@@ -1,0 +1,51 @@
+name: tests
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/tests.yml
+      - '*/**.py'
+      - docker-compose.yml
+      - app.Dockerfile
+      - gunicorn_config.py
+      - pytest.ini
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/tests.yml
+      - '*/**.py'
+      - docker-compose.yml
+      - app.Dockerfile
+      - gunicorn_config.py
+      - pytest.ini
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    services:
+      docker:
+        image: docker:19.03.12
+        options: --privileged
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Build latest image
+        run: docker build -t germ:latest -f app.Dockerfile .
+
+      - name: Run tests
+        env:
+          HF_HOME: /tmp/huggingface
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SKIP_TESTS: 'false'
+        run: |
+          cat > .env <<EOF
+          HF_HOME=$HF_HOME
+          OPENAI_API_KEY=$OPENAI_API_KEY
+          POSTGRES_USER=germ
+          POSTGRES_PASSWORD=bacteria4life
+          EOF
+          docker compose run test

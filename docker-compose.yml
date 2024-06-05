@@ -1,0 +1,217 @@
+networks:
+  bots: {}
+
+volumes:
+  flair-data: {}
+  grafana-storage: {}
+  nltk-data: {}
+
+services:
+  bot:
+    networks: [bots]
+    container_name: germ-bot
+    depends_on:
+      bot-init:
+        condition: service_completed_successfully
+      test:
+        condition: service_completed_successfully
+    build:
+      context: .
+      dockerfile: app.Dockerfile
+    image: "germ:latest"
+    volumes:
+      - ./:/src:rw
+      - flair-data:/root/.flair
+      - nltk-data:/root/nltk_data
+    environment: &local-dev
+      PG_HOST: &pg-host germ-pg
+      POSTGRES_USER: &pg-user ${POSTGRES_USER:-germ}
+      POSTGRES_PASSWORD: &pg-password ${POSTGRES_PASSWORD:-bacteria4life}
+      NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
+      HF_HOME: ${HF_HOME:-/src/data/huggingface}
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      SKIP_TESTS: ${SKIP_TESTS:-true}
+    working_dir: /src
+    command: [
+      "gunicorn", "-c", "gunicorn_config.py", "bot.main:bot", "--bind", "0.0.0.0:8000"
+    ]
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-s", "localhost:8000/healthz"]
+      interval: 10s
+      timeout: 9s
+      retries: 6
+
+  bot-init:
+    networks: [bots]
+    container_name: germ-bot-init
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      jaeger-init:
+        condition: service_completed_successfully
+      prometheus-init:
+        condition: service_completed_successfully
+    image: "germ:latest"
+    volumes:
+      - ./:/src
+    environment:
+      <<: *local-dev
+      WAIT_FOR_HOST: &neo4j-host germ-neo4j
+      WAIT_FOR_PORT: 7474
+    working_dir: /src
+    command: [ "scripts/wait-for-port-up.sh" ]
+
+  pg:
+    networks: [bots]
+    container_name: *pg-host
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: germ
+      POSTGRES_PASSWORD: *pg-password
+      POSTGRES_USER: *pg-user
+
+  neo4j:
+    networks: [bots]
+    container_name: *neo4j-host
+    image: neo4j:latest
+    volumes:
+      - ./scripts/neo4j-start.sh:/neo4j-start.sh
+      - ./database_dump/neo4j:/dump  # Persist data
+    environment:
+      NEO4J_AUTH: *neo4j-auth
+    ports:
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
+    command: [ "/neo4j-start.sh" ]
+
+  pg-init:
+    networks: [bots]
+    container_name: germ-pg-init
+    image: "germ:latest"
+    volumes:
+      - ./:/src
+    environment:
+      <<: *local-dev
+      WAIT_FOR_HOST: *pg-host
+      WAIT_FOR_PORT: 5432
+    working_dir: /src
+    command: [ "scripts/wait-for-port-up.sh" ]
+
+  neo4j-init:
+    networks: [bots]
+    container_name: germ-neo4j-init
+    image: "germ:latest"
+    volumes:
+      - ./:/src
+    environment:
+      WAIT_FOR_HOST: *neo4j-host
+      WAIT_FOR_PORT: 7474
+    working_dir: /src
+    command: [ "scripts/wait-for-port-up.sh" ]
+
+  db-migrate:
+    networks: [bots]
+    container_name: germ-db-migrate
+    depends_on:
+      pg-init:
+        condition: service_completed_successfully
+      neo4j-init:
+        condition: service_completed_successfully
+    image: "germ-db-migrate:latest"
+    build:
+      context: .
+      dockerfile: db-migrate.Dockerfile
+    volumes:
+      - ./:/src
+    environment:
+      <<: *local-dev
+      PGPASSWORD: ${POSTGRES_PASSWORD:-bacteria4life}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-Ma9icMicr0be}
+    working_dir: /src
+    command: [ "scripts/db-migrate.sh" ]
+
+  grafana:
+    networks: [bots]
+    container_name: germ-grafana
+    depends_on:
+      prometheus-init:
+        condition: service_completed_successfully
+    image: grafana/grafana:latest
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+      - "grafana-storage:/var/lib/grafana"
+    environment:
+      - GF_LOG_LEVEL=warn
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_NAME=Main Org.
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    ports:
+      - "3000:3000"
+
+  # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
+  jaeger:
+    networks: [bots]
+    container_name: &jaeger-host germ-jaeger
+    image: jaegertracing/jaeger:2.2.0
+    ports:
+      - "16686:16686" # UI
+      - "4317:4317"   # OTLP over gRPC
+
+  jaeger-init:
+    networks: [bots]
+    container_name: germ-jaeger-init
+    image: "germ:latest"
+    volumes:
+      - ./:/src
+    environment:
+      WAIT_FOR_HOST: *jaeger-host
+      WAIT_FOR_PORT: 4317
+    working_dir: /src
+    command: [ "scripts/wait-for-port-up.sh" ]
+
+  # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
+  prometheus:
+    networks: [bots]
+    container_name: &prometheus-host germ-prometheus
+    image: prom/prometheus:v2.52.0
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - '9090:9090'
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      #- --log.level=debug
+      - --log.level=warn
+
+  prometheus-init:
+    networks: [bots]
+    container_name: germ-prometheus-init
+    image: "germ:latest"
+    volumes:
+      - ./:/src
+    environment:
+      WAIT_FOR_HOST: *prometheus-host
+      WAIT_FOR_PORT: 9090
+    working_dir: /src
+    command: [ "scripts/wait-for-port-up.sh" ]
+
+  test:
+    networks: [bots]
+    container_name: germ-test
+    links: [pg]
+    depends_on:
+      bot-init:
+        condition: service_completed_successfully
+    build:
+      context: .
+      dockerfile: app.Dockerfile
+    image: "germ:latest"
+    volumes:
+      - ./:/src
+    environment: *local-dev
+    working_dir: /src
+    command: ["tests/run.sh"]

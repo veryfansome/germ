@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Postgres</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+
+    <link rel="stylesheet" href="/static/ui.css">
+    <script src="/static/ui.js"></script>
+    <style></style>
+</head>
+<body>
+    <nav>
+        <div class="logo"><a href="/"><i class="fa-solid fa-virus" style="padding-right: 4px"></i>GermBot</a></div>
+        <div class="nav-links">
+            <a id="chat-nav-link" href="/"><i class="fa-solid fa-comment" style="padding-right: 4px"></i>Chat</a>
+            <a href="/static/postgres.html"><i class="fa-solid fa-code" style="padding-right: 4px"></i><u>Postgres</u></a>
+        </div>
+    </nav>
+    <div id="error-popup" class="hidden">
+        <button id="close-error-popup">X</button>
+        <span id="error-popup-message-text"></span>
+    </div>
+    <div id="chatbox"></div>
+    <div id="input-container">
+        <div id="popup-menu" class="popup-menu">
+            <ul id="popup-menu-ul"></ul>
+        </div>
+        <form action="javascript:sendMessage().catch(error => console.log(error))">
+            <label for="input"></label>
+            <textarea id="input" placeholder="Type some SQL..."></textarea>
+            <div class="button-container">
+                <button type="submit" id="send-button">Send</button>
+            </div>
+        </form>
+    </div>
+    <script>
+    // Initialize highlight.js
+    hljs.highlightAll();
+
+    const queryParams = getQueryParams();
+
+    const chatbox = document.getElementById('chatbox');
+    initErrorPopup();
+    initSendButtonResize();
+
+    // Text input area
+    let submittedText = [];
+    initTextArea(submittedText, sendMessage);
+
+    async function sendMessage() {
+        const sql = document.getElementById('input').value;
+        submittedText.push(sql);
+        document.getElementById('input').value = '';
+
+        const queryMessageBox = getUserMessageBox(sql, 'sql');
+        queryMessageBox.appendChild(getCopyTextLink(sql));
+        chatbox.appendChild(queryMessageBox);
+        hljs.highlightAll();
+        scrollChatBoxToBottom();
+
+        // Show loading indicator
+        const loadingIndicator = getLoadingIndicator();
+        chatbox.appendChild(loadingIndicator);
+        scrollChatBoxToBottom();
+
+        fetch('/postgres/germ/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({sql: sql}),
+        })
+        .then(response => {
+            // Stop showing loading indicator
+            loadingIndicator.remove();
+            return throwOrJson(response);
+        })
+        .then(text => {
+            const resultMessageBox = getAssistantMessageBox('result', text, null, "fa fa-database");
+            resultMessageBox.appendChild(getCopyTextLink(text));
+            chatbox.appendChild(resultMessageBox)
+            hljs.highlightAll();
+            scrollChatBoxToBottom();
+        })
+        .catch(error => {
+            // Stop showing loading indicator
+            loadingIndicator.remove();
+            handleError(error, 'Query failed:');
+        });
+    }
+    </script>
+</body>
+</html>
