@@ -1,16 +1,12 @@
 services:
-  web:
+  bot:
     build: .
-    working_dir: /app
-    command:
-      - gunicorn
-      - -k
-      - uvicorn.workers.UvicornWorker
-      - "main:app"
-      - --bind
-      - "0.0.0.0:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     ports:
-      - "8000:8000"
+      - "8001:8000"
   test:
     build: .
     command: ["pytest", "tests"]
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}

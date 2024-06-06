@@ -49,3 +49,5 @@ jobs:
 
       - name: Run tests
         run: docker-compose run test
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

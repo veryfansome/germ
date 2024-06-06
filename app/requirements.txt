@@ -1,5 +1,8 @@
 fastapi
-uvicorn
 gunicorn
-pytest
 httpx
+openai
+pydantic
+pytest
+python-dotenv
+uvicorn
