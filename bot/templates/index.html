@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GermBot</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        #chatbox { width: 100%; height: 600px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; }
+        #input { width: calc(100% - 22px); padding: 10px; margin-top: 10px; }
+        button { padding: 10px; }
+    </style>
+</head>
+<body>
+    <div id="chatbox"></div>
+    <form action="javascript:sendMessage().then(null)">
+        <input type="text" id="input" placeholder="Type a message..."/>
+    </form>
+    <button onclick="sendMessage()">Send</button>
+
+    <script>
+        let messageList = [];
+
+        async function sendMessage() {
+            const message = document.getElementById('input').value;
+            document.getElementById('input').value = '';
+            document.getElementById('chatbox').innerHTML += `<div><b>user:</b> ${message}</div>`;
+            messageList.push({ role: "user", content: message })
+            const response = await fetch('/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({messages: messageList})
+            });
+            const responseData = await response.json();
+            const responseChoice = responseData['choices'][0];
+            const responseReason = responseChoice['finish_reason']
+            const responseRole = responseChoice['message']['role']
+            const responseContent = responseChoice['message']['content']
+            messageList.push({ role: responseRole, content: responseContent })
+            document.getElementById('chatbox').innerHTML += `<div><b>${responseRole}:</b> ${responseContent}</br></br><i>${responseReason}</i></div>`;
+        }
+    </script>
+</body>
+</html>

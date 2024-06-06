@@ -1,8 +1,13 @@
+faiss-cpu
 fastapi
 gunicorn
 httpx
+numpy
 openai
+psycopg2-binary
 pydantic
 pytest
 python-dotenv
+sqlalchemy
+tiktoken
 uvicorn

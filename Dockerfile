@@ -1,16 +1,14 @@
 # Use the official Python image from the Docker Hub
-FROM python:3.9-slim
+FROM python:3.12-slim
 
-RUN mkdir /app
+RUN mkdir -p /src/bot
 
 # Copy the requirements file
-COPY app/requirements.txt /app
+COPY bot/requirements.txt /src/bot
 
 # Install the Python dependencies
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN pip install --no-cache-dir -r /src/bot/requirements.txt
 
-# Copy the application and test files
-COPY app /app
-COPY tests /tests
-
-CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "app.main:app", "--bind", "0.0.0.0:8000"]
+# Copy the application and test files. Not currently needed, mounted by `docker compose`.
+#COPY bot /src/bot
+#COPY tests /src/tests

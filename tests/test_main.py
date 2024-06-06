@@ -1,16 +1,22 @@
 from fastapi.testclient import TestClient
-from app.main import app
+from bot.main import bot
 
-client = TestClient(app)
+client = TestClient(bot)
 
 
-def test_read_main():
+def test_main():
     response = client.get("/")
     assert response.status_code == 200
-    assert response.json() == {"message": "Hello, World!"}
 
 
-def test_chat():
-    response = client.post("/chat", json={"messages": [{"role": "user", "content": "Hello"}]})
+def test_main_healthz():
+    response = client.get("/healthz")
     assert response.status_code == 200
-    assert "response" in response.json()
+    assert "status" in response.json()
+    assert response.json()["status"] == "OK"
+
+
+def test_chat_basic():
+    response = client.post("/chat", json={"messages": [{"role": "user", "content": "Hello?"}]})
+    assert response.status_code == 200
+    assert "choices" in response.json()
