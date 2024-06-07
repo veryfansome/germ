@@ -18,25 +18,26 @@ class ChatRequest(BaseModel):
 
 
 class OpenAIChatBot:
-    def __init__(self, model="gpt-4o"):
+    def __init__(self, default_model="gpt-4o"):
         self.default_vector_store = OpenAITextEmbedding3SmallDim1536()  # TODO: Dynamically explore topical vector DBs?
-        self.enc = tiktoken.encoding_for_model(model)
-        self.model = model
+        self.default_model = default_model
 
     def chat(self, messages: list[ChatMessage]) -> object:
+
+        enc = tiktoken.encoding_for_model(self.default_model)
         total_tokens = 0
-        new_messages = []
+        chat_frame = []
         for chat_message in reversed(messages):  # In reverse because message list is ordered from oldest to newest.
             message = chat_message.model_dump()
-            message_tokens = len(self.enc.encode(message['content']))
+            message_tokens = len(enc.encode(message['content']))
             # If adding `message_tokens` pushes us over the limit, stop appending
-            if message_tokens + total_tokens > self.enc.max_token_value:
+            if message_tokens + total_tokens > enc.max_token_value:
                 break
             total_tokens += message_tokens
-            new_messages.append(message)
+            chat_frame.append(message)
         response = OpenAI().chat.completions.create(
-            model=self.model,
-            messages=reversed(new_messages)  # Undo reverse
+            model=self.default_model,
+            messages=reversed(chat_frame)  # Undo previously reversed order
         )
         """
         $ curl -s localhost:8001/chat \
