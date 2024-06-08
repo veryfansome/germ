@@ -33,7 +33,7 @@ services:
       CHAT_HISTORY_POSTGRES_PASSWORD: ${CHAT_HISTORY_POSTGRES_PASSWORD}
       CHAT_HISTORY_POSTGRES_USER: ${CHAT_HISTORY_POSTGRES_USER}
     working_dir: /src
-    command: ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "bot.main:bot", "-w", "1", "--bind", "0.0.0.0:8000"]
+    command: ["gunicorn", "-c", "bot/gunicorn_config.py", "bot.main:bot", "--bind", "0.0.0.0:8000"]
     ports:
       - "8001:8000"
   test:

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GermBot</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -40,38 +41,73 @@
             flex: 1;
             display: flex;
         }
+        .user-message-box {
+            background-color: #d4edda; /* Light green */
+            border-radius: 10px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .assistant-message-box {
+            background-color: #d1ecf1; /* Light blue */
+            border-radius: 10px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        pre {
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 10px;
+            overflow-x: auto;
+        }
     </style>
 </head>
 <body>
     <div id="chatbox"></div>
     <div id="input-container">
         <form action="javascript:sendMessage().then(null)">
-            <input type="text" id="input" placeholder="Type a message..."/>
+            <label for="input"></label>
+            <textarea id="input" placeholder="Type a message..."></textarea>
+            <button type="submit">Send</button>
         </form>
-        <button onclick="sendMessage()">Send</button>
     </div>
 
-    <script>
-        let messageList = [];
 
-        async function sendMessage() {
-            const message = document.getElementById('input').value;
-            document.getElementById('input').value = '';
-            document.getElementById('chatbox').innerHTML += `<div><b>user:</b> ${message}</div>`;
-            messageList.push({ role: "user", content: message })
-            const response = await fetch('/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({messages: messageList})
-            });
-            const responseData = await response.json();
-            const responseChoice = responseData['choices'][0];
-            const responseReason = responseChoice['finish_reason']
-            const responseRole = responseChoice['message']['role']
-            const responseContent = responseChoice['message']['content']
-            messageList.push({ role: responseRole, content: responseContent })
-            document.getElementById('chatbox').innerHTML += `<div><b>${responseRole}:</b> ${responseContent}</br></br><i>${responseReason}</i></div>`;
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script>
+    // Initialize highlight.js
+    hljs.highlightAll();
+
+    document.getElementById('input').addEventListener('keydown', function(event) {
+        if (event.key === 'Enter' && (!event.shiftKey)) {
+            event.preventDefault();
+            sendMessage();
         }
+    });
+
+    let messageList = [];
+
+    async function sendMessage() {
+        const message = marked.parse(document.getElementById('input').value);
+        document.getElementById('input').value = '';
+        document.getElementById('chatbox').innerHTML += `<div class="user-message-box"><b>user:</b> ${message}</div>`;
+        messageList.push({ role: "user", content: message })
+        hljs.highlightAll();
+
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({messages: messageList})
+        });
+        const responseData = await response.json();
+        const responseChoice = responseData['choices'][0];
+        const responseReason = responseChoice['finish_reason']
+        const responseRole = responseChoice['message']['role']
+        const responseContent = responseChoice['message']['content']
+        messageList.push({ role: responseRole, content: responseContent })
+        document.getElementById('chatbox').innerHTML += marked.parse(`<div class="assistant-message-box"><b>${responseRole}:</b> ${responseContent}</br></br><i>${responseReason}</i></div>`);
+        hljs.highlightAll();
+    }
     </script>
 </body>
 </html>
