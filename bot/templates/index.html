@@ -31,6 +31,21 @@
             /* flex: 1; */
             flex-grow: 1;
         }
+        nav {
+            background-color: #333;
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 20px;
+        }
+        nav a {
+            color: white;
+            text-decoration: none;
+            padding: 0 10px;
+        }
+        nav a:hover {
+            text-decoration: underline;
+        }
         pre {
             background: #f0f0f0;
             border-radius: 10px;
@@ -187,6 +202,14 @@
     </style>
 </head>
 <body>
+    <nav>
+        <div class="logo"><a href="#">GermBot</a></div>
+        <div class="nav-links">
+            <a href="#home">Home</a>
+            <a href="#about">About</a>
+            <a href="#contact">Contact</a>
+        </div>
+    </nav>
     <div id="chatbox"></div>
     <div id="input-container">
         <div id="popup-menu" class="popup-menu">
