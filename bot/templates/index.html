@@ -7,57 +7,68 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
     <style>
         body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
             display: flex;
             flex-direction: column;
+            font-family: Arial, sans-serif;
             height: 100vh;
+            margin: 0;
+            padding: 0;
         }
         #chatbox {
+            background-color: #e0e0e0; /* Slightly grayish background */
+            /* background-image: url("/logo.webp"); */
+            border: 1px solid #ccc;
+            box-sizing: border-box;
             flex: 1;
             overflow-y: scroll;
-            border: 1px solid #ccc;
             padding: 10px;
-            box-sizing: border-box;
         }
         #input-container {
-            display: flex;
             align-items: center;
-            padding: 10px;
-            box-sizing: border-box;
             border-top: 1px solid #ccc;
+            box-sizing: border-box;
+            display: flex;
+            padding: 10px;
         }
         #input {
-            flex: 1;
-            padding: 10px;
-            margin-right: 10px;
             box-sizing: border-box;
+            flex: 1;
+            margin-right: 10px;
+            padding: 10px;
+        }
+        textarea {
+            box-sizing: border-box;
+            flex: 1;
+            margin-right: 10px;
+            max-height: 70vh;
+            min-height: 7vh;
+            padding: 10px;
+            resize: vertical;
         }
         button {
             padding: 10px;
         }
         form {
-            flex: 1;
             display: flex;
+            flex: 1;
         }
         .user-message-box {
             background-color: #d4edda; /* Light green */
             border-radius: 10px;
-            padding: 10px;
             margin-bottom: 10px;
+            padding: 10px;
         }
         .assistant-message-box {
             background-color: #d1ecf1; /* Light blue */
             border-radius: 10px;
-            padding: 10px;
             margin-bottom: 10px;
+            padding: 10px;
         }
         pre {
             background: #f0f0f0;
-            padding: 10px;
             border-radius: 10px;
             overflow-x: auto;
+            padding: 10px;
         }
     </style>
 </head>
@@ -78,7 +89,17 @@
     // Initialize highlight.js
     hljs.highlightAll();
 
-    document.getElementById('input').addEventListener('keydown', function(event) {
+    const textarea = document.getElementById('input');
+
+    textarea.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = this.scrollHeight + 'px';
+        if (this.style.height < this.style.maxHeight) {
+            this.style.overflow = 'hidden';
+        }
+    });
+
+    textarea.addEventListener('keydown', function(event) {
         if (event.key === 'Enter' && (!event.shiftKey)) {
             event.preventDefault();
             sendMessage();
@@ -87,12 +108,18 @@
 
     let messageList = [];
 
+    function scrollToBottom() {
+        const chatbox = document.getElementById('chatbox');
+        chatbox.scrollTop = chatbox.scrollHeight;
+    }
+
     async function sendMessage() {
         const message = marked.parse(document.getElementById('input').value);
         document.getElementById('input').value = '';
-        document.getElementById('chatbox').innerHTML += `<div class="user-message-box"><b>user:</b> ${message}</div>`;
+        document.getElementById('chatbox').innerHTML += `<div class="user-message-box"><b>user:</b>${message}</div>`;
         messageList.push({ role: "user", content: message })
         hljs.highlightAll();
+        scrollToBottom()
 
         const response = await fetch('/chat', {
             method: 'POST',
@@ -103,10 +130,11 @@
         const responseChoice = responseData['choices'][0];
         const responseReason = responseChoice['finish_reason']
         const responseRole = responseChoice['message']['role']
-        const responseContent = responseChoice['message']['content']
+        const responseContent = marked.parse(responseChoice['message']['content'])
         messageList.push({ role: responseRole, content: responseContent })
-        document.getElementById('chatbox').innerHTML += marked.parse(`<div class="assistant-message-box"><b>${responseRole}:</b> ${responseContent}</br></br><i>${responseReason}</i></div>`);
+        document.getElementById('chatbox').innerHTML += `<div class="assistant-message-box"><b>${responseRole}:</b>${responseContent}</br><i>${responseReason}</i></div>`;
         hljs.highlightAll();
+        scrollToBottom()
     }
     </script>
 </body>

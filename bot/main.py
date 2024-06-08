@@ -26,12 +26,6 @@ async def get(request: Request):
     return templates.TemplateResponse(request, "index.html")
 
 
-@bot.get("/favicon.ico", include_in_schema=False)
-def favicon():
-    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'favicon.ico')
-    return FileResponse(favicon_path)
-
-
 @bot.post("/chat")
 async def chat(request: ChatRequest):
     try:
@@ -46,6 +40,12 @@ async def root():
     return {"environ": os.environ}
 
 
+@bot.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'favicon.ico')
+    return FileResponse(favicon_path)
+
+
 @bot.get("/healthz")
 async def healthz():
     # Is PostgreSQL usable?
@@ -58,3 +58,9 @@ async def healthz():
         "status": "OK",
         "chat_history_db_url": CHAT_HISTORY_DATABASE_URL
     }
+
+
+@bot.get("/logo.webp", include_in_schema=False)
+def favicon():
+    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'logo.webp')
+    return FileResponse(favicon_path)
