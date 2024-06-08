@@ -38,13 +38,32 @@
             resize: vertical;
         }
         #chatbox {
-            background-color: #e0e0e0; /* Slightly grayish background */
-            /* background-image: url("/logo.webp"); */
+            background-color: #fffefa; /* Slightly yellowish? */
             border: 1px solid #ccc;
             box-sizing: border-box;
             flex: 1;
             overflow-y: scroll;
             padding: 10px;
+            position: relative; /* Required for the pseudo-element */
+        }
+        #chatbox::after {
+            background-image: url("/logo.webp");
+            background-position: center; /* Center the background image */
+            background-repeat: no-repeat; /* Prevent the background image from repeating */
+            background-size: contain; /* Adjust the size of the background image */
+            content: '';
+            height: 100%;
+            left: 0;
+            opacity: 0.15; /* Adjust the opacity level */
+            pointer-events: none; /* Allow clicking through the pseudo-element */
+            position: absolute;
+            top: 0;
+            width: 100%;
+            z-index: 1; /* Ensure it is behind the content */
+        }
+        #chatbox > * {
+            position: relative;
+            z-index: 2; /* Ensure content is above the pseudo-element */
         }
         #input {
             box-sizing: border-box;
@@ -59,27 +78,77 @@
             display: flex;
             padding: 10px;
         }
+        /* Popup button settings */
+        #popup-button {
+            cursor: pointer;
+            padding: 3px 0px 0px 0px; /* Adjust padding if needed */
+            width: 100%; /* Set equal width */
+        }
+        /* Send button settings */
+        #send-button {
+            cursor: pointer;
+            padding: 5px 10px; /* Adjust padding if needed */
+            width: 100%; /* Set equal width */
+        }
         .assistant-message-box {
             background-color: #d1ecf1; /* Light blue */
             border-radius: 10px;
             margin-bottom: 10px;
             padding: 10px;
         }
+        /* Button container to position buttons vertically */
+        .button-container {
+            display: flex;
+            flex-direction: column;
+            width: 5%; /* Adjust width as necessary to fit design */
+        }
+        .button-container > button {
+            margin-bottom: 1vh; /* Adds 2px space between each button */
+        }
+        /* Last button should not have a margin-bottom */
+        .button-container > button:last-child {
+            margin-bottom: 0;
+        }
         .fa {
             margin-right: 8px;
         }
         .loading-indicator {
-            text-align: center;
             margin: 10px 0;
+            text-align: center;
         }
         .loading-spinner {
-            border: 4px solid rgba(0,0,0,.1);
+            animation: spin 1s linear infinite;
             border-left-color: #333;
             border-radius: 50%;
-            width: 12px;
-            height: 12px;
-            animation: spin 1s linear infinite;
+            border: 4px solid rgba(0,0,0,.1);
             display: inline-block;
+            height: 12px;
+            width: 12px;
+        }
+        /* Pop-up menu settings */
+        .popup-menu {
+            background: white;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            bottom: 50px; /* Position above the button */
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            display: none; /* Start as hidden */
+            position: absolute;
+            right: 10px; /* Adjust as necessary */
+            width: 500px;
+            z-index: 10;
+        }
+        .popup-menu ul {
+            list-style: none;
+            margin: 0;
+            padding: 10px;
+        }
+        .popup-menu li {
+            cursor: pointer;
+            padding: 5px 10px;
+        }
+        .popup-menu li:hover {
+            background-color: #f0f0f0;
         }
         .user-message-box {
             background-color: #d4edda; /* Light green */
@@ -87,6 +156,7 @@
             margin-bottom: 10px;
             padding: 10px;
         }
+        /* For loading indicator */
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
@@ -95,10 +165,18 @@
 <body>
     <div id="chatbox"></div>
     <div id="input-container">
+        <div id="popup-menu" class="popup-menu">
+            <ul>
+                <li><i class="fa fa-thumbs-down"></i> Bad model choice</li>
+            </ul>
+        </div>
         <form action="javascript:sendMessage().then(null)">
             <label for="input"></label>
             <textarea id="input" placeholder="Type a message..."></textarea>
-            <button type="submit">Send</button>
+            <div class="button-container">
+                <button type="button" id="popup-button"><i class="fas fa-chevron-up"></i></button>
+                <button type="submit" id="send-button">Send</button>
+            </div>
         </form>
     </div>
 
@@ -109,8 +187,24 @@
     // Initialize highlight.js
     hljs.highlightAll();
 
-    const textarea = document.getElementById('input');
+    // Popup menu
+    const popupButton = document.getElementById('popup-button');
+    const popupMenu = document.getElementById('popup-menu');
+    popupButton.addEventListener('mouseenter', () => {
+        popupMenu.style.display = 'block';
+    });
+    popupButton.addEventListener('mouseleave', () => {
+        popupMenu.style.display = 'block';
+    });
+    popupMenu.addEventListener('mouseenter', () => {
+        popupMenu.style.display = 'block';
+    });
+    popupMenu.addEventListener('mouseleave', () => {
+        popupMenu.style.display = 'none';
+    });
 
+    // Text input area
+    const textarea = document.getElementById('input');
     textarea.addEventListener('input', function() {
         this.style.height = 'auto';
         this.style.height = this.scrollHeight + 'px';
@@ -120,7 +214,6 @@
             this.style.overflow = 'auto';
         }
     });
-
     textarea.addEventListener('keydown', function(event) {
         if (event.key === 'Enter' && (!event.shiftKey)) {
             event.preventDefault();
@@ -130,7 +223,6 @@
             this.style.overflow = 'auto';
         }
     });
-
     function scrollToBottom() {
         const chatbox = document.getElementById('chatbox');
         chatbox.scrollTop = chatbox.scrollHeight;
@@ -163,12 +255,13 @@
         // Stop showing loading indicator
         loadingIndicator.innerHTML = '';
 
+        const responseModel = responseData['model'];
         const responseChoice = responseData['choices'][0];
         const responseReason = responseChoice['finish_reason']
         const responseRole = responseChoice['message']['role']
         const responseContent = marked.parse(responseChoice['message']['content'])
         messageList.push({ role: responseRole, content: responseContent })
-        document.getElementById('chatbox').innerHTML += `<div class="assistant-message-box"><i class="fa fa-user"></i><b>${responseRole}:</b>${responseContent}</br><i>${responseReason}</i></div>`;
+        document.getElementById('chatbox').innerHTML += `<div class="assistant-message-box"><i class="fa fa-user"></i><b>${responseRole}(${responseModel}):</b>${responseContent}</br><i>${responseReason}</i></div>`;
         hljs.highlightAll();
         scrollToBottom()
     }
