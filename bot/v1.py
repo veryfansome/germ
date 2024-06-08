@@ -1,11 +1,13 @@
 from openai import OpenAI
 from pydantic import BaseModel
-from typing import List
-import faiss
+import json
 import tiktoken
 
-from bot.db_chat_history import SessionLocal as ChatHistorySessionLocal
+from bot.db_chat_history import MessageReceived, MessageSent, SessionLocal as ChatHistorySessionLocal
+from bot.logging_config import logging
 from bot.vector_store import OpenAITextEmbedding3SmallDim1536
+
+logger = logging.getLogger(__name__)
 
 
 class ChatMessage(BaseModel):
@@ -19,25 +21,44 @@ class ChatRequest(BaseModel):
 
 class OpenAIChatBot:
     def __init__(self, default_model="gpt-4o"):
-        self.default_vector_store = OpenAITextEmbedding3SmallDim1536()  # TODO: Dynamically explore topical vector DBs?
         self.default_model = default_model
+        self.default_vector_store = OpenAITextEmbedding3SmallDim1536()  # TODO: Dynamically explore topical vector DBs?
+        self.enabled_models = [self.default_model, "dall-e-3"]
+        self.enabled_vector_stores = [self.default_vector_store]
 
     def chat(self, messages: list[ChatMessage]) -> object:
+        new_chat_message: ChatMessage = messages[-1]
+        # Insert received message
+        logger.info("received: %s", new_chat_message.content)
 
+        # Trim message list to avoid hitting selected model's token limit.
         enc = tiktoken.encoding_for_model(self.default_model)
         total_tokens = 0
-        chat_frame = []
+        reversed_chat_frame = []
         for chat_message in reversed(messages):  # In reverse because message list is ordered from oldest to newest.
-            message = chat_message.model_dump()
-            message_tokens = len(enc.encode(message['content']))
+            message_dict = chat_message.model_dump()
+            message_tokens = len(enc.encode(message_dict['content']))
             # If adding `message_tokens` pushes us over the limit, stop appending
             if message_tokens + total_tokens > enc.max_token_value:
                 break
             total_tokens += message_tokens
-            chat_frame.append(message)
+            reversed_chat_frame.append(message_dict)
+        chat_frame = tuple(reversed(reversed_chat_frame))  # Undo previously reversed order
+
+        # Update message history
+        message_received_session = ChatHistorySessionLocal()
+        message_received = MessageReceived(
+            chat_frame=json.dumps(chat_frame[:-1]).encode('utf-8'),
+            content=new_chat_message.content.encode('utf-8'),
+            role=new_chat_message.role,
+        )
+        message_received_session.add(message_received)
+        message_received_session.commit()
+
+        # Do completion request
         response = OpenAI().chat.completions.create(
+            messages=chat_frame,
             model=self.default_model,
-            messages=reversed(chat_frame)  # Undo previously reversed order
         )
         """
         $ curl -s localhost:8001/chat \
@@ -70,7 +91,19 @@ class OpenAIChatBot:
         }
         """
 
-        #self.default_vector_store.add(message, response.choices.pop().message.content)
-        #self.chat_history.append((sender, message, response.choices.pop().message.content))
-        #return response.choices.pop().message.content
+        # self.default_vector_store.add(message, response.choices.pop().message.content)
+        # self.chat_history.append((sender, message, response.choices.pop().message.content))
+
+        # Update message history
+        message_received_session.refresh(message_received)
+        new_response = response.choices[0].message
+        logger.info("response: %s", new_response.content)
+        response_session = ChatHistorySessionLocal()
+        response_session.add(
+            MessageSent(
+                content=new_response.content.encode('utf-8'),
+                message_received_id=message_received.id,
+            )
+        )
+        response_session.commit()
         return response

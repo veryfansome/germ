@@ -7,7 +7,7 @@ from starlette.requests import Request
 import os
 
 from bot.db_chat_history import DATABASE_URL as CHAT_HISTORY_DATABASE_URL, SessionLocal as ChatHistorySessionLocal
-from bot.logging_config import logging, setup_logging
+from bot.logging_config import logging, setup_logging, traceback
 from bot.v1 import ChatRequest, OpenAIChatBot
 
 
@@ -32,6 +32,7 @@ async def chat(request: ChatRequest):
         response = chat_bot.chat(request.messages)
         return response
     except Exception as e:
+        logger.error("%s: trace: %s", e, traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -7,6 +7,10 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
     <style>
+        /**
+        Ensure that the body has height: 100vh and display: flex is properly supported across browsers.
+        Consider adding a fallback for older browsers.
+        */
         body {
             display: flex;
             flex-direction: column;
@@ -18,9 +22,14 @@
         button {
             padding: 10px;
         }
+        /**
+        Using flex: 1 on form might cause issues if the form does not behave as expected.
+        Consider using flex-grow: 1 instead.
+        */
         form {
             display: flex;
-            flex: 1;
+            /* flex: 1; */
+            flex-grow: 1;
         }
         pre {
             background: #f0f0f0;
@@ -28,6 +37,10 @@
             overflow-x: auto;
             padding: 10px;
         }
+        /**
+        `max-height: 70vh and min-height: 7vh could potentially cause overflow issues on smaller screens.
+        Make sure these values are appropriate for all screen sizes.
+        */
         textarea {
             box-sizing: border-box;
             flex: 1;
@@ -46,6 +59,10 @@
             padding: 10px;
             position: relative; /* Required for the pseudo-element */
         }
+        /**
+        The use of ::after with a background image could affect the readability of text.
+        Ensure the opacity is low enough to not interfere with the text but still visible.
+        */
         #chatbox::after {
             background-image: url("/logo.webp");
             background-position: center; /* Center the background image */
@@ -78,13 +95,16 @@
             display: flex;
             padding: 10px;
         }
-        /* Popup button settings */
+        /**
+        Popup and Send button settings
+        Setting width: 100% for buttons might cause layout issues if not properly contained within their parent
+        elements. Ensure the parent elements manage the layout appropriately.
+        */
         #popup-button {
             cursor: pointer;
             padding: 3px 0px 0px 0px; /* Adjust padding if needed */
             width: 100%; /* Set equal width */
         }
-        /* Send button settings */
         #send-button {
             cursor: pointer;
             padding: 5px 10px; /* Adjust padding if needed */
@@ -96,7 +116,11 @@
             margin-bottom: 10px;
             padding: 10px;
         }
-        /* Button container to position buttons vertically */
+        /**
+        Button container to position buttons vertically
+        `width: 5% might be too small or too large depending on screen size. Consider using relative units like em or
+        rem for better responsiveness.
+        */
         .button-container {
             display: flex;
             flex-direction: column;
@@ -118,9 +142,9 @@
         }
         .loading-spinner {
             animation: spin 1s linear infinite;
+            border: 4px solid rgba(0,0,0,.1);
             border-left-color: #333;
             border-radius: 50%;
-            border: 4px solid rgba(0,0,0,.1);
             display: inline-block;
             height: 12px;
             width: 12px;
@@ -231,9 +255,9 @@
     let messageList = [];
 
     async function sendMessage() {
-        const message = marked.parse(document.getElementById('input').value);
+        const message = document.getElementById('input').value;
         document.getElementById('input').value = '';
-        document.getElementById('chatbox').innerHTML += `<div class="user-message-box"><i class="fa fa-user"></i><b>user:</b>${message}</div>`;
+        document.getElementById('chatbox').innerHTML += `<div class="user-message-box"><i class="fa fa-user"></i><b>user:</b>${marked.parse(message)}</div>`;
         messageList.push({ role: "user", content: message })
         hljs.highlightAll();
         scrollToBottom()
@@ -253,15 +277,15 @@
         const responseData = await response.json();
 
         // Stop showing loading indicator
-        loadingIndicator.innerHTML = '';
+        loadingIndicator.remove()
 
         const responseModel = responseData['model'];
         const responseChoice = responseData['choices'][0];
         const responseReason = responseChoice['finish_reason']
         const responseRole = responseChoice['message']['role']
-        const responseContent = marked.parse(responseChoice['message']['content'])
+        const responseContent = responseChoice['message']['content']
         messageList.push({ role: responseRole, content: responseContent })
-        document.getElementById('chatbox').innerHTML += `<div class="assistant-message-box"><i class="fa fa-user"></i><b>${responseRole}(${responseModel}):</b>${responseContent}</br><i>${responseReason}</i></div>`;
+        document.getElementById('chatbox').innerHTML += `<div class="assistant-message-box"><i class="fa fa-user"></i><b>${responseRole}(${responseModel}):</b>${marked.parse(responseContent)}</br><i>${responseReason}</i></div>`;
         hljs.highlightAll();
         scrollToBottom()
     }

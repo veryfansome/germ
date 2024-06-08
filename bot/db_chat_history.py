@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime
+from sqlalchemy import create_engine, Column, DateTime, ForeignKey, Integer, LargeBinary, String
 from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
 import os
@@ -19,16 +19,17 @@ Base = declarative_base()
 class MessageReceived(Base):
     __tablename__ = "message_received"
     id = Column(Integer, primary_key=True, index=True)
-    sender = Column(String, index=True)
-    message = Column(String, index=True)
+    role = Column(String)
+    content = Column(LargeBinary)
+    chat_frame = Column(LargeBinary)
     timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
 
 
 class MessageSent(Base):
     __tablename__ = "message_sent"
     id = Column(Integer, primary_key=True, index=True)
-    recipient = Column(String, index=True)
-    message = Column(String, index=True)
+    content = Column(LargeBinary)
+    message_received_id = Column(Integer, ForeignKey("message_received.id"))
     timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
 
 
