@@ -1,12 +1,16 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Path
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from openai import OpenAI
+from pydantic import BaseModel
 from starlette.requests import Request
+import hashlib
 import os
+import subprocess
 
-from bot.db_chat_history import DATABASE_URL as CHAT_HISTORY_DATABASE_URL, SessionLocal as ChatHistorySessionLocal
+from bot.db_chat_history import (DATABASE_URL as CHAT_HISTORY_DATABASE_URL,
+                                 SessionLocal as ChatHistorySessionLocal)
 from bot.logging_config import logging, setup_logging, traceback
 from bot.v1 import ChatRequest, OpenAIChatBot
 
@@ -21,15 +25,13 @@ templates = Jinja2Templates(directory="bot/templates")
 chat_bot = OpenAIChatBot()
 
 
+class SqlRequest(BaseModel):
+    sql: str
+
+
 @bot.get("/", include_in_schema=False)
 async def get(request: Request):
     return templates.TemplateResponse(request, "index.html")
-
-
-@bot.get("/bot.css", include_in_schema=False)
-def favicon():
-    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'bot.css')
-    return FileResponse(favicon_path)
 
 
 @bot.post("/chat")
@@ -76,3 +78,43 @@ def favicon():
 @bot.get("/postgres.html", include_in_schema=False)
 async def get(request: Request):
     return templates.TemplateResponse(request, "postgres.html")
+
+
+@bot.post("/postgres/{db}/query")
+async def postgres_query(request: SqlRequest,
+                         db: str = Path(..., title="Postgres DB")):
+    enabled_dbs = {
+        "chat_history": CHAT_HISTORY_DATABASE_URL
+    }
+    if db not in enabled_dbs:
+        raise HTTPException(status_code=400, detail="Not supported")
+
+    md5 = hashlib.md5()
+    md5.update(request.sql.encode())
+    query_file = f"/tmp/{db}_query_{md5.hexdigest()}.sql"
+    with open(query_file, "w") as f:
+        f.write(request.sql)
+    try:
+        cmd = subprocess.run(f"psql '{enabled_dbs[db]}' -f {query_file}",
+                             shell=True, capture_output=True, text=True, check=True)
+        os.remove(query_file)
+        return f"""**rc**: {cmd.returncode}\n
+**stdout**:
+```text
+{cmd.stdout}
+```
+**stderr**:
+```text
+{cmd.stderr}
+```
+"""
+    except Exception as e:
+        os.remove(query_file)
+        logger.error("%s: trace: %s", e, traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@bot.get("/ui.css", include_in_schema=False)
+def favicon():
+    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.css')
+    return FileResponse(favicon_path)

@@ -113,9 +113,15 @@ elements. Ensure the parent elements manage the layout appropriately.
     width: 100%; /* Set equal width */
 }
 #send-button {
+    /*
+    */
     cursor: pointer;
-    padding: 5px 10px; /* Adjust padding if needed */
-    width: 100%; /* Set equal width */
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 10px;
+    transition: width 0.3s;
 }
 .assistant-message-box {
     background-color: #d1ecf1; /* Light blue */
@@ -166,7 +172,7 @@ rem for better responsiveness.
     display: none; /* Start as hidden */
     position: absolute;
     right: 10px; /* Adjust as necessary */
-    width: 500px;
+    width: 50vh;
     z-index: 10;
 }
 .popup-menu ul {
