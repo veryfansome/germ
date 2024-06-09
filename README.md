@@ -1,10 +1,12 @@
 # germ
 
-This is a simple FastAPI project served using Gunicorn and Docker.
+Germ is a chatbot project built using FastAPI and Gunicorn.
+
+<img src="./bot/static/logo.webp" alt="logo.webp" title="Germ" style="width:200px; height:200px;">
 
 ## Setup
 
-Make sure you have Docker and Docker Compose installed.
+Make sure you have Docker and Docker Compose installed. Try [Rancher Desktop](https://rancherdesktop.io/).
 
 ### Environment Setup
 
@@ -29,13 +31,5 @@ docker-compose run test
 ```
 
 ## AI Assisted design and implementation
-
-Project structure created by ChatGPT via
-
-```text
-Make a simple green unicorn project with a docker-compose
-file, unit tests, and GitHub actions setup to run unit tests
-on PR and push.
-```
 
 [Design docs](./docs)
