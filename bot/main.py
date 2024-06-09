@@ -21,9 +21,15 @@ templates = Jinja2Templates(directory="bot/templates")
 chat_bot = OpenAIChatBot()
 
 
-@bot.get("/")
+@bot.get("/", include_in_schema=False)
 async def get(request: Request):
     return templates.TemplateResponse(request, "index.html")
+
+
+@bot.get("/bot.css", include_in_schema=False)
+def favicon():
+    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'bot.css')
+    return FileResponse(favicon_path)
 
 
 @bot.post("/chat")
@@ -36,7 +42,7 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@bot.get("/env")
+@bot.get("/env", include_in_schema=False)
 async def root():
     return {"environ": os.environ}
 
@@ -65,3 +71,8 @@ async def healthz():
 def favicon():
     favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'logo.webp')
     return FileResponse(favicon_path)
+
+
+@bot.get("/postgres.html", include_in_schema=False)
+async def get(request: Request):
+    return templates.TemplateResponse(request, "postgres.html")
