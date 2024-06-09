@@ -5,7 +5,7 @@ Consider adding a fallback for older browsers.
 body {
     display: flex;
     flex-direction: column;
-    font-family: Arial, sans-serif;
+    font-family: "Menlo", Courier, sans-serif, monospace;
     height: 100vh;
     margin: 0;
     padding: 0;
@@ -38,11 +38,24 @@ nav a {
 nav a:hover {
     text-decoration: underline;
 }
-pre {
-    background: #f0f0f0;
-    border-radius: 10px;
-    overflow-x: auto;
+/* Styles for inline code */
+code {
+    background-color: #f5f5f5; /* Light gray background */
+    border: 1px solid #ccc;   /* Gray border */
+    padding: 2px 4px;
+    border-radius: 3px;       /* Rounded corners */
+    font-family: monospace;   /* Monospace font */
+}
+/* Styles for block code */
+pre code {
+    display: block;
+    background-color: #f5f5f5;
+    border: 1px solid #ccc;
     padding: 10px;
+    border-radius: 3px;
+    font-family: monospace;
+    white-space: pre;       /* Preserve white space */
+    overflow-x: auto;       /* Horizontal scroll for long lines */
 }
 /**
 `max-height: 70vh and min-height: 7vh could potentially cause overflow issues on smaller screens.
