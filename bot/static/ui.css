@@ -102,6 +102,25 @@ Ensure the opacity is low enough to not interfere with the text but still visibl
     position: relative;
     z-index: 2; /* Ensure content is above the pseudo-element */
 }
+#close-error-popup {
+}
+#error-popup {
+    top: 20px;
+    right: 20px;
+    left: 20px;
+    background-color: #ff8787;
+    color: white;
+    padding: 10px 20px;
+    align-items: center;
+}
+#error-popup button {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 16px;
+    margin-left: 10px;
+    cursor: pointer;
+}
 #input {
     box-sizing: border-box;
     flex: 1;
@@ -159,8 +178,14 @@ rem for better responsiveness.
 .button-container > button:last-child {
     margin-bottom: 0;
 }
+.clicked-message-sent-background-link {
+    color: blue; /* Set the same as `.message-sent-background-link:hover` */
+}
 .fa {
     margin-right: 8px;
+}
+.hidden {
+    display: none;
 }
 .loading-indicator {
     margin: 10px 0;
@@ -174,6 +199,14 @@ rem for better responsiveness.
     display: inline-block;
     height: 12px;
     width: 12px;
+}
+/* Default link style */
+.message-sent-background-link {
+    text-decoration: none; /* Remove underline by default */
+}
+.message-sent-background-link:hover {
+    color: blue; /* You can set any color you like */
+    cursor: pointer;
 }
 /* Pop-up menu settings */
 .popup-menu {

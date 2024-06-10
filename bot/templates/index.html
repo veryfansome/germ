@@ -17,11 +17,15 @@
             <a href="/postgres.html"><i class="fa-solid fa-code" style="padding-right: 4px"></i>Postgres</a>
         </div>
     </nav>
+    <div id="error-popup" class="hidden">
+        <span id="error-popup-message" style="color: darkred"></span>
+        <button id="close-error-popup">X</button>
+    </div>
     <div id="chatbox"></div>
     <div id="input-container">
         <div id="popup-menu" class="popup-menu">
             <ul>
-                <li><i class="fa fa-thumbs-down"></i> Bad model choice</li>
+                <li><i class="fa fa-foo"></i>Foo</li>
             </ul>
         </div>
         <form action="javascript:sendMessage().then(null)">
@@ -40,6 +44,22 @@
     <script>
     // Initialize highlight.js
     hljs.highlightAll();
+
+    const errorPopup = document.getElementById('error-popup');
+    const errorMessage = document.getElementById('error-popup-message');
+    const closeErrorButton = document.getElementById('close-error-popup');
+    closeErrorButton.addEventListener('click', () => {
+        errorPopup.classList.add('hidden');
+    });
+    const showErrorPopup = (message) => {
+        errorPopup.classList.remove('hidden')
+        errorMessage.innerHTML = message;
+
+        // Auto-hide after 5 seconds
+        setTimeout(() => {
+            errorPopup.classList.add('hidden');
+        }, 5000);
+    };
 
     // Popup menu
     const popupButton = document.getElementById('popup-button');
@@ -77,13 +97,14 @@
             this.style.overflow = 'auto';
         }
     });
-    function scrollToBottom() {
+
+    function scrollChatBoxToBottom() {
         const chatbox = document.getElementById('chatbox');
         chatbox.scrollTop = chatbox.scrollHeight;
     }
 
     // Function to check button width and replace text with icon if needed
-    function updateButton() {
+    function updateSendButton() {
         const sendButton = document.getElementById('send-button');
         if (sendButton.offsetWidth < 60) { // Adjust the width as needed
             sendButton.innerHTML = '<i class="fas fa-arrow-right"></i>';
@@ -92,8 +113,8 @@
         }
     }
     // Check button size on load and resize
-    window.addEventListener('load', updateButton);
-    window.addEventListener('resize', updateButton);
+    window.addEventListener('load', updateSendButton);
+    window.addEventListener('resize', updateSendButton);
 
     let messageList = [];
 
@@ -103,34 +124,115 @@
         document.getElementById('chatbox').innerHTML += `<div class="user-message-box"><i class="fa fa-user"></i><b>user:</b>${marked.parse(message)}</div>`;
         messageList.push({ role: "user", content: message })
         hljs.highlightAll();
-        scrollToBottom()
+        scrollChatBoxToBottom()
 
         // Show loading indicator
         const loadingIndicator = document.createElement('div');
         loadingIndicator.className = 'loading-indicator';
         loadingIndicator.innerHTML = '<div class="loading-spinner"></div>';
         document.getElementById('chatbox').appendChild(loadingIndicator);
-        scrollToBottom();
+        scrollChatBoxToBottom();
 
-        const response = await fetch('/chat', {
+        fetch('/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({messages: messageList})
+            body: JSON.stringify({ messages: messageList })
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            const messageReceivedId = data['message_received_id'];
+            const messageSentId = data['message_sent_id'];
+            const responseData = data['response'];
+
+            // Stop showing loading indicator
+            loadingIndicator.remove()
+
+            const responseModel = responseData['model'];
+            const responseChoice = responseData['choices'][0];
+            const responseReason = responseChoice['finish_reason']
+            const responseRole = responseChoice['message']['role']
+            const responseContent = responseChoice['message']['content']
+            messageList.push({ role: responseRole, content: responseContent })
+
+            const assistantMessageBox = document.createElement('div');
+            assistantMessageBox.className = 'assistant-message-box';
+            assistantMessageBox.innerHTML = `<i class="fa fa-virus"></i><b>${responseRole}(${responseModel}):</b>`
+            assistantMessageBox.innerHTML += `${marked.parse(responseContent)}</br>`
+            assistantMessageBox.innerHTML += `<i>${responseReason}</i> | `
+
+            const bookmarkLink = document.createElement('a');
+            bookmarkLink.className = "message-sent-background-link"
+            bookmarkLink.innerHTML = `<i class="fa fa-bookmark">`
+            bookmarkLink.addEventListener('click', (event) => {
+                event.preventDefault()
+                fetch('/chat/bookmark', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message_received_id: messageReceivedId,
+                        message_sent_id: messageSentId
+                    })
+                })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! Status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('Bookmark created:', data);
+                        bookmarkLink.classList.add('clicked-message-sent-background-link')
+                    })
+                    .catch(error => {
+                        console.error('Bookmark creation failed:', error);
+                        showErrorPopup(`Bookmark creation failed: ${error.message}`);
+                    });
+            })
+            assistantMessageBox.appendChild(bookmarkLink)
+
+            const thumbsDownLink = document.createElement('a');
+            thumbsDownLink.className = "message-sent-background-link"
+            thumbsDownLink.innerHTML = `<i class="fa fa-thumbs-down">`
+            thumbsDownLink.addEventListener('click', (event) => {
+                event.preventDefault()
+                fetch('/chat/thumbs-down', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message_received_id: messageReceivedId,
+                        message_sent_id: messageSentId
+                    })
+                })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! Status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('Thumbed down:', data);
+                        thumbsDownLink.classList.add('clicked-message-sent-background-link')
+                    })
+                    .catch(error => {
+                        console.error('Thumb down failed:', error);
+                        showErrorPopup(`Thumb down failed: ${error.message}`);
+                    });
+            })
+            assistantMessageBox.appendChild(thumbsDownLink)
+
+            document.getElementById('chatbox').appendChild(assistantMessageBox)
+            hljs.highlightAll();
+            scrollChatBoxToBottom()
+        })
+        .catch(error => {
+            console.error('Chat failed:', error);
+            showErrorPopup(`Chat failed: ${error.message}`);
         });
-        const responseData = await response.json();
-
-        // Stop showing loading indicator
-        loadingIndicator.remove()
-
-        const responseModel = responseData['model'];
-        const responseChoice = responseData['choices'][0];
-        const responseReason = responseChoice['finish_reason']
-        const responseRole = responseChoice['message']['role']
-        const responseContent = responseChoice['message']['content']
-        messageList.push({ role: responseRole, content: responseContent })
-        document.getElementById('chatbox').innerHTML += `<div class="assistant-message-box"><i class="fa fa-virus"></i><b>${responseRole}(${responseModel}):</b>${marked.parse(responseContent)}</br><i>${responseReason}</i></div>`;
-        hljs.highlightAll();
-        scrollToBottom()
     }
     </script>
 </body>

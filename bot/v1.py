@@ -29,7 +29,7 @@ class OpenAIChatBot:
     def chat(self, messages: list[ChatMessage]) -> object:
         new_chat_message: ChatMessage = messages[-1]
         # Insert received message
-        logger.info("received: %s", new_chat_message.content)
+        logger.debug("received: %s", new_chat_message.content)
 
         # Trim message list to avoid hitting selected model's token limit.
         enc = tiktoken.encoding_for_model(self.default_model)
@@ -46,14 +46,15 @@ class OpenAIChatBot:
         chat_frame = tuple(reversed(reversed_chat_frame))  # Undo previously reversed order
 
         # Update message history
-        message_received_session = ChatHistorySessionLocal()
         message_received = MessageReceived(
             chat_frame=json.dumps(chat_frame[:-1]).encode('utf-8'),
             content=new_chat_message.content.encode('utf-8'),
             role=new_chat_message.role,
         )
-        message_received_session.add(message_received)
-        message_received_session.commit()
+        with ChatHistorySessionLocal() as session:
+            session.add(message_received)
+            session.commit()
+            session.refresh(message_received)
 
         # Do completion request
         response = OpenAI().chat.completions.create(
@@ -90,20 +91,23 @@ class OpenAIChatBot:
           }
         }
         """
+        new_response = response.choices[0].message
+        logger.debug("response: %s", new_response.content)
 
         # self.default_vector_store.add(message, response.choices.pop().message.content)
         # self.chat_history.append((sender, message, response.choices.pop().message.content))
 
         # Update message history
-        message_received_session.refresh(message_received)
-        new_response = response.choices[0].message
-        logger.info("response: %s", new_response.content)
-        response_session = ChatHistorySessionLocal()
-        response_session.add(
-            MessageSent(
-                content=new_response.content.encode('utf-8'),
-                message_received_id=message_received.id,
-            )
+        message_sent = MessageSent(
+            content=new_response.content.encode('utf-8'),
+            message_received_id=message_received.id,
         )
-        response_session.commit()
-        return response
+        with ChatHistorySessionLocal() as session:
+            session.add(message_sent)
+            session.commit()
+            session.refresh(message_sent)
+        return {
+            "message_received_id": message_received.id,
+            "message_sent_id":  message_sent.id,
+            "response": response,
+        }

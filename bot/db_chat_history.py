@@ -15,6 +15,13 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+class MessageBookmark(Base):
+    __tablename__ = "message_bookmark"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    message_received_id = Column(Integer, ForeignKey("message_received.id"), nullable=False)
+    message_sent_id = Column(Integer, ForeignKey("message_sent.id"), nullable=False)
+
+
 # Define the ChatHistory model
 class MessageReceived(Base):
     __tablename__ = "message_received"
