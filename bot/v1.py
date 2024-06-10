@@ -19,6 +19,11 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessage]
 
 
+class LinkedMessageIds(BaseModel):
+    message_received_id: int
+    message_sent_id: int
+
+
 class OpenAIChatBot:
     def __init__(self, default_model="gpt-4o"):
         self.default_model = default_model

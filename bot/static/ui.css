@@ -58,7 +58,7 @@ pre code {
     overflow-x: auto;       /* Horizontal scroll for long lines */
 }
 /**
-`max-height: 70vh and min-height: 7vh could potentially cause overflow issues on smaller screens.
+`max-height: 70vh and min-height: 8.5vh could potentially cause overflow issues on smaller screens.
 Make sure these values are appropriate for all screen sizes.
 */
 textarea {
@@ -66,7 +66,7 @@ textarea {
     flex: 1;
     margin-right: 10px;
     max-height: 70vh;
-    min-height: 7vh;
+    min-height: 8.5vh;
     padding: 10px;
     resize: vertical;
 }
@@ -141,7 +141,7 @@ elements. Ensure the parent elements manage the layout appropriately.
 */
 #popup-button {
     cursor: pointer;
-    padding: 3px 0px 0px 0px; /* Adjust padding if needed */
+    padding: 3px 0px 2px 0px; /* Adjust padding if needed */
     width: 100%; /* Set equal width */
 }
 #send-button {

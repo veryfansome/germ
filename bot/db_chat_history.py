@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, DateTime, ForeignKey, Integer, LargeBinary, String
+from sqlalchemy import create_engine, Column, DateTime, ForeignKey, Integer, LargeBinary, String, UniqueConstraint
 from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
 import os
@@ -20,6 +20,9 @@ class MessageBookmark(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     message_received_id = Column(Integer, ForeignKey("message_received.id"), nullable=False)
     message_sent_id = Column(Integer, ForeignKey("message_sent.id"), nullable=False)
+    __table_args__ = (
+        UniqueConstraint('message_received_id', 'message_sent_id', name='unique_message_received_id_message_sent_id'),
+    )
 
 
 # Define the ChatHistory model
@@ -38,6 +41,13 @@ class MessageSent(Base):
     content = Column(LargeBinary)
     message_received_id = Column(Integer, ForeignKey("message_received.id"))
     timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
+
+
+class MessageThumbsDown(Base):
+    __tablename__ = "message_thumbs_down"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    message_received_id = Column(Integer, ForeignKey("message_received.id"), nullable=False)
+    message_sent_id = Column(Integer, ForeignKey("message_sent.id"), nullable=False)
 
 
 # Create the tables in the database

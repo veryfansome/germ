@@ -10,9 +10,10 @@ import os
 import subprocess
 
 from bot.db_chat_history import (DATABASE_URL as CHAT_HISTORY_DATABASE_URL,
-                                 SessionLocal as ChatHistorySessionLocal)
+                                 SessionLocal as ChatHistorySessionLocal,
+                                 MessageBookmark, MessageThumbsDown)
 from bot.logging_config import logging, setup_logging, traceback
-from bot.v1 import ChatRequest, OpenAIChatBot
+from bot.v1 import ChatRequest, LinkedMessageIds, OpenAIChatBot
 
 
 setup_logging()
@@ -39,6 +40,45 @@ async def chat(request: ChatRequest):
     try:
         response = chat_bot.chat(request.messages)
         return response
+    except Exception as e:
+        logger.error("%s: trace: %s", e, traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@bot.post("/chat/bookmark")
+async def chat(request: LinkedMessageIds):
+    with ChatHistorySessionLocal() as session:
+        result = session.query(MessageBookmark).where(
+            MessageBookmark.message_received_id == request.message_received_id,
+            MessageBookmark.message_sent_id == request.message_sent_id
+        ).one_or_none()
+        if result:
+            return {"bookmark_id": result.id}
+    try:
+        bookmark = MessageBookmark(
+            message_received_id=request.message_received_id,
+            message_sent_id=request.message_sent_id)
+        with ChatHistorySessionLocal() as session:
+            session.add(bookmark)
+            session.commit()
+            session.refresh(bookmark)
+        return {"bookmark_id": bookmark.id}
+    except Exception as e:
+        logger.error("%s: trace: %s", e, traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@bot.post("/chat/thumbs-down")
+async def chat(request: LinkedMessageIds):
+    try:
+        thumbs_down = MessageThumbsDown(
+            message_received_id=request.message_received_id,
+            message_sent_id=request.message_sent_id)
+        with ChatHistorySessionLocal() as session:
+            session.add(thumbs_down)
+            session.commit()
+            session.refresh(thumbs_down)
+        return {"thumbs_down_id": thumbs_down.id}
     except Exception as e:
         logger.error("%s: trace: %s", e, traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))

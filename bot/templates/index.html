@@ -32,7 +32,7 @@
             <label for="input"></label>
             <textarea id="input" placeholder="Type a message..."></textarea>
             <div class="button-container">
-                <button type="button" id="popup-button"><i class="fas fa-chevron-up"></i></button>
+                <button type="button" id="popup-button"><i class="fas fa-bookmark"></i></button>
                 <button type="submit" id="send-button">Send</button>
             </div>
         </form>
@@ -178,20 +178,20 @@
                         message_sent_id: messageSentId
                     })
                 })
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error(`HTTP error! Status: ${response.status}`);
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        console.log('Bookmark created:', data);
-                        bookmarkLink.classList.add('clicked-message-sent-background-link')
-                    })
-                    .catch(error => {
-                        console.error('Bookmark creation failed:', error);
-                        showErrorPopup(`Bookmark creation failed: ${error.message}`);
-                    });
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status} ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Bookmark created:', data);
+                    bookmarkLink.classList.add('clicked-message-sent-background-link')
+                })
+                .catch(error => {
+                    console.error('Bookmark creation failed:', error);
+                    showErrorPopup(`Bookmark creation failed: ${error.message}`);
+                });
             })
             assistantMessageBox.appendChild(bookmarkLink)
 
@@ -208,20 +208,20 @@
                         message_sent_id: messageSentId
                     })
                 })
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error(`HTTP error! Status: ${response.status}`);
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        console.log('Thumbed down:', data);
-                        thumbsDownLink.classList.add('clicked-message-sent-background-link')
-                    })
-                    .catch(error => {
-                        console.error('Thumb down failed:', error);
-                        showErrorPopup(`Thumb down failed: ${error.message}`);
-                    });
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status} ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Thumbed down:', data);
+                    thumbsDownLink.classList.add('clicked-message-sent-background-link')
+                })
+                .catch(error => {
+                    console.error('Thumb down failed:', error);
+                    showErrorPopup(`Thumb down failed: ${error.message}`);
+                });
             })
             assistantMessageBox.appendChild(thumbsDownLink)
 
