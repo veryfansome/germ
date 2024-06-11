@@ -191,6 +191,10 @@
             });
             assistantMessageBox.appendChild(bookmarkLink)
 
+            const copyLink = document.createElement('a');
+            copyLink.innerHTML = `<i class="fa fa-copy">`
+            assistantMessageBox.appendChild(copyLink)
+
             const thumbsDownLink = document.createElement('a');
             thumbsDownLink.className = "message-sent-background-link"
             thumbsDownLink.innerHTML = `<i class="fa fa-thumbs-down">`
