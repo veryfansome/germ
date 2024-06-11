@@ -45,6 +45,15 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@bot.get("/chat/bookmarks")
+async def bookmarks(request: Request) -> object:
+    foo = []
+    with ChatHistorySessionLocal() as session:
+        bookmark_results = session.query(MessageBookmark).all()
+        for bookmark in bookmark_results:
+            bookmark_id = bookmark.message_summary
+    return {}
+
 @bot.post("/chat/bookmark")
 async def chat(request: ChatBookmark):
     with ChatHistorySessionLocal() as session:
@@ -57,7 +66,9 @@ async def chat(request: ChatBookmark):
     try:
         bookmark = MessageBookmark(
             message_received_id=request.message_received_id,
-            message_summary=chat_bot.summarize_text(request.message_sent_content).encode("utf-8"),
+            message_summary=chat_bot.do_with_text(
+                "Summarize the following text in 70 characters or less",
+                request.message_sent_content).encode("utf-8"),
             message_sent_id=request.message_sent_id)
         with ChatHistorySessionLocal() as session:
             session.add(bookmark)

@@ -123,12 +123,12 @@ class OpenAIChatBot:
             "response": response,
         }
 
-    def summarize_text(self, text: str, max_tokens=140, n=1, stop=None, temperature=0.0) -> str:
-        response = OpenAI().completions.create(
+    def do_with_text(self, directive: str, text: str, max_tokens=140, n=1, stop=None, temperature=0.0) -> str:
+        response = OpenAI().chat.completions.create(
+            messages=[{"role": "user", "content": f'{directive}: {text}'}],
             model=self.default_model,
-            prompt=f"Summarize the following text:\n\n{text}\n\nSummary:",
 
             max_tokens=max_tokens, n=n, stop=stop, temperature=temperature,
         )
-        return response.choices[0].text.strip()
+        return response.choices[0].message.content.strip()
 

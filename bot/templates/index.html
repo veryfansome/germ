@@ -64,6 +64,7 @@
     // Popup menu
     const popupButton = document.getElementById('popup-button');
     const popupMenu = document.getElementById('popup-menu');
+    const popupMenuList = document.getElementById('popup-menu-ul');
     popupButton.addEventListener('mouseenter', () => {
         popupMenu.style.display = 'block';
     });
@@ -76,6 +77,14 @@
     popupMenu.addEventListener('mouseleave', () => {
         popupMenu.style.display = 'none';
     });
+    popupMenuList.addEventListener('DOMContentLoaded', function () {
+        fetch('')
+            .then(response => response.json)
+            .then(data => {
+            })
+            .catch(error => {
+            })
+    })
 
     // Text input area
     const textarea = document.getElementById('input');
