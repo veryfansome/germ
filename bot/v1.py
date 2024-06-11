@@ -1,5 +1,6 @@
 from openai import OpenAI
 from pydantic import BaseModel
+from typing import Optional
 import json
 import tiktoken
 
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class ChatBookmark(BaseModel):
+    id: Optional[int] = None
     message_received_id: int
     message_sent_id: int
     message_sent_content: str

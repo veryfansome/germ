@@ -6,7 +6,6 @@
     <title>Chat</title>
     <link rel="stylesheet" href="/ui.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
     <style></style>
 </head>
 <body>
@@ -39,8 +38,10 @@
     </div>
 
 
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="/ui.js"></script>
     <script>
     // Initialize highlight.js
     hljs.highlightAll();
@@ -65,6 +66,22 @@
     const popupButton = document.getElementById('popup-button');
     const popupMenu = document.getElementById('popup-menu');
     const popupMenuList = document.getElementById('popup-menu-ul');
+    const refreshBookmarks = () => {
+        fetch('/chat/bookmarks')
+            .then(response => throwOrJson(response))
+            .then(data => {
+                popupMenuList.innerHTML = ''
+                data.forEach(function (item, idx) {
+                    const li = document.createElement('li');
+                    li.innerHTML = `<i class="fa fa-bookmark"></i>${item['message_sent_content']}`
+                    popupMenuList.appendChild(li)
+                })
+            })
+            .catch(error => handleError(error, 'Failed to fetch bookmarks:'));
+    }
+    document.addEventListener('DOMContentLoaded', function () {
+        refreshBookmarks()
+    });
     popupButton.addEventListener('mouseenter', () => {
         popupMenu.style.display = 'block';
     });
@@ -77,14 +94,6 @@
     popupMenu.addEventListener('mouseleave', () => {
         popupMenu.style.display = 'none';
     });
-    popupMenuList.addEventListener('DOMContentLoaded', function () {
-        fetch('')
-            .then(response => response.json)
-            .then(data => {
-            })
-            .catch(error => {
-            })
-    })
 
     // Text input area
     const textarea = document.getElementById('input');
@@ -107,20 +116,6 @@
         }
     });
 
-    function scrollChatBoxToBottom() {
-        const chatbox = document.getElementById('chatbox');
-        chatbox.scrollTop = chatbox.scrollHeight;
-    }
-
-    // Function to check button width and replace text with icon if needed
-    function updateSendButton() {
-        const sendButton = document.getElementById('send-button');
-        if (sendButton.offsetWidth < 60) { // Adjust the width as needed
-            sendButton.innerHTML = '<i class="fas fa-arrow-right"></i>';
-        } else {
-            sendButton.innerHTML = 'Send';
-        }
-    }
     // Check button size on load and resize
     window.addEventListener('load', updateSendButton);
     window.addEventListener('resize', updateSendButton);
@@ -147,12 +142,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ messages: messageList })
         })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! Status: ${response.status}`);
-            }
-            return response.json();
-        })
+        .then(response => throwOrJson(response))
         .then(data => {
             const messageReceivedId = data['message_received_id'];
             const messageSentId = data['message_sent_id'];
@@ -179,6 +169,7 @@
             bookmarkLink.innerHTML = `<i class="fa fa-bookmark">`
             bookmarkLink.addEventListener('click', (event) => {
                 event.preventDefault()
+                bookmarkLink.classList.add('clicked-message-sent-background-link')
                 fetch('/chat/bookmark', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -188,21 +179,16 @@
                         message_sent_id: messageSentId,
                     })
                 })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! Status: ${response.status} ${response.statusText}`);
-                    }
-                    return response.json();
-                })
+                .then(response => throwOrJson(response))
                 .then(data => {
                     console.log('Bookmark created:', data);
-                    bookmarkLink.classList.add('clicked-message-sent-background-link')
+                    refreshBookmarks()
                 })
                 .catch(error => {
-                    console.error('Bookmark creation failed:', error);
-                    showErrorPopup(`Bookmark creation failed: ${error.message}`);
+                    bookmarkLink.classList.remove('clicked-message-sent-background-link')
+                    handleError(error, 'Bookmark creation failed:')
                 });
-            })
+            });
             assistantMessageBox.appendChild(bookmarkLink)
 
             const thumbsDownLink = document.createElement('a');
@@ -218,31 +204,20 @@
                         message_sent_id: messageSentId
                     })
                 })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! Status: ${response.status} ${response.statusText}`);
-                    }
-                    return response.json();
-                })
+                .then(response => throwOrJson(response))
                 .then(data => {
                     console.log('Thumbed down:', data);
                     thumbsDownLink.classList.add('clicked-message-sent-background-link')
                 })
-                .catch(error => {
-                    console.error('Thumb down failed:', error);
-                    showErrorPopup(`Thumb down failed: ${error.message}`);
-                });
-            })
+                .catch(error => handleError(error, 'Thumb down failed:'));
+            });
             assistantMessageBox.appendChild(thumbsDownLink)
 
             document.getElementById('chatbox').appendChild(assistantMessageBox)
             hljs.highlightAll();
             scrollChatBoxToBottom()
         })
-        .catch(error => {
-            console.error('Chat failed:', error);
-            showErrorPopup(`Chat failed: ${error.message}`);
-        });
+        .catch(error => handleError(error, 'Chat failed:'));
     }
     </script>
 </body>

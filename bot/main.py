@@ -11,7 +11,7 @@ import subprocess
 
 from bot.db_chat_history import (DATABASE_URL as CHAT_HISTORY_DATABASE_URL,
                                  SessionLocal as ChatHistorySessionLocal,
-                                 MessageBookmark, MessageThumbsDown)
+                                 MessageBookmark, MessageReceived, MessageThumbsDown)
 from bot.logging_config import logging, setup_logging, traceback
 from bot.v1 import ChatBookmark, ChatRequest, LinkedMessageIds, OpenAIChatBot
 
@@ -46,38 +46,62 @@ async def chat(request: ChatRequest):
 
 
 @bot.get("/chat/bookmarks")
-async def bookmarks(request: Request) -> object:
-    foo = []
+async def bookmarks(request: Request) -> list[ChatBookmark]:
+    bookmark_list = []
     with ChatHistorySessionLocal() as session:
-        bookmark_results = session.query(MessageBookmark).all()
-        for bookmark in bookmark_results:
-            bookmark_id = bookmark.message_summary
-    return {}
+        results = session.query(MessageBookmark).all()
+        for message_bookmark in results:
+            bookmark_list.append(ChatBookmark(
+                id=message_bookmark.id,
+                message_received_id=message_bookmark.message_received_id,
+                message_sent_id=message_bookmark.message_sent_id,
+                message_sent_content=message_bookmark.message_summary.decode("utf-8"),
+            ))
+    return bookmark_list
+
 
 @bot.post("/chat/bookmark")
 async def chat(request: ChatBookmark):
-    with ChatHistorySessionLocal() as session:
-        result = session.query(MessageBookmark).where(
-            MessageBookmark.message_received_id == request.message_received_id,
-            MessageBookmark.message_sent_id == request.message_sent_id
-        ).one_or_none()
-        if result:
-            return {"bookmark_id": result.id}
     try:
-        bookmark = MessageBookmark(
-            message_received_id=request.message_received_id,
-            message_summary=chat_bot.do_with_text(
-                "Summarize the following text in 70 characters or less",
-                request.message_sent_content).encode("utf-8"),
-            message_sent_id=request.message_sent_id)
+        # If exists, return existing
         with ChatHistorySessionLocal() as session:
+            result = session.query(MessageBookmark).where(
+                MessageBookmark.message_received_id == request.message_received_id,
+                MessageBookmark.message_sent_id == request.message_sent_id
+            ).one_or_none()
+            if result:
+                return ChatBookmark(
+                    id=result.id,
+                    message_received_id=result.message_received_id,
+                    message_sent_id=result.message_sent_id,
+                    message_sent_content=result.message_sent.decode("utf-8"),
+                )
+        with ChatHistorySessionLocal() as session:
+            result = session.query(MessageReceived).where(
+                MessageReceived.id == request.message_received_id
+            ).one_or_none()
+            if not result:
+                raise HTTPException(status_code=404,
+                                    detail=f"MessageReceived.id == {request.message_received_id} not found")
+            message_summary = chat_bot.do_with_text(
+                "Summarize the following prompt and response in 70 characters or less",
+                '# Prompt:\n\n' + result.content.decode('utf-8') + '\n\n# Response:\n\n' + request.message_sent_content)
+            bookmark = MessageBookmark(
+                message_received_id=request.message_received_id,
+                message_summary=message_summary.encode("utf-8"),
+                message_sent_id=request.message_sent_id)
             session.add(bookmark)
             session.commit()
             session.refresh(bookmark)
-        return {"bookmark_id": bookmark.id}
+            return ChatBookmark(
+                id=bookmark.id,
+                message_received_id=bookmark.message_received_id,
+                message_sent_id=bookmark.message_sent_id,
+                message_sent_content=bookmark.message_summary
+            )
     except Exception as e:
         logger.error("%s: trace: %s", e, traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise e if isinstance(e, HTTPException) else HTTPException(status_code=500, detail=str(e))
 
 
 @bot.post("/chat/thumbs-down")
@@ -169,4 +193,10 @@ async def postgres_query(request: SqlRequest,
 @bot.get("/ui.css", include_in_schema=False)
 def favicon():
     favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.css')
+    return FileResponse(favicon_path)
+
+
+@bot.get("/ui.js", include_in_schema=False)
+def favicon():
+    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.js')
     return FileResponse(favicon_path)

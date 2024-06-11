@@ -9,6 +9,7 @@ body {
     height: 100vh;
     margin: 0;
     padding: 0;
+    user-select: none;
 }
 button {
     padding: 10px;
