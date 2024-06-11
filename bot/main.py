@@ -13,7 +13,7 @@ from bot.db_chat_history import (DATABASE_URL as CHAT_HISTORY_DATABASE_URL,
                                  SessionLocal as ChatHistorySessionLocal,
                                  MessageBookmark, MessageThumbsDown)
 from bot.logging_config import logging, setup_logging, traceback
-from bot.v1 import ChatRequest, LinkedMessageIds, OpenAIChatBot
+from bot.v1 import ChatBookmark, ChatRequest, LinkedMessageIds, OpenAIChatBot
 
 
 setup_logging()
@@ -46,7 +46,7 @@ async def chat(request: ChatRequest):
 
 
 @bot.post("/chat/bookmark")
-async def chat(request: LinkedMessageIds):
+async def chat(request: ChatBookmark):
     with ChatHistorySessionLocal() as session:
         result = session.query(MessageBookmark).where(
             MessageBookmark.message_received_id == request.message_received_id,
@@ -57,6 +57,7 @@ async def chat(request: LinkedMessageIds):
     try:
         bookmark = MessageBookmark(
             message_received_id=request.message_received_id,
+            message_summary=chat_bot.summarize_text(request.message_sent_content).encode("utf-8"),
             message_sent_id=request.message_sent_id)
         with ChatHistorySessionLocal() as session:
             session.add(bookmark)

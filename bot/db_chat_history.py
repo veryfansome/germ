@@ -20,6 +20,7 @@ class MessageBookmark(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     message_received_id = Column(Integer, ForeignKey("message_received.id"), nullable=False)
     message_sent_id = Column(Integer, ForeignKey("message_sent.id"), nullable=False)
+    message_summary = Column(LargeBinary)
     __table_args__ = (
         UniqueConstraint('message_received_id', 'message_sent_id', name='unique_message_received_id_message_sent_id'),
     )

@@ -10,6 +10,12 @@ from bot.vector_store import OpenAITextEmbedding3SmallDim1536
 logger = logging.getLogger(__name__)
 
 
+class ChatBookmark(BaseModel):
+    message_received_id: int
+    message_sent_id: int
+    message_sent_content: str
+
+
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -116,3 +122,13 @@ class OpenAIChatBot:
             "message_sent_id":  message_sent.id,
             "response": response,
         }
+
+    def summarize_text(self, text: str, max_tokens=140, n=1, stop=None, temperature=0.0) -> str:
+        response = OpenAI().completions.create(
+            model=self.default_model,
+            prompt=f"Summarize the following text:\n\n{text}\n\nSummary:",
+
+            max_tokens=max_tokens, n=n, stop=stop, temperature=temperature,
+        )
+        return response.choices[0].text.strip()
+

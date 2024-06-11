@@ -24,7 +24,7 @@
     <div id="chatbox"></div>
     <div id="input-container">
         <div id="popup-menu" class="popup-menu">
-            <ul>
+            <ul id="popup-menu-ul">
                 <li><i class="fa fa-foo"></i>Foo</li>
             </ul>
         </div>
@@ -175,7 +175,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         message_received_id: messageReceivedId,
-                        message_sent_id: messageSentId
+                        message_sent_content: responseContent,
+                        message_sent_id: messageSentId,
                     })
                 })
                 .then(response => {
