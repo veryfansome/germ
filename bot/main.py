@@ -9,9 +9,8 @@ import hashlib
 import os
 import subprocess
 
-from bot.db_chat_history import (DATABASE_URL as CHAT_HISTORY_DATABASE_URL,
-                                 SessionLocal as ChatHistorySessionLocal,
-                                 MessageBookmark, MessageReceived, MessageThumbsDown)
+from bot.db import (DATABASE_URL, SessionLocal,
+                    MessageBookmark, MessageReceived, MessageThumbsDown)
 from bot.logging_config import logging, setup_logging, traceback
 from bot.v1 import ChatBookmark, ChatRequest, LinkedMessageIds, OpenAIChatBot
 
@@ -48,7 +47,7 @@ async def chat(request: ChatRequest):
 @bot.get("/chat/bookmarks")
 async def bookmarks(request: Request) -> list[ChatBookmark]:
     bookmark_list = []
-    with ChatHistorySessionLocal() as session:
+    with SessionLocal() as session:
         results = session.query(MessageBookmark).all()
         for message_bookmark in results:
             bookmark_list.append(ChatBookmark(
@@ -64,7 +63,7 @@ async def bookmarks(request: Request) -> list[ChatBookmark]:
 async def chat(request: ChatBookmark):
     try:
         # If exists, return existing
-        with ChatHistorySessionLocal() as session:
+        with SessionLocal() as session:
             result = session.query(MessageBookmark).where(
                 MessageBookmark.message_received_id == request.message_received_id,
                 MessageBookmark.message_sent_id == request.message_sent_id
@@ -76,7 +75,7 @@ async def chat(request: ChatBookmark):
                     message_sent_id=result.message_sent_id,
                     message_sent_content=result.message_sent.decode("utf-8"),
                 )
-        with ChatHistorySessionLocal() as session:
+        with SessionLocal() as session:
             result = session.query(MessageReceived).where(
                 MessageReceived.id == request.message_received_id
             ).one_or_none()
@@ -110,7 +109,7 @@ async def chat(request: LinkedMessageIds):
         thumbs_down = MessageThumbsDown(
             message_received_id=request.message_received_id,
             message_sent_id=request.message_sent_id)
-        with ChatHistorySessionLocal() as session:
+        with SessionLocal() as session:
             session.add(thumbs_down)
             session.commit()
             session.refresh(thumbs_down)
@@ -134,14 +133,14 @@ def favicon():
 @bot.get("/healthz")
 async def healthz():
     # Is PostgreSQL usable?
-    session = ChatHistorySessionLocal()
+    session = SessionLocal()
     session.close()
     # Is OpenAI usable?
     openai_client = OpenAI()
     openai_client.close()
     return {
         "status": "OK",
-        "chat_history_db_url": CHAT_HISTORY_DATABASE_URL
+        "db_url": DATABASE_URL
     }
 
 
@@ -160,7 +159,7 @@ async def get(request: Request):
 async def postgres_query(request: SqlRequest,
                          db: str = Path(..., title="Postgres DB")):
     enabled_dbs = {
-        "chat_history": CHAT_HISTORY_DATABASE_URL
+        "germ": DATABASE_URL
     }
     if db not in enabled_dbs:
         raise HTTPException(status_code=400, detail="Not supported")

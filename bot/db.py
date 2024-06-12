@@ -4,10 +4,10 @@ import datetime
 import os
 
 # Database Configuration
-DATABASE_URL = "postgresql://{name}:{password}@{host}/chat_history".format(
-    host=os.getenv("CHAT_HISTORY_DB_HOST"),
-    name=os.getenv("CHAT_HISTORY_POSTGRES_USER"),
-    password=os.getenv("CHAT_HISTORY_POSTGRES_PASSWORD"),
+DATABASE_URL = "postgresql://{name}:{password}@{host}/germ".format(
+    host=os.getenv("DB_HOST"),
+    name=os.getenv("POSTGRES_USER"),
+    password=os.getenv("POSTGRES_PASSWORD"),
 )
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

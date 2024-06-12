@@ -14,8 +14,8 @@ At the root level of the project, create a `.env` file with the following conten
 
 ```shell
 OPENAI_API_KEY=sk-proj-xxxxxxxxxx
-CHAT_HISTORY_POSTGRES_USER=germ
-CHAT_HISTORY_POSTGRES_PASSWORD=bacteria4life
+POSTGRES_USER=germ
+POSTGRES_PASSWORD=bacteria4life
 ```
 
 ## Running the Application

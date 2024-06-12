@@ -4,7 +4,7 @@ from typing import Optional
 import json
 import tiktoken
 
-from bot.db_chat_history import MessageReceived, MessageSent, SessionLocal as ChatHistorySessionLocal
+from bot.db import MessageReceived, MessageSent, SessionLocal as ChatHistorySessionLocal
 from bot.logging_config import logging
 from bot.vector_store import OpenAITextEmbedding3SmallDim1536
 
