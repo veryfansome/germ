@@ -37,7 +37,11 @@ async def get(request: Request):
 @bot.post("/chat")
 async def chat(request: ChatRequest):
     try:
-        response = chat_bot.chat(request.messages)
+        response = chat_bot.chat(
+            request.messages,
+            system_message=request.system_message,
+            temperature=request.temperature,
+        )
         return response
     except Exception as e:
         logger.error("%s: trace: %s", e, traceback.format_exc())
@@ -82,7 +86,7 @@ async def chat(request: ChatBookmark):
             if not result:
                 raise HTTPException(status_code=404,
                                     detail=f"MessageReceived.id == {request.message_received_id} not found")
-            message_summary = chat_bot.do_with_text(
+            message_summary = chat_bot.do_on_text(
                 "Summarize the following prompt and response in 70 characters or less",
                 '# Prompt:\n\n' + result.content.decode('utf-8') + '\n\n# Response:\n\n' + request.message_sent_content)
             bookmark = MessageBookmark(
@@ -104,7 +108,7 @@ async def chat(request: ChatBookmark):
 
 
 @bot.post("/chat/thumbs-down")
-async def chat(request: LinkedMessageIds):
+async def chat(request: LinkedMessageIds, ):
     try:
         thumbs_down = MessageThumbsDown(
             message_received_id=request.message_received_id,

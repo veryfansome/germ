@@ -226,6 +226,7 @@ rem for better responsiveness.
     list-style: none;
     margin: 0;
     padding: 10px;
+    font-size: small;
 }
 .popup-menu li {
     cursor: pointer;

@@ -24,7 +24,7 @@
     <div id="input-container">
         <div id="popup-menu" class="popup-menu">
             <ul id="popup-menu-ul">
-                <li><i class="fa fa-foo"></i>Foo</li>
+                <li>Foo</li>
             </ul>
         </div>
         <form action="javascript:sendMessage().then(null)">
@@ -70,10 +70,13 @@
         fetch('/chat/bookmarks')
             .then(response => throwOrJson(response))
             .then(data => {
-                popupMenuList.innerHTML = ''
+                popupMenuList.innerHTML = `<span style="color: gray;"><em>You haven't created any bookmarks yet. When you see reply you want to save, click on the <i class="fa fa-bookmark" style="color: black; margin-right: 0;"></i> below the message.</em></span>`
                 data.forEach(function (item, idx) {
+                    if (idx === 0) {
+                        popupMenuList.innerHTML = ''
+                    }
                     const li = document.createElement('li');
-                    li.innerHTML = `<i class="fa fa-bookmark"></i>${item['message_sent_content']}`
+                    li.innerHTML = `<a href="/?message_sent_id=${item['message_sent_id']}&message_received_id=${item['message_received_id']}"><i class="fa fa-bookmark"></i>${item['message_sent_content']}</a>`
                     popupMenuList.appendChild(li)
                 })
             })
