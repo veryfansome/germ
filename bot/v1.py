@@ -105,8 +105,6 @@ class OpenAIChatBot:
                 break
             total_tokens += message_tokens
             reversed_chat_frame.append(message_dict)
-        # TODO: Need to move this because we may not want system messages in chat history
-        reversed_chat_frame += [{"role": "system", "content": system_message}] if system_message else []
         chat_frame = tuple(reversed(reversed_chat_frame))  # Undo previously reversed order
 
         # Update message history
@@ -122,7 +120,8 @@ class OpenAIChatBot:
 
         # Do completion request
         response = OpenAI().chat.completions.create(
-            messages=chat_frame,
+            messages=(([{"role": "system", "content": system_message}] if system_message else [])
+                      + [x for x in chat_frame]),
             model=self.model,
             n=1,
             temperature=temperature,
