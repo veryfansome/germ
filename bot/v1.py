@@ -68,7 +68,6 @@ class OpenAIChatBot:
              system_message=None,
              temperature: float = 0.0) -> object:
         new_chat_message: ChatMessage = messages[-1]
-        # Insert received message
         logger.debug("received: %s", new_chat_message.content)
 
         ##
@@ -106,6 +105,7 @@ class OpenAIChatBot:
                 break
             total_tokens += message_tokens
             reversed_chat_frame.append(message_dict)
+        # TODO: Need to move this because we may not want system messages in chat history
         reversed_chat_frame += [{"role": "system", "content": system_message}] if system_message else []
         chat_frame = tuple(reversed(reversed_chat_frame))  # Undo previously reversed order
 
