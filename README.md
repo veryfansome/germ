@@ -1,5 +1,7 @@
 # germ
 
+[![tests](https://github.com/veryfansome/germ/actions/workflows/tests.yml/badge.svg)](https://github.com/veryfansome/germ/actions/workflows/tests.yml)
+
 Germ is a chatbot project built using FastAPI and Gunicorn.
 
 <img src="./bot/static/logo.webp" alt="logo.webp" title="Germ" style="width:200px; height:200px;">
