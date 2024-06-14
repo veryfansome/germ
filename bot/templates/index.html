@@ -55,7 +55,7 @@
     const popupMenu = document.getElementById('popup-menu');
     const popupMenuList = document.getElementById('popup-menu-ul');
     const refreshBookmarks = () => {
-        fetch('/chat/bookmarks')
+        fetch('/chat/bookmarks?is_test=false')
             .then(response => throwOrJson(response))
             .then(data => {
                 popupMenuList.innerHTML = `<span style="color: gray;"><em>You haven't created any bookmarks yet. When you see reply you want to save, click on the <i class="fa fa-bookmark" style="color: black; margin-right: 0;"></i> below the message.</em></span>`;
@@ -64,7 +64,7 @@
                         popupMenuList.innerHTML = '';
                     }
                     const li = document.createElement('li');
-                    li.innerHTML = `<a href="/?message_sent_id=${item['message_sent_id']}&message_received_id=${item['message_received_id']}"><i class="fa fa-bookmark"></i>${item['message_sent_content']}</a>`;
+                    li.innerHTML = `<a href="/?message_replied_id=${item['message_replied_id']}&message_received_id=${item['message_received_id']}"><i class="fa fa-bookmark"></i>${item['message_replied_content']}</a>`;
                     popupMenuList.appendChild(li);
                 })
             })
@@ -179,7 +179,10 @@
         fetch('/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: chatCompletionMessageList }),
+            body: JSON.stringify({
+                is_test: false,
+                messages: chatCompletionMessageList,
+            }),
         })
         .then(response => {
             // Stop showing loading indicator
@@ -189,7 +192,7 @@
         .then(data => {
             console.log(data)
             const messageReceivedId = data['message_received_id'];
-            const messageSentId = data['message_sent_id'];
+            const messageRepliedId = data['message_replied_id'];
             const responseData = data['response'];
 
             const responseModel = responseData['model'];
@@ -206,7 +209,7 @@
             assistantMessageBox.innerHTML += `${marked.parse(responseContent)}</br>`;
             assistantMessageBox.innerHTML += `<i>${responseReason}</i> | `;
 
-            // Render sent message copy button
+            // Render replied message copy button
             const copyLink = document.createElement('a');
             copyLink.className = "chatbox-message-link";
             copyLink.innerHTML = `<i class="fa fa-copy">`;
@@ -227,9 +230,10 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
+                        is_test: false,
                         message_received_id: messageReceivedId,
-                        message_sent_content: responseContent,
-                        message_sent_id: messageSentId,
+                        message_replied_content: responseContent,
+                        message_replied_id: messageRepliedId,
                     })
                 })
                 .then(response => throwOrJson(response))
@@ -254,8 +258,9 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
+                        is_test: false,
                         message_received_id: messageReceivedId,
-                        message_sent_id: messageSentId
+                        message_replied_id: messageRepliedId
                     })
                 })
                 .then(response => throwOrJson(response))

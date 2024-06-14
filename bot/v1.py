@@ -4,7 +4,7 @@ from typing import Optional
 import json
 import tiktoken
 
-from bot.db import MessageReceived, MessageSent, SessionLocal
+from bot.db import MessageReceived, MessageReplied, SessionLocal
 from bot.logging_config import logging
 from bot.vector_store import OpenAITextEmbedding3SmallDim1536
 
@@ -35,26 +35,30 @@ ENABLED_TOOLS = {
 
 
 class ChatBookmark(BaseModel):
-    id: Optional[int] = None
+    bookmark_id: Optional[int] = None
+    is_test: Optional[bool] = True
     message_received_id: int
-    message_sent_id: int
-    message_sent_content: str
+    message_replied_id: int
+    message_replied_content: str
 
 
 class ChatMessage(BaseModel):
-    role: str
     content: str
+    is_test: Optional[bool] = True
+    role: str
 
 
 class ChatRequest(BaseModel):
+    is_test: Optional[bool] = True
     messages: list[ChatMessage]
     system_message: Optional[str] = ""
     temperature: Optional[float] = 0.0
 
 
 class LinkedMessageIds(BaseModel):
+    is_test: Optional[bool] = True
     message_received_id: int
-    message_sent_id: int
+    message_replied_id: int
 
 
 class OpenAIChatBot:
@@ -65,6 +69,7 @@ class OpenAIChatBot:
         self.enabled_vector_stores = [self.default_vector_store]
 
     def chat(self, messages: list[ChatMessage],
+             is_test=True,
              system_message=None,
              temperature: float = 0.0) -> object:
         new_chat_message: ChatMessage = messages[-1]
@@ -111,6 +116,7 @@ class OpenAIChatBot:
         message_received = MessageReceived(
             chat_frame=json.dumps(chat_frame[:-1]).encode('utf-8'),
             content=new_chat_message.content.encode('utf-8'),
+            is_test=is_test,
             role=new_chat_message.role,
         )
         with SessionLocal() as session:
@@ -177,17 +183,18 @@ class OpenAIChatBot:
         # TODO: post-response >>HERE<<
 
         # Update message history
-        message_sent = MessageSent(
+        message_replied = MessageReplied(
             content=new_response.content.encode('utf-8'),
+            is_test=is_test,
             message_received_id=message_received.id,
         )
         with SessionLocal() as session:
-            session.add(message_sent)
+            session.add(message_replied)
             session.commit()
-            session.refresh(message_sent)
+            session.refresh(message_replied)
         return {
             "message_received_id": message_received.id,
-            "message_sent_id":  message_sent.id,
+            "message_replied_id":  message_replied.id,
             "response": response,
         }
 

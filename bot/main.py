@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException, Path
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -38,6 +40,7 @@ async def chat(request: ChatRequest):
     try:
         response = chat_bot.chat(
             request.messages,
+            is_test=request.is_test,
             system_message=request.system_message,
             temperature=request.temperature,
         )
@@ -48,26 +51,27 @@ async def chat(request: ChatRequest):
 
 
 @bot.get("/chat/bookmarks")
-async def bookmarks(request: Request) -> list[ChatBookmark]:
+async def bookmarks(is_test: Optional[bool] = True) -> list[ChatBookmark]:
     bookmark_list = []
     with SessionLocal() as session:
-        results = session.query(MessageBookmark).all()
+        results = session.query(MessageBookmark).where(MessageBookmark.is_test == is_test).all()
         for message_bookmark in results:
             bookmark_list.append(ChatBookmark(
-                id=message_bookmark.id,
+                bookmark_id=message_bookmark.id,
+                is_test=is_test,
                 message_received_id=message_bookmark.message_received_id,
-                message_sent_id=message_bookmark.message_sent_id,
-                message_sent_content=message_bookmark.message_summary.decode("utf-8"),
+                message_replied_id=message_bookmark.message_replied_id,
+                message_replied_content=message_bookmark.message_summary.decode("utf-8"),
             ))
     return bookmark_list
 
 
-#@bot.get("/chat/message/sent/{message_sent_id}")
-#async def message_sent(message_sent_id: str):
-#    try:
-#        pass
-#    except Exception as e:
-#        pass
+@bot.get("/chat/message/replied/{message_replied_id}")
+async def message_replied(message_replied_id: str):
+    try:
+        pass
+    except Exception as e:
+        pass
 
 
 @bot.post("/chat/bookmark")
@@ -77,14 +81,15 @@ async def chat(request: ChatBookmark):
         with SessionLocal() as session:
             result = session.query(MessageBookmark).where(
                 MessageBookmark.message_received_id == request.message_received_id,
-                MessageBookmark.message_sent_id == request.message_sent_id
+                MessageBookmark.message_replied_id == request.message_replied_id
             ).one_or_none()
             if result:
                 return ChatBookmark(
-                    id=result.id,
+                    bookmark_id=result.id,
+                    is_test=result.is_test,
                     message_received_id=result.message_received_id,
-                    message_sent_id=result.message_sent_id,
-                    message_sent_content=result.message_sent.decode("utf-8"),
+                    message_replied_id=result.message_replied_id,
+                    message_replied_content=result.message_replied.decode("utf-8"),
                 )
         with SessionLocal() as session:
             result = session.query(MessageReceived).where(
@@ -95,20 +100,21 @@ async def chat(request: ChatBookmark):
                                     detail=f"MessageReceived.id == {request.message_received_id} not found")
             message_summary = do_on_text(
                 "Summarize the following prompt and response in 70 characters or less",
-                '# Prompt:\n\n' + result.content.decode('utf-8') + '\n\n# Response:\n\n' + request.message_sent_content)
+                '# Prompt:\n\n' + result.content.decode('utf-8') + '\n\n# Response:\n\n' + request.message_replied_content)
             bookmark = MessageBookmark(
+                is_test=request.is_test,
                 message_received_id=request.message_received_id,
-                message_summary=message_summary.encode("utf-8"),
-                message_sent_id=request.message_sent_id)
+                message_replied_id=request.message_replied_id,
+                message_summary=message_summary.encode("utf-8"))
             session.add(bookmark)
             session.commit()
             session.refresh(bookmark)
             return ChatBookmark(
-                id=bookmark.id,
+                bookmark_id=bookmark.id,
+                is_test=bookmark.is_test,
                 message_received_id=bookmark.message_received_id,
-                message_sent_id=bookmark.message_sent_id,
-                message_sent_content=bookmark.message_summary
-            )
+                message_replied_content=bookmark.message_summary,
+                message_replied_id=bookmark.message_replied_id)
     except Exception as e:
         logger.error("%s: trace: %s", e, traceback.format_exc())
         raise e if isinstance(e, HTTPException) else HTTPException(status_code=500, detail=str(e))
@@ -118,8 +124,9 @@ async def chat(request: ChatBookmark):
 async def chat(request: LinkedMessageIds, ):
     try:
         thumbs_down = MessageThumbsDown(
+            is_test=request.is_test,
             message_received_id=request.message_received_id,
-            message_sent_id=request.message_sent_id)
+            message_replied_id=request.message_replied_id)
         with SessionLocal() as session:
             session.add(thumbs_down)
             session.commit()

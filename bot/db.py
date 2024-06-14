@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, DateTime, ForeignKey, Integer, LargeBinary, String, UniqueConstraint
+from sqlalchemy import create_engine, Boolean, Column, DateTime, ForeignKey, Integer, LargeBinary, String, UniqueConstraint
 from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
 import os
@@ -18,11 +18,12 @@ Base = declarative_base()
 class MessageBookmark(Base):
     __tablename__ = "message_bookmark"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    is_test = Column(Boolean, default=True)
     message_received_id = Column(Integer, ForeignKey("message_received.id"), nullable=False)
-    message_sent_id = Column(Integer, ForeignKey("message_sent.id"), nullable=False)
+    message_replied_id = Column(Integer, ForeignKey("message_replied.id"), nullable=False)
     message_summary = Column(LargeBinary)
     __table_args__ = (
-        UniqueConstraint('message_received_id', 'message_sent_id', name='unique_message_received_id_message_sent_id'),
+        UniqueConstraint('message_received_id', 'message_replied_id', name='unique_message_received_id_message_replied_id'),
     )
 
 
@@ -30,15 +31,17 @@ class MessageBookmark(Base):
 class MessageReceived(Base):
     __tablename__ = "message_received"
     id = Column(Integer, primary_key=True, index=True)
+    is_test = Column(Boolean, default=True)
     role = Column(String)
     content = Column(LargeBinary)
     chat_frame = Column(LargeBinary)
     timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
 
 
-class MessageSent(Base):
-    __tablename__ = "message_sent"
+class MessageReplied(Base):
+    __tablename__ = "message_replied"
     id = Column(Integer, primary_key=True, index=True)
+    is_test = Column(Boolean, default=True)
     content = Column(LargeBinary)
     message_received_id = Column(Integer, ForeignKey("message_received.id"))
     timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
@@ -47,8 +50,9 @@ class MessageSent(Base):
 class MessageThumbsDown(Base):
     __tablename__ = "message_thumbs_down"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    is_test = Column(Boolean, default=True)
     message_received_id = Column(Integer, ForeignKey("message_received.id"), nullable=False)
-    message_sent_id = Column(Integer, ForeignKey("message_sent.id"), nullable=False)
+    message_replied_id = Column(Integer, ForeignKey("message_replied.id"), nullable=False)
 
 
 # Create the tables in the database
