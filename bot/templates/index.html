@@ -53,7 +53,7 @@
         errorPopup.classList.add('hidden');
     });
     const showErrorPopup = (message) => {
-        errorPopup.classList.remove('hidden')
+        errorPopup.classList.remove('hidden');
         errorMessage.innerHTML = message;
 
         // Auto-hide after 5 seconds
@@ -70,20 +70,20 @@
         fetch('/chat/bookmarks')
             .then(response => throwOrJson(response))
             .then(data => {
-                popupMenuList.innerHTML = `<span style="color: gray;"><em>You haven't created any bookmarks yet. When you see reply you want to save, click on the <i class="fa fa-bookmark" style="color: black; margin-right: 0;"></i> below the message.</em></span>`
+                popupMenuList.innerHTML = `<span style="color: gray;"><em>You haven't created any bookmarks yet. When you see reply you want to save, click on the <i class="fa fa-bookmark" style="color: black; margin-right: 0;"></i> below the message.</em></span>`;
                 data.forEach(function (item, idx) {
                     if (idx === 0) {
-                        popupMenuList.innerHTML = ''
+                        popupMenuList.innerHTML = '';
                     }
                     const li = document.createElement('li');
-                    li.innerHTML = `<a href="/?message_sent_id=${item['message_sent_id']}&message_received_id=${item['message_received_id']}"><i class="fa fa-bookmark"></i>${item['message_sent_content']}</a>`
-                    popupMenuList.appendChild(li)
+                    li.innerHTML = `<a href="/?message_sent_id=${item['message_sent_id']}&message_received_id=${item['message_received_id']}"><i class="fa fa-bookmark"></i>${item['message_sent_content']}</a>`;
+                    popupMenuList.appendChild(li);
                 })
             })
             .catch(error => handleError(error, 'Failed to fetch bookmarks:'));
     }
     document.addEventListener('DOMContentLoaded', function () {
-        refreshBookmarks()
+        refreshBookmarks();
     });
     popupButton.addEventListener('mouseenter', () => {
         popupMenu.style.display = 'block';
@@ -129,9 +129,9 @@
         const message = document.getElementById('input').value;
         document.getElementById('input').value = '';
         document.getElementById('chatbox').innerHTML += `<div class="user-message-box"><i class="fa fa-user"></i><b>user:</b>${marked.parse(message)}</div>`;
-        messageList.push({ role: "user", content: message })
+        messageList.push({ role: "user", content: message });
         hljs.highlightAll();
-        scrollChatBoxToBottom()
+        scrollChatBoxToBottom();
 
         // Show loading indicator
         const loadingIndicator = document.createElement('div');
@@ -143,7 +143,7 @@
         fetch('/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: messageList })
+            body: JSON.stringify({ messages: messageList }),
         })
         .then(response => throwOrJson(response))
         .then(data => {
@@ -152,27 +152,39 @@
             const responseData = data['response'];
 
             // Stop showing loading indicator
-            loadingIndicator.remove()
+            loadingIndicator.remove();
 
             const responseModel = responseData['model'];
             const responseChoice = responseData['choices'][0];
-            const responseReason = responseChoice['finish_reason']
-            const responseRole = responseChoice['message']['role']
-            const responseContent = responseChoice['message']['content']
-            messageList.push({ role: responseRole, content: responseContent })
+            const responseReason = responseChoice['finish_reason'];
+            const responseRole = responseChoice['message']['role'];
+            const responseContent = responseChoice['message']['content'];
+            messageList.push({ role: responseRole, content: responseContent });
 
+            // Render response
             const assistantMessageBox = document.createElement('div');
             assistantMessageBox.className = 'assistant-message-box';
-            assistantMessageBox.innerHTML = `<i class="fa fa-virus"></i><b>${responseRole}(${responseModel}):</b>`
-            assistantMessageBox.innerHTML += `${marked.parse(responseContent)}</br>`
-            assistantMessageBox.innerHTML += `<i>${responseReason}</i> | `
+            assistantMessageBox.innerHTML = `<i class="fa fa-virus"></i><b>${responseRole}(${responseModel}):</b>`;
+            assistantMessageBox.innerHTML += `${marked.parse(responseContent)}</br>`;
+            assistantMessageBox.innerHTML += `<i>${responseReason}</i> | `;
 
+            // Render copy button
+            const copyLink = document.createElement('a');
+            copyLink.className = "message-sent-background-link";
+            copyLink.innerHTML = `<i class="fa fa-copy">`;
+            copyLink.addEventListener('click', (event) => {
+                event.preventDefault();
+                navigator.clipboard.writeText(responseContent)
+            })
+            assistantMessageBox.appendChild(copyLink);
+
+            // Render bookmark button
             const bookmarkLink = document.createElement('a');
-            bookmarkLink.className = "message-sent-background-link"
-            bookmarkLink.innerHTML = `<i class="fa fa-bookmark">`
+            bookmarkLink.className = "message-sent-background-link";
+            bookmarkLink.innerHTML = `<i class="fa fa-bookmark">`;
             bookmarkLink.addEventListener('click', (event) => {
-                event.preventDefault()
-                bookmarkLink.classList.add('clicked-message-sent-background-link')
+                event.preventDefault();
+                bookmarkLink.classList.add('clicked-message-sent-background-link');
                 fetch('/chat/bookmark', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -192,17 +204,14 @@
                     handleError(error, 'Bookmark creation failed:')
                 });
             });
-            assistantMessageBox.appendChild(bookmarkLink)
+            assistantMessageBox.appendChild(bookmarkLink);
 
-            const copyLink = document.createElement('a');
-            copyLink.innerHTML = `<i class="fa fa-copy">`
-            assistantMessageBox.appendChild(copyLink)
-
+            // Render thumbs-down button
             const thumbsDownLink = document.createElement('a');
-            thumbsDownLink.className = "message-sent-background-link"
-            thumbsDownLink.innerHTML = `<i class="fa fa-thumbs-down">`
+            thumbsDownLink.className = "message-sent-background-link";
+            thumbsDownLink.innerHTML = `<i class="fa fa-thumbs-down">`;
             thumbsDownLink.addEventListener('click', (event) => {
-                event.preventDefault()
+                event.preventDefault();
                 fetch('/chat/thumbs-down', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -218,11 +227,11 @@
                 })
                 .catch(error => handleError(error, 'Thumb down failed:'));
             });
-            assistantMessageBox.appendChild(thumbsDownLink)
+            assistantMessageBox.appendChild(thumbsDownLink);
 
-            document.getElementById('chatbox').appendChild(assistantMessageBox)
+            document.getElementById('chatbox').appendChild(assistantMessageBox);
             hljs.highlightAll();
-            scrollChatBoxToBottom()
+            scrollChatBoxToBottom();
         })
         .catch(error => handleError(error, 'Chat failed:'));
     }

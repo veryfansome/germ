@@ -94,7 +94,7 @@
         document.getElementById('input').value = '';
         document.getElementById('chatbox').innerHTML += `<div class="user-message-box"><i class="fa fa-magnifying-glass"></i><b>query:</b>${marked.parse('```sql\n' + sql + '\n```')}</div>`;
         hljs.highlightAll();
-        scrollChatBoxToBottom()
+        scrollChatBoxToBottom();
 
         // Show loading indicator
         const loadingIndicator = document.createElement('div');
@@ -107,14 +107,14 @@
         fetch('/postgres/' + db + '/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({sql: sql})
+            body: JSON.stringify({sql: sql}),
         })
         .then(response => throwOrJson(response))
         .then(text => {
             loadingIndicator.remove() // Stop showing loading indicator
             document.getElementById('chatbox').innerHTML += `<div class="assistant-message-box"><i class="fa fa-database"></i><b>result:</b>${marked.parse(text)}</div>`;
             hljs.highlightAll();
-            scrollChatBoxToBottom()
+            scrollChatBoxToBottom();
         })
         .catch(error => handleError(error, 'Query failed:'));
     }
