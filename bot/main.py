@@ -12,8 +12,7 @@ import subprocess
 from bot.db import (DATABASE_URL, SessionLocal,
                     MessageBookmark, MessageReceived, MessageThumbsDown)
 from bot.logging_config import logging, setup_logging, traceback
-from bot.v1 import ChatBookmark, ChatRequest, LinkedMessageIds, OpenAIChatBot
-
+from bot.v1 import do_on_text, ChatBookmark, ChatRequest, LinkedMessageIds, OpenAIChatBot
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -63,6 +62,14 @@ async def bookmarks(request: Request) -> list[ChatBookmark]:
     return bookmark_list
 
 
+#@bot.get("/chat/message/sent/{message_sent_id}")
+#async def message_sent(message_sent_id: str):
+#    try:
+#        pass
+#    except Exception as e:
+#        pass
+
+
 @bot.post("/chat/bookmark")
 async def chat(request: ChatBookmark):
     try:
@@ -86,7 +93,7 @@ async def chat(request: ChatBookmark):
             if not result:
                 raise HTTPException(status_code=404,
                                     detail=f"MessageReceived.id == {request.message_received_id} not found")
-            message_summary = chat_bot.do_on_text(
+            message_summary = do_on_text(
                 "Summarize the following prompt and response in 70 characters or less",
                 '# Prompt:\n\n' + result.content.decode('utf-8') + '\n\n# Response:\n\n' + request.message_sent_content)
             bookmark = MessageBookmark(

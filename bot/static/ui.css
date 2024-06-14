@@ -103,8 +103,6 @@ Ensure the opacity is low enough to not interfere with the text but still visibl
     position: relative;
     z-index: 2; /* Ensure content is above the pseudo-element */
 }
-#close-error-popup {
-}
 #error-popup {
     top: 20px;
     right: 20px;
@@ -121,6 +119,9 @@ Ensure the opacity is low enough to not interfere with the text but still visibl
     font-size: 16px;
     margin-left: 10px;
     cursor: pointer;
+}
+#error-popup-message-text {
+    color: darkred;
 }
 #input {
     box-sizing: border-box;
@@ -160,7 +161,11 @@ elements. Ensure the parent elements manage the layout appropriately.
     background-color: #d1ecf1; /* Light blue */
     border-radius: 10px;
     margin-bottom: 10px;
+    margin-right: auto;
     padding: 10px;
+    width: fit-content;
+    max-width: 90%;
+    min-width: 25%;
 }
 /**
 Button container to position buttons vertically
@@ -179,8 +184,8 @@ rem for better responsiveness.
 .button-container > button:last-child {
     margin-bottom: 0;
 }
-.clicked-message-sent-background-link {
-    color: blue; /* Set the same as `.message-sent-background-link:hover` */
+.clicked-chatbox-message-link {
+    color: blue; /* Set the same as `.chatbox-message-link:hover` */
 }
 .fa {
     margin-right: 8px;
@@ -202,10 +207,10 @@ rem for better responsiveness.
     width: 12px;
 }
 /* Default link style */
-.message-sent-background-link {
+.chatbox-message-link {
     text-decoration: none; /* Remove underline by default */
 }
-.message-sent-background-link:hover {
+.chatbox-message-link:hover {
     color: blue; /* You can set any color you like */
     cursor: pointer;
 }
@@ -239,7 +244,11 @@ rem for better responsiveness.
     background-color: #d4edda; /* Light green */
     border-radius: 10px;
     margin-bottom: 10px;
+    margin-left: auto;
     padding: 10px;
+    width: fit-content;
+    max-width: 90%;
+    min-width: 25%;
 }
 /* For loading indicator */
 @keyframes spin {

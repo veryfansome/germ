@@ -17,8 +17,8 @@
         </div>
     </nav>
     <div id="error-popup" class="hidden">
-        <span id="error-popup-message" style="color: darkred"></span>
         <button id="close-error-popup">X</button>
+        <span id="error-popup-message-text"></span>
     </div>
     <div id="chatbox"></div>
     <div id="input-container">
@@ -46,21 +46,9 @@
     // Initialize highlight.js
     hljs.highlightAll();
 
-    const errorPopup = document.getElementById('error-popup');
-    const errorMessage = document.getElementById('error-popup-message');
-    const closeErrorButton = document.getElementById('close-error-popup');
-    closeErrorButton.addEventListener('click', () => {
-        errorPopup.classList.add('hidden');
+    document.getElementById('close-error-popup').addEventListener('click', () => {
+        document.getElementById('error-popup').classList.add('hidden');
     });
-    const showErrorPopup = (message) => {
-        errorPopup.classList.remove('hidden');
-        errorMessage.innerHTML = message;
-
-        // Auto-hide after 5 seconds
-        setTimeout(() => {
-            errorPopup.classList.add('hidden');
-        }, 5000);
-    };
 
     // Popup menu
     const popupButton = document.getElementById('popup-button');
@@ -99,6 +87,9 @@
     });
 
     // Text input area
+    let submittedText = [];
+    let submittedTextSelectionCursor = -1;
+    let textSubmissionCandidate = '';
     const textarea = document.getElementById('input');
     textarea.addEventListener('input', function() {
         this.style.height = 'auto';
@@ -108,8 +99,30 @@
         } else {
             this.style.overflow = 'auto';
         }
+        // Update with each keystroke
+        textSubmissionCandidate = textarea.value;
     });
     textarea.addEventListener('keydown', function(event) {
+        if (event.key === 'ArrowUp' && textarea.selectionStart === 0) {
+            if (submittedText.length > 0 && (submittedText.length - 1) > submittedTextSelectionCursor) {
+                submittedTextSelectionCursor += 1;
+                let reversedSubmissions = submittedText.slice().reverse();
+                textarea.value = reversedSubmissions[submittedTextSelectionCursor];
+            }
+            event.preventDefault();
+        }
+        if (event.key === 'ArrowDown' && textarea.selectionStart === textarea.value.length) {
+            if (submittedText.length > 0 && submittedTextSelectionCursor > -1) {
+                submittedTextSelectionCursor -= 1;
+                if (submittedTextSelectionCursor === -1) {
+                    textarea.value = textSubmissionCandidate;
+                } else {
+                    let reversedSubmissions = submittedText.slice().reverse();
+                    textarea.value = reversedSubmissions[submittedTextSelectionCursor];
+                }
+            }
+            event.preventDefault();
+        }
         if (event.key === 'Enter' && (!event.shiftKey)) {
             event.preventDefault();
             sendMessage();
@@ -123,15 +136,38 @@
     window.addEventListener('load', updateSendButton);
     window.addEventListener('resize', updateSendButton);
 
-    let messageList = [];
+    let chatCompletionMessageList = [];
+    //const queryParams = getQueryParams();
 
     async function sendMessage() {
+        const chatbox = document.getElementById('chatbox');
+
         const message = document.getElementById('input').value;
+        submittedText.push(message)
         document.getElementById('input').value = '';
-        document.getElementById('chatbox').innerHTML += `<div class="user-message-box"><i class="fa fa-user"></i><b>user:</b>${marked.parse(message)}</div>`;
-        messageList.push({ role: "user", content: message });
+
+        // Setup user message box
+        const userMessageBox = document.createElement('div');
+        userMessageBox.className = 'user-message-box';
+        userMessageBox.innerHTML = `<i class="fa fa-user"></i><b>user:</b>`;
+        userMessageBox.innerHTML += `${marked.parse(message)}</br>`;
+
+        // Render user message copy button
+        const userMessageCopyLink = document.createElement('a');
+        userMessageCopyLink.title = "Copy"
+        userMessageCopyLink.className = "chatbox-message-link";
+        userMessageCopyLink.innerHTML = `<i class="fa fa-copy" style="">`;
+        userMessageCopyLink.addEventListener('click', (event) => {
+            event.preventDefault();
+            navigator.clipboard.writeText(message)
+        })
+        userMessageBox.appendChild(userMessageCopyLink);
+
+        // Render user message box
+        chatbox.appendChild(userMessageBox)
         hljs.highlightAll();
         scrollChatBoxToBottom();
+        chatCompletionMessageList.push({ role: "user", content: message });
 
         // Show loading indicator
         const loadingIndicator = document.createElement('div');
@@ -143,34 +179,36 @@
         fetch('/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: messageList }),
+            body: JSON.stringify({ messages: chatCompletionMessageList }),
         })
-        .then(response => throwOrJson(response))
+        .then(response => {
+            // Stop showing loading indicator
+            loadingIndicator.remove();
+            return throwOrJson(response);
+        })
         .then(data => {
+            console.log(data)
             const messageReceivedId = data['message_received_id'];
             const messageSentId = data['message_sent_id'];
             const responseData = data['response'];
-
-            // Stop showing loading indicator
-            loadingIndicator.remove();
 
             const responseModel = responseData['model'];
             const responseChoice = responseData['choices'][0];
             const responseReason = responseChoice['finish_reason'];
             const responseRole = responseChoice['message']['role'];
             const responseContent = responseChoice['message']['content'];
-            messageList.push({ role: responseRole, content: responseContent });
+            chatCompletionMessageList.push({ role: responseRole, content: responseContent });
 
-            // Render response
+            // Setup assistant message box
             const assistantMessageBox = document.createElement('div');
             assistantMessageBox.className = 'assistant-message-box';
             assistantMessageBox.innerHTML = `<i class="fa fa-virus"></i><b>${responseRole}(${responseModel}):</b>`;
             assistantMessageBox.innerHTML += `${marked.parse(responseContent)}</br>`;
             assistantMessageBox.innerHTML += `<i>${responseReason}</i> | `;
 
-            // Render copy button
+            // Render sent message copy button
             const copyLink = document.createElement('a');
-            copyLink.className = "message-sent-background-link";
+            copyLink.className = "chatbox-message-link";
             copyLink.innerHTML = `<i class="fa fa-copy">`;
             copyLink.addEventListener('click', (event) => {
                 event.preventDefault();
@@ -180,11 +218,11 @@
 
             // Render bookmark button
             const bookmarkLink = document.createElement('a');
-            bookmarkLink.className = "message-sent-background-link";
+            bookmarkLink.className = "chatbox-message-link";
             bookmarkLink.innerHTML = `<i class="fa fa-bookmark">`;
             bookmarkLink.addEventListener('click', (event) => {
                 event.preventDefault();
-                bookmarkLink.classList.add('clicked-message-sent-background-link');
+                bookmarkLink.classList.add('clicked-chatbox-message-link');
                 fetch('/chat/bookmark', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -200,7 +238,7 @@
                     refreshBookmarks()
                 })
                 .catch(error => {
-                    bookmarkLink.classList.remove('clicked-message-sent-background-link')
+                    bookmarkLink.classList.remove('clicked-chatbox-message-link')
                     handleError(error, 'Bookmark creation failed:')
                 });
             });
@@ -208,7 +246,7 @@
 
             // Render thumbs-down button
             const thumbsDownLink = document.createElement('a');
-            thumbsDownLink.className = "message-sent-background-link";
+            thumbsDownLink.className = "chatbox-message-link";
             thumbsDownLink.innerHTML = `<i class="fa fa-thumbs-down">`;
             thumbsDownLink.addEventListener('click', (event) => {
                 event.preventDefault();
@@ -223,13 +261,14 @@
                 .then(response => throwOrJson(response))
                 .then(data => {
                     console.log('Thumbed down:', data);
-                    thumbsDownLink.classList.add('clicked-message-sent-background-link')
+                    thumbsDownLink.classList.add('clicked-chatbox-message-link')
                 })
                 .catch(error => handleError(error, 'Thumb down failed:'));
             });
             assistantMessageBox.appendChild(thumbsDownLink);
 
-            document.getElementById('chatbox').appendChild(assistantMessageBox);
+            // Render response
+            chatbox.appendChild(assistantMessageBox);
             hljs.highlightAll();
             scrollChatBoxToBottom();
         })

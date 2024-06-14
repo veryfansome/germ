@@ -29,7 +29,7 @@ ENABLED_TOOLS = {
                 "required": ["prompt"]
             },
         },
-        "callback": lambda url, arguments: f"[![{arguments["prompt"]}]({url})]({url})"
+        "callback": lambda url, arguments: f"[![{arguments['prompt']}]({url})]({url})"
     }
 }
 
@@ -48,7 +48,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
-    system_message: Optional[str] = "You are a helpful and versatile assistant."
+    system_message: Optional[str] = ""
     temperature: Optional[float] = 0.0
 
 

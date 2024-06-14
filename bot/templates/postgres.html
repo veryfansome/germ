@@ -17,8 +17,8 @@
         </div>
     </nav>
     <div id="error-popup" class="hidden">
-        <span id="error-popup-message" style="color: darkred"></span>
         <button id="close-error-popup">X</button>
+        <span id="error-popup-message-text"></span>
     </div>
     <div id="chatbox"></div>
     <div id="input-container">
@@ -47,6 +47,10 @@
     <script>
     // Initialize highlight.js
     hljs.highlightAll();
+
+    document.getElementById('close-error-popup').addEventListener('click', () => {
+        document.getElementById('error-popup').classList.add('hidden');
+    });
 
     // Popup menu
     const popupButton = document.getElementById('popup-button');
