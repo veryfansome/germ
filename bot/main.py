@@ -16,10 +16,8 @@ from bot.db import (DATABASE_URL, SessionLocal,
 from bot.logging_config import logging, setup_logging, traceback
 from bot.v1 import do_on_text, ChatBookmark, ChatRequest, LinkedMessageIds, OpenAIChatBot
 
-
 setup_logging()
 logger = logging.getLogger(__name__)
-
 
 bot = FastAPI()
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
@@ -32,28 +30,8 @@ class SqlRequest(BaseModel):
     sql: str
 
 
-@bot.get("/", include_in_schema=False)
-async def get(request: Request):
-    return templates.TemplateResponse(request, "index.html")
-
-
-@bot.post("/chat")
-async def chat(request: ChatRequest):
-    try:
-        response = chat_bot.chat(
-            request.messages,
-            is_test=request.is_test,
-            system_message=request.system_message,
-            temperature=request.temperature,
-        )
-        return response
-    except Exception as e:
-        logger.error("%s: trace: %s", e, traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @bot.get("/chat/bookmarks")
-async def bookmarks(is_test: Optional[bool] = True) -> list[ChatBookmark]:
+async def get_chat_bookmarks(is_test: Optional[bool] = True) -> list[ChatBookmark]:
     bookmark_list = []
     with SessionLocal() as session:
         results = session.query(MessageBookmark).where(MessageBookmark.is_test == is_test).all()
@@ -69,15 +47,83 @@ async def bookmarks(is_test: Optional[bool] = True) -> list[ChatBookmark]:
 
 
 @bot.get("/chat/message/replied/{message_replied_id}")
-async def message_replied(message_replied_id: str):
+async def get_message_replied(message_replied_id: str):
     try:
         pass
     except Exception as e:
         pass
 
 
+@bot.get("/env", include_in_schema=False)
+async def get_env():
+    return {"environ": os.environ}
+
+
+@bot.get("/favicon.ico", include_in_schema=False)
+async def get_favicon():
+    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'favicon.ico')
+    return FileResponse(favicon_path)
+
+
+@bot.get("/", include_in_schema=False)
+async def get_landing(request: Request):
+    return templates.TemplateResponse(request, "index.html")
+
+
+@bot.get("/logo.webp", include_in_schema=False)
+async def get_logo_webp():
+    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'logo.webp')
+    return FileResponse(favicon_path)
+
+
+@bot.get("/healthz")
+async def get_healthz():
+    # Is PostgreSQL usable?
+    session = SessionLocal()
+    session.close()
+    # Is OpenAI usable?
+    openai_client = OpenAI()
+    openai_client.close()
+    return {
+        "status": "OK",
+        "db_url": DATABASE_URL
+    }
+
+
+@bot.get("/postgres.html", include_in_schema=False)
+async def get_postgres_landing(request: Request):
+    return templates.TemplateResponse(request, "postgres.html")
+
+
+@bot.get("/ui.css", include_in_schema=False)
+async def get_ui_css():
+    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.css')
+    return FileResponse(favicon_path)
+
+
+@bot.get("/ui.js", include_in_schema=False)
+async def get_ui_js():
+    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.js')
+    return FileResponse(favicon_path)
+
+
+@bot.post("/chat")
+async def post_chat(request: ChatRequest):
+    try:
+        response = chat_bot.chat(
+            request.messages,
+            is_test=request.is_test,
+            system_message=request.system_message,
+            temperature=request.temperature,
+        )
+        return response
+    except Exception as e:
+        logger.error("%s: trace: %s", e, traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @bot.post("/chat/bookmark")
-async def chat(request: ChatBookmark):
+async def post_chat_bookmark(request: ChatBookmark):
     try:
         # If exists, return existing
         with SessionLocal() as session:
@@ -102,7 +148,8 @@ async def chat(request: ChatBookmark):
                                     detail=f"MessageReceived.id == {request.message_received_id} not found")
             message_summary = do_on_text(
                 "Summarize the following prompt and response in 70 characters or less",
-                '# Prompt:\n\n' + result.content.decode('utf-8') + '\n\n# Response:\n\n' + request.message_replied_content)
+                '# Prompt:\n\n' + result.content.decode(
+                    'utf-8') + '\n\n# Response:\n\n' + request.message_replied_content)
             bookmark = MessageBookmark(
                 is_test=request.is_test,
                 message_received_id=request.message_received_id,
@@ -123,7 +170,7 @@ async def chat(request: ChatBookmark):
 
 
 @bot.post("/chat/thumbs-down")
-async def chat(request: LinkedMessageIds, ):
+async def post_chat_thumbs_down(request: LinkedMessageIds, ):
     try:
         thumbs_down = MessageThumbsDown(
             is_test=request.is_test,
@@ -139,45 +186,9 @@ async def chat(request: LinkedMessageIds, ):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@bot.get("/env", include_in_schema=False)
-async def root():
-    return {"environ": os.environ}
-
-
-@bot.get("/favicon.ico", include_in_schema=False)
-def favicon():
-    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'favicon.ico')
-    return FileResponse(favicon_path)
-
-
-@bot.get("/healthz")
-async def healthz():
-    # Is PostgreSQL usable?
-    session = SessionLocal()
-    session.close()
-    # Is OpenAI usable?
-    openai_client = OpenAI()
-    openai_client.close()
-    return {
-        "status": "OK",
-        "db_url": DATABASE_URL
-    }
-
-
-@bot.get("/logo.webp", include_in_schema=False)
-def favicon():
-    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'logo.webp')
-    return FileResponse(favicon_path)
-
-
-@bot.get("/postgres.html", include_in_schema=False)
-async def get(request: Request):
-    return templates.TemplateResponse(request, "postgres.html")
-
-
 @bot.post("/postgres/{db}/query")
-async def postgres_query(request: SqlRequest,
-                         db: str = Path(..., title="Postgres DB")):
+async def post_postgres_query(request: SqlRequest,
+                              db: str = Path(..., title="Postgres DB")):
     enabled_dbs = {
         "germ": DATABASE_URL
     }
@@ -207,15 +218,3 @@ async def postgres_query(request: SqlRequest,
         os.remove(query_file)
         logger.error("%s: trace: %s", e, traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@bot.get("/ui.css", include_in_schema=False)
-def favicon():
-    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.css')
-    return FileResponse(favicon_path)
-
-
-@bot.get("/ui.js", include_in_schema=False)
-def favicon():
-    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.js')
-    return FileResponse(favicon_path)
