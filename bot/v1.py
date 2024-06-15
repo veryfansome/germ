@@ -35,7 +35,7 @@ ENABLED_TOOLS = {
 
 
 class ChatBookmark(BaseModel):
-    bookmark_id: Optional[int] = None
+    id: Optional[int] = None
     is_test: Optional[bool] = True
     message_received_id: int
     message_replied_id: int

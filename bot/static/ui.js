@@ -9,6 +9,13 @@ function getQueryParams() {
     return params;
 }
 
+function getLoadingIndicator() {
+    const loadingIndicator = document.createElement('div');
+    loadingIndicator.className = 'loading-indicator';
+    loadingIndicator.innerHTML = '<div class="loading-spinner"></div>';
+    return loadingIndicator;
+}
+
 function handleError(error, message) {
     console.error(message, error);
     showErrorPopup(`${message} ${error.message}`);

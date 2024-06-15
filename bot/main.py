@@ -3,16 +3,16 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Path
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from openai import OpenAI
 from pydantic import BaseModel
 from starlette.requests import Request
 import hashlib
+import json
 import os
 import subprocess
 
 from bot.db import (DATABASE_URL, SessionLocal,
-                    MessageBookmark, MessageReceived, MessageThumbsDown)
+                    MessageBookmark, MessageReceived, MessageReplied, MessageThumbsDown)
 from bot.logging_config import logging, setup_logging, traceback
 from bot.v1 import do_on_text, ChatBookmark, ChatRequest, LinkedMessageIds, OpenAIChatBot
 
@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 bot = FastAPI()
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
-templates = Jinja2Templates(directory="bot/templates")
 
 chat_bot = OpenAIChatBot()
 
@@ -37,7 +36,7 @@ async def get_chat_bookmarks(is_test: Optional[bool] = True) -> list[ChatBookmar
         results = session.query(MessageBookmark).where(MessageBookmark.is_test == is_test).all()
         for message_bookmark in results:
             bookmark_list.append(ChatBookmark(
-                bookmark_id=message_bookmark.id,
+                id=message_bookmark.id,
                 is_test=is_test,
                 message_received_id=message_bookmark.message_received_id,
                 message_replied_id=message_bookmark.message_replied_id,
@@ -46,12 +45,47 @@ async def get_chat_bookmarks(is_test: Optional[bool] = True) -> list[ChatBookmar
     return bookmark_list
 
 
-@bot.get("/chat/message/replied/{message_replied_id}")
-async def get_message_replied(message_replied_id: str):
+@bot.get("/chat/bookmark/{bookmark_id}")
+async def get_chat_bookmark(bookmark_id: int, is_test: Optional[bool] = True):
     try:
-        pass
+        with SessionLocal() as session:
+            bookmark_record = session.query(MessageBookmark).where(
+                MessageBookmark.id == bookmark_id,
+                MessageBookmark.is_test == is_test
+            ).one_or_none()
+            if not bookmark_record:
+                raise HTTPException(status_code=404,
+                                    detail=f"MessageBookmark.id == {bookmark_id} not found")
+            message_received_record = session.query(MessageReceived).where(
+                MessageReceived.id == bookmark_record.message_received_id,
+                MessageReceived.is_test == is_test,
+            ).one_or_none()
+            if not message_received_record:
+                raise HTTPException(status_code=404,
+                                    detail=f"MessageReceived.id == {bookmark_record.message_received_id} not found")
+            message_replied_record = session.query(MessageReplied).where(
+                MessageReplied.id == bookmark_record.message_replied_id,
+                MessageReplied.is_test == is_test
+            ).one_or_none()
+            if not message_replied_record:
+                raise HTTPException(status_code=404,
+                                    detail=f"MessageReplied.id == {bookmark_record.message_replied_id} not found")
+            return {
+                "id": bookmark_record.id,
+                "message_summary": bookmark_record.message_summary.decode("utf-8"),
+                "message_received": {
+                    "id": message_received_record.id,
+                    "chat_frame": message_received_record.chat_frame.decode("utf-8"),
+                    "content": message_received_record.content.decode("utf-8"),
+                },
+                "message_replied": {
+                    "id": message_replied_record.id,
+                    "content": message_replied_record.content.decode("utf-8"),
+                },
+            }
     except Exception as e:
-        pass
+        logger.error("%s: trace: %s", e, traceback.format_exc())
+        raise e if isinstance(e, HTTPException) else HTTPException(status_code=500, detail=str(e))
 
 
 @bot.get("/env", include_in_schema=False)
@@ -61,19 +95,20 @@ async def get_env():
 
 @bot.get("/favicon.ico", include_in_schema=False)
 async def get_favicon():
-    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'favicon.ico')
-    return FileResponse(favicon_path)
+    file_path = os.path.join(os.path.dirname(__file__), 'static', 'favicon.ico')
+    return FileResponse(file_path)
 
 
 @bot.get("/", include_in_schema=False)
-async def get_landing(request: Request):
-    return templates.TemplateResponse(request, "index.html")
+async def get_landing():
+    file_path = os.path.join(os.path.dirname(__file__), 'static', 'index.html')
+    return FileResponse(file_path)
 
 
 @bot.get("/logo.webp", include_in_schema=False)
 async def get_logo_webp():
-    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'logo.webp')
-    return FileResponse(favicon_path)
+    file_path = os.path.join(os.path.dirname(__file__), 'static', 'logo.webp')
+    return FileResponse(file_path)
 
 
 @bot.get("/healthz")
@@ -92,29 +127,30 @@ async def get_healthz():
 
 @bot.get("/postgres.html", include_in_schema=False)
 async def get_postgres_landing(request: Request):
-    return templates.TemplateResponse(request, "postgres.html")
+    file_path = os.path.join(os.path.dirname(__file__), 'static', 'postgres.html')
+    return FileResponse(file_path)
 
 
 @bot.get("/ui.css", include_in_schema=False)
 async def get_ui_css():
-    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.css')
-    return FileResponse(favicon_path)
+    file_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.css')
+    return FileResponse(file_path)
 
 
 @bot.get("/ui.js", include_in_schema=False)
 async def get_ui_js():
-    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.js')
-    return FileResponse(favicon_path)
+    file_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.js')
+    return FileResponse(file_path)
 
 
 @bot.post("/chat")
-async def post_chat(request: ChatRequest):
+async def post_chat(payload: ChatRequest):
     try:
         response = chat_bot.chat(
-            request.messages,
-            is_test=request.is_test,
-            system_message=request.system_message,
-            temperature=request.temperature,
+            payload.messages,
+            is_test=payload.is_test,
+            system_message=payload.system_message,
+            temperature=payload.temperature,
         )
         return response
     except Exception as e:
@@ -123,71 +159,71 @@ async def post_chat(request: ChatRequest):
 
 
 @bot.post("/chat/bookmark")
-async def post_chat_bookmark(request: ChatBookmark):
+async def post_chat_bookmark(payload: ChatBookmark):
     try:
         # If exists, return existing
         with SessionLocal() as session:
-            result = session.query(MessageBookmark).where(
-                MessageBookmark.message_received_id == request.message_received_id,
-                MessageBookmark.message_replied_id == request.message_replied_id
+            existing_bookmark_record = session.query(MessageBookmark).where(
+                MessageBookmark.message_received_id == payload.message_received_id,
+                MessageBookmark.message_replied_id == payload.message_replied_id
             ).one_or_none()
-            if result:
+            if existing_bookmark_record:
                 return ChatBookmark(
-                    bookmark_id=result.id,
-                    is_test=result.is_test,
-                    message_received_id=result.message_received_id,
-                    message_replied_id=result.message_replied_id,
-                    message_replied_content=result.message_replied.decode("utf-8"),
+                    id=existing_bookmark_record.id,
+                    is_test=existing_bookmark_record.is_test,
+                    message_received_id=existing_bookmark_record.message_received_id,
+                    message_replied_id=existing_bookmark_record.message_replied_id,
+                    message_replied_content=existing_bookmark_record.message_replied.decode("utf-8"),
                 )
-        with SessionLocal() as session:
-            result = session.query(MessageReceived).where(
-                MessageReceived.id == request.message_received_id
+            message_received_record = session.query(MessageReceived).where(
+                MessageReceived.id == payload.message_received_id
             ).one_or_none()
-            if not result:
+            if not message_received_record:
                 raise HTTPException(status_code=404,
-                                    detail=f"MessageReceived.id == {request.message_received_id} not found")
+                                    detail=f"MessageReceived.id == {payload.message_received_id} not found")
+            # 70 characters is a "guideline" because we don't enforce it with a `max_tokens=`.
             message_summary = do_on_text(
                 "Summarize the following prompt and response in 70 characters or less",
-                '# Prompt:\n\n' + result.content.decode(
-                    'utf-8') + '\n\n# Response:\n\n' + request.message_replied_content)
-            bookmark = MessageBookmark(
-                is_test=request.is_test,
-                message_received_id=request.message_received_id,
-                message_replied_id=request.message_replied_id,
+                '# Prompt:\n\n' + message_received_record.content.decode(
+                    'utf-8') + '\n\n# Response:\n\n' + payload.message_replied_content)
+            new_bookmark_record = MessageBookmark(
+                is_test=payload.is_test,
+                message_received_id=payload.message_received_id,
+                message_replied_id=payload.message_replied_id,
                 message_summary=message_summary.encode("utf-8"))
-            session.add(bookmark)
+            session.add(new_bookmark_record)
             session.commit()
-            session.refresh(bookmark)
+            session.refresh(new_bookmark_record)
             return ChatBookmark(
-                bookmark_id=bookmark.id,
-                is_test=bookmark.is_test,
-                message_received_id=bookmark.message_received_id,
-                message_replied_content=bookmark.message_summary,
-                message_replied_id=bookmark.message_replied_id)
+                id=new_bookmark_record.id,
+                is_test=new_bookmark_record.is_test,
+                message_received_id=new_bookmark_record.message_received_id,
+                message_replied_content=new_bookmark_record.message_summary,
+                message_replied_id=new_bookmark_record.message_replied_id)
     except Exception as e:
         logger.error("%s: trace: %s", e, traceback.format_exc())
         raise e if isinstance(e, HTTPException) else HTTPException(status_code=500, detail=str(e))
 
 
 @bot.post("/chat/thumbs-down")
-async def post_chat_thumbs_down(request: LinkedMessageIds, ):
+async def post_chat_thumbs_down(payload: LinkedMessageIds, ):
     try:
         thumbs_down = MessageThumbsDown(
-            is_test=request.is_test,
-            message_received_id=request.message_received_id,
-            message_replied_id=request.message_replied_id)
+            is_test=payload.is_test,
+            message_received_id=payload.message_received_id,
+            message_replied_id=payload.message_replied_id)
         with SessionLocal() as session:
             session.add(thumbs_down)
             session.commit()
             session.refresh(thumbs_down)
-        return {"thumbs_down_id": thumbs_down.id}
+        return {"id": thumbs_down.id}
     except Exception as e:
         logger.error("%s: trace: %s", e, traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @bot.post("/postgres/{db}/query")
-async def post_postgres_query(request: SqlRequest,
+async def post_postgres_query(payload: SqlRequest,
                               db: str = Path(..., title="Postgres DB")):
     enabled_dbs = {
         "germ": DATABASE_URL
@@ -196,10 +232,10 @@ async def post_postgres_query(request: SqlRequest,
         raise HTTPException(status_code=400, detail="Not supported")
 
     md5 = hashlib.md5()
-    md5.update(request.sql.encode())
+    md5.update(payload.sql.encode())
     query_file = f"/tmp/{db}_query_{md5.hexdigest()}.sql"
     with open(query_file, "w") as f:
-        f.write(request.sql)
+        f.write(payload.sql)
     try:
         cmd = subprocess.run(f"psql '{enabled_dbs[db]}' -f {query_file}",
                              shell=True, capture_output=True, text=True, check=True)

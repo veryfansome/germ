@@ -32,14 +32,14 @@ def test_basic_interactions():
     assert "response" in chat_data
 
     # Bookmark it
-    bookmark_response = client.post("/chat/bookmark", json={
+    bookmark_post_response = client.post("/chat/bookmark", json={
         'message_received_id': chat_data["message_received_id"],
         'message_replied_id': chat_data["message_replied_id"],
         'message_replied_content': chat_data["response"]["choices"][0]['message']['content'],
     })
-    assert bookmark_response.status_code == 200
-    bookmark_data = bookmark_response.json()
-    assert "bookmark_id" in bookmark_data
+    assert bookmark_post_response.status_code == 200
+    bookmark_post_data = bookmark_post_response.json()
+    assert "id" in bookmark_post_data
 
     # Thumbs down
     thumbs_down_response = client.post("/chat/thumbs-down", json={
@@ -48,10 +48,20 @@ def test_basic_interactions():
     })
     assert thumbs_down_response.status_code == 200
     thumbs_down_data = thumbs_down_response.json()
-    assert "thumbs_down_id" in thumbs_down_data
+    assert "id" in thumbs_down_data
 
-    # TODO: test fetching messages
-    pass
+    # Retrieve bookmarked messages
+    bookmark_get_response = client.get(f"/chat/bookmark/{bookmark_post_data['id']}")
+    assert bookmark_get_response.status_code == 200
+    bookmark_get_data = bookmark_get_response.json()
+    assert "id" in bookmark_get_data
+    assert "message_summary" in bookmark_get_data
+    assert "message_received" in bookmark_get_data
+    assert "id" in bookmark_get_data["message_received"]
+    assert bookmark_get_data["message_received"]["id"] == chat_data["message_received_id"]
+    assert "message_replied" in bookmark_get_data
+    assert "id" in bookmark_get_data["message_replied"]
+    assert bookmark_get_data["message_replied"]["id"] == chat_data["message_replied_id"]
 
 
 def test_postgres_pageload():

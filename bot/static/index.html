@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chat</title>
+    <script src="/ui.js"></script>
     <link rel="stylesheet" href="/ui.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style></style>
@@ -41,10 +42,10 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
-    <script src="/ui.js"></script>
     <script>
     // Initialize highlight.js
     hljs.highlightAll();
+    const chatbox = document.getElementById('chatbox');
 
     document.getElementById('close-error-popup').addEventListener('click', () => {
         document.getElementById('error-popup').classList.add('hidden');
@@ -64,7 +65,7 @@
                         popupMenuList.innerHTML = '';
                     }
                     const li = document.createElement('li');
-                    li.innerHTML = `<a href="/?message_replied_id=${item['message_replied_id']}&message_received_id=${item['message_received_id']}"><i class="fa fa-bookmark"></i>${item['message_replied_content']}</a>`;
+                    li.innerHTML = `<a href="/?bookmark_id=${item['bookmark_id']}"><i class="fa fa-bookmark"></i>${item['message_replied_content']}</a>`;
                     popupMenuList.appendChild(li);
                 })
             })
@@ -137,11 +138,35 @@
     window.addEventListener('resize', updateSendButton);
 
     let chatCompletionMessageList = [];
-    //const queryParams = getQueryParams();
+    const queryParams = getQueryParams();
+    if ('bookmark_id' in queryParams) {
+        // Reset the chatbox
+        chatbox.innerHTML = '';
+
+        // Show loading indicator
+        const loadingIndicator = getLoadingIndicator();
+        chatbox.appendChild(loadingIndicator);
+        scrollChatBoxToBottom();
+
+        fetch('/chat/bookmark/${queryParams["bookmark_id"]}')
+            .then(response => {
+                // Stop showing loading indicator
+                loadingIndicator.remove();
+                return throwOrJson(response);
+            })
+            .then(data => {
+                //chatbox.innerHTML += `<div class="assistant-message-box"><i class="fa fa-database"></i><b>result:</b>${marked.parse(text)}</div>`;
+                hljs.highlightAll();
+                scrollChatBoxToBottom();
+            })
+            .catch(error => {
+                // Stop showing loading indicator
+                loadingIndicator.remove();
+                handleError(error, 'Query failed:');
+            });
+    }
 
     async function sendMessage() {
-        const chatbox = document.getElementById('chatbox');
-
         const message = document.getElementById('input').value;
         submittedText.push(message)
         document.getElementById('input').value = '';
@@ -170,10 +195,8 @@
         chatCompletionMessageList.push({ role: "user", content: message });
 
         // Show loading indicator
-        const loadingIndicator = document.createElement('div');
-        loadingIndicator.className = 'loading-indicator';
-        loadingIndicator.innerHTML = '<div class="loading-spinner"></div>';
-        document.getElementById('chatbox').appendChild(loadingIndicator);
+        const loadingIndicator = getLoadingIndicator();
+        chatbox.appendChild(loadingIndicator);
         scrollChatBoxToBottom();
 
         fetch('/chat', {
@@ -277,7 +300,11 @@
             hljs.highlightAll();
             scrollChatBoxToBottom();
         })
-        .catch(error => handleError(error, 'Chat failed:'));
+        .catch(error => {
+            // Stop showing loading indicator
+            loadingIndicator.remove();
+            handleError(error, 'Chat failed:');
+        });
     }
     </script>
 </body>
