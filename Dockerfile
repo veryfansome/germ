@@ -11,3 +11,6 @@ COPY bot/requirements.txt /src/bot
 # Install the Python dependencies
 RUN python -m venv germ && . germ/bin/activate
 RUN pip install --no-cache-dir -r /src/bot/requirements.txt
+RUN opentelemetry-bootstrap -a install
+
+ENV OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED=true

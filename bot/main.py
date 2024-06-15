@@ -5,6 +5,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from openai import OpenAI
+from opentelemetry import trace
+from opentelemetry.exporter.jaeger.proto.grpc import JaegerExporter
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
 from pydantic import BaseModel
 from starlette.requests import Request
 import hashlib
@@ -18,6 +25,23 @@ from bot.v1 import do_on_text, ChatBookmark, ChatRequest, LinkedMessageIds, Open
 
 setup_logging()
 logger = logging.getLogger(__name__)
+
+# Set up the tracer provider
+trace.set_tracer_provider(
+    TracerProvider(
+        resource=Resource.create({"service.name": "germ-bot"})
+    )
+)
+# Create a Jaeger exporter
+jaeger_exporter = JaegerExporter(
+    agent_host_name=os.getenv("JAEGER_EXPORTER_", "germ-jaeger"),
+    agent_port=6831,
+)
+#tracer = trace.get_tracer(__name__)
+
+#otlp_exporter = OTLPMetricExporter(
+#    endpoint=os.environ.get('OTLP_METRICS_ENDPOINT'),
+#    insecure=True)
 
 bot = FastAPI()
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
@@ -36,7 +60,7 @@ async def get(request: Request):
 
 
 @bot.post("/chat")
-async def chat(request: ChatRequest):
+async def post_chat(request: ChatRequest):
     try:
         response = chat_bot.chat(
             request.messages,
@@ -51,7 +75,7 @@ async def chat(request: ChatRequest):
 
 
 @bot.get("/chat/bookmarks")
-async def bookmarks(is_test: Optional[bool] = True) -> list[ChatBookmark]:
+async def get_chat_bookmarks(is_test: Optional[bool] = True) -> list[ChatBookmark]:
     bookmark_list = []
     with SessionLocal() as session:
         results = session.query(MessageBookmark).where(MessageBookmark.is_test == is_test).all()
@@ -66,8 +90,8 @@ async def bookmarks(is_test: Optional[bool] = True) -> list[ChatBookmark]:
     return bookmark_list
 
 
-@bot.get("/chat/message/replied/{message_replied_id}")
-async def message_replied(message_replied_id: str):
+@bot.get("/chat/bookmark")
+async def get_chat_bookmark(message_replied_id: str):
     try:
         pass
     except Exception as e:
@@ -75,7 +99,7 @@ async def message_replied(message_replied_id: str):
 
 
 @bot.post("/chat/bookmark")
-async def chat(request: ChatBookmark):
+async def post_chat_bookmark(request: ChatBookmark):
     try:
         # If exists, return existing
         with SessionLocal() as session:
@@ -121,7 +145,7 @@ async def chat(request: ChatBookmark):
 
 
 @bot.post("/chat/thumbs-down")
-async def chat(request: LinkedMessageIds, ):
+async def post_chat_thumbs_down(request: LinkedMessageIds, ):
     try:
         thumbs_down = MessageThumbsDown(
             is_test=request.is_test,
@@ -138,18 +162,18 @@ async def chat(request: LinkedMessageIds, ):
 
 
 @bot.get("/env", include_in_schema=False)
-async def root():
+async def get_env():
     return {"environ": os.environ}
 
 
 @bot.get("/favicon.ico", include_in_schema=False)
-def favicon():
+async def get_favicon():
     favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'favicon.ico')
     return FileResponse(favicon_path)
 
 
 @bot.get("/healthz")
-async def healthz():
+async def get_healthz():
     # Is PostgreSQL usable?
     session = SessionLocal()
     session.close()
@@ -163,18 +187,18 @@ async def healthz():
 
 
 @bot.get("/logo.webp", include_in_schema=False)
-def favicon():
+async def get_logo_webp():
     favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'logo.webp')
     return FileResponse(favicon_path)
 
 
 @bot.get("/postgres.html", include_in_schema=False)
-async def get(request: Request):
+async def get_postgres_html(request: Request):
     return templates.TemplateResponse(request, "postgres.html")
 
 
 @bot.post("/postgres/{db}/query")
-async def postgres_query(request: SqlRequest,
+async def post_postgres_query(request: SqlRequest,
                          db: str = Path(..., title="Postgres DB")):
     enabled_dbs = {
         "germ": DATABASE_URL
@@ -208,12 +232,12 @@ async def postgres_query(request: SqlRequest,
 
 
 @bot.get("/ui.css", include_in_schema=False)
-def favicon():
+async def get_ui_css():
     favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.css')
     return FileResponse(favicon_path)
 
 
 @bot.get("/ui.js", include_in_schema=False)
-def favicon():
+async def get_ui_js():
     favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.js')
     return FileResponse(favicon_path)

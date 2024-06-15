@@ -39,7 +39,7 @@ class ChatBookmark(BaseModel):
     is_test: Optional[bool] = True
     message_received_id: int
     message_replied_id: int
-    message_replied_content: str
+    message_replied_content: Optional[str] = None
 
 
 class ChatMessage(BaseModel):

@@ -137,7 +137,9 @@
     window.addEventListener('resize', updateSendButton);
 
     let chatCompletionMessageList = [];
-    //const queryParams = getQueryParams();
+    const queryParams = getQueryParams();
+    if ('message_replied_id' in queryParams && 'message_received_id' in queryParams) {
+    }
 
     async function sendMessage() {
         const chatbox = document.getElementById('chatbox');
