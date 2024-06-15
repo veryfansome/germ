@@ -4,6 +4,9 @@ gunicorn
 httpx
 numpy
 openai
+opentelemetry-distro
+opentelemetry-exporter-otlp-proto-grpc
+opentelemetry-exporter-otlp-proto-http
 pandas
 psycopg2-binary
 pydantic

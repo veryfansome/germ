@@ -16,8 +16,10 @@ from bot.db import (DATABASE_URL, SessionLocal,
 from bot.logging_config import logging, setup_logging, traceback
 from bot.v1 import do_on_text, ChatBookmark, ChatRequest, LinkedMessageIds, OpenAIChatBot
 
+
 setup_logging()
 logger = logging.getLogger(__name__)
+
 
 bot = FastAPI()
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
