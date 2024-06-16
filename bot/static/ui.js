@@ -16,6 +16,26 @@ function getLoadingIndicator() {
     return loadingIndicator;
 }
 
+function getUserMessageBox(message) {
+    const userMessageBox = document.createElement('div');
+    userMessageBox.className = 'user-message-box';
+    userMessageBox.innerHTML = `<i class="fa fa-user"></i><b>user:</b>`;
+    userMessageBox.innerHTML += `${marked.parse(message)}</br>`;
+
+    // Render user message copy button
+    const userMessageCopyLink = document.createElement('a');
+    userMessageCopyLink.title = "Copy"
+    userMessageCopyLink.className = "chatbox-message-link";
+    userMessageCopyLink.innerHTML = `<i class="fa fa-copy" style="">`;
+    userMessageCopyLink.addEventListener('click', (event) => {
+        event.preventDefault();
+        navigator.clipboard.writeText(message)
+    })
+    userMessageBox.appendChild(userMessageCopyLink);
+    hljs.highlightAll();
+    return userMessageBox;
+}
+
 function handleError(error, message) {
     console.error(message, error);
     showErrorPopup(`${message} ${error.message}`);

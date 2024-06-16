@@ -159,6 +159,19 @@
             .then(data => {
                 console.log(data)
 
+                let messageReceived = data['message_received'];
+                let messageReceivedContent = messageReceived['content'];
+                let messageReceivedChatFrame = JSON.parse(messageReceived['chat_frame']);
+                let messageReplied = data['message_replied'];
+                let messageRepliedContent = messageReplied['content'];
+                messageReceivedChatFrame.map(mesg => {
+                    if (mesg['role'] === 'assistant') {
+
+                    } else if (mesg['role'] === 'user') {
+
+                    }
+                });
+
                 //chatbox.innerHTML += `<div class="assistant-message-box"><i class="fa fa-database"></i><b>result:</b>${marked.parse(text)}</div>`;
                 hljs.highlightAll();
                 scrollChatBoxToBottom();
@@ -175,26 +188,9 @@
         submittedText.push(message)
         document.getElementById('input').value = '';
 
-        // Setup user message box
-        const userMessageBox = document.createElement('div');
-        userMessageBox.className = 'user-message-box';
-        userMessageBox.innerHTML = `<i class="fa fa-user"></i><b>user:</b>`;
-        userMessageBox.innerHTML += `${marked.parse(message)}</br>`;
-
-        // Render user message copy button
-        const userMessageCopyLink = document.createElement('a');
-        userMessageCopyLink.title = "Copy"
-        userMessageCopyLink.className = "chatbox-message-link";
-        userMessageCopyLink.innerHTML = `<i class="fa fa-copy" style="">`;
-        userMessageCopyLink.addEventListener('click', (event) => {
-            event.preventDefault();
-            navigator.clipboard.writeText(message)
-        })
-        userMessageBox.appendChild(userMessageCopyLink);
-
         // Render user message box
+        const userMessageBox = getUserMessageBox(message);
         chatbox.appendChild(userMessageBox)
-        hljs.highlightAll();
         scrollChatBoxToBottom();
         chatCompletionMessageList.push({ role: "user", content: message });
 
