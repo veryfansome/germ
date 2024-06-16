@@ -4,12 +4,12 @@ import datetime
 import os
 
 # Database Configuration
-DATABASE_URL = "postgresql://{name}:{password}@{host}/germ".format(
+DATABASE_URL = "{name}:{password}@{host}/germ".format(
     host=os.getenv("DB_HOST"),
     name=os.getenv("POSTGRES_USER"),
     password=os.getenv("POSTGRES_PASSWORD"),
 )
-engine = create_engine(DATABASE_URL)
+engine = create_engine(f"postgresql+psycopg2://{DATABASE_URL}")
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
@@ -22,15 +22,16 @@ class MessageBookmark(Base):
     message_received_id = Column(Integer, ForeignKey("message_received.id"), nullable=False)
     message_replied_id = Column(Integer, ForeignKey("message_replied.id"), nullable=False)
     message_summary = Column(LargeBinary)
+    timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
 
 
 # Define the ChatHistory model
 class MessageReceived(Base):
     __tablename__ = "message_received"
     id = Column(Integer, primary_key=True, index=True)
-    role = Column(String)
-    content = Column(LargeBinary)
     chat_frame = Column(LargeBinary)
+    content = Column(LargeBinary)
+    role = Column(String)
     timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
 
 
@@ -39,7 +40,9 @@ class MessageReplied(Base):
     id = Column(Integer, primary_key=True, index=True)
     content = Column(LargeBinary)
     message_received_id = Column(Integer, ForeignKey("message_received.id"))
+    role = Column(String)
     timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
+    tool_func_name = Column(String)
 
 
 class MessageThumbsDown(Base):
@@ -48,6 +51,7 @@ class MessageThumbsDown(Base):
     is_test = Column(Boolean, default=True)
     message_received_id = Column(Integer, ForeignKey("message_received.id"), nullable=False)
     message_replied_id = Column(Integer, ForeignKey("message_replied.id"), nullable=False)
+    timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
 
 
 # Create the tables in the database

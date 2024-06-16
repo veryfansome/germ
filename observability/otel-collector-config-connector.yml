@@ -2,11 +2,11 @@ receivers:
   otlp:
     protocols:
       http:
-        endpoint: "0.0.0.0:4318"
+        endpoint: "germ-otel-collector:4318"
 
 exporters:
   prometheus:
-    endpoint: "0.0.0.0:8889"
+    endpoint: "germ-otel-collector:8889"
 
   otlp:
     endpoint: germ-jaeger:4317

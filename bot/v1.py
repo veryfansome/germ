@@ -181,8 +181,10 @@ class OpenAIChatBot:
 
         # Update message history
         message_replied = MessageReplied(
-            content=new_response.content.encode('utf-8'),
+            content=None if new_response.tool_calls else new_response.content.encode('utf-8'),
             message_received_id=message_received.id,
+            role=new_response.role,
+            tool_func_name=None if not new_response.tool_calls else new_response.tool_calls[0].function.name
         )
         with SessionLocal() as session:
             session.add(message_replied)

@@ -4,14 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chat</title>
-    <script src="/ui.js"></script>
-    <link rel="stylesheet" href="/ui.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+
+    <link rel="stylesheet" href="/ui.css">
     <style></style>
 </head>
 <body>
     <nav>
-        <div class="logo"><a href="#"><i class="fa-solid fa-virus" style="padding-right: 4px"></i>GermBot</a></div>
+        <div class="logo"><a href="/"><i class="fa-solid fa-virus" style="padding-right: 4px"></i>GermBot</a></div>
         <div class="nav-links">
             <a href="/"><i class="fa-solid fa-comment" style="padding-right: 4px"></i><u>Chat</u></a>
             <a href="/postgres.html"><i class="fa-solid fa-code" style="padding-right: 4px"></i>Postgres</a>
@@ -24,11 +27,9 @@
     <div id="chatbox"></div>
     <div id="input-container">
         <div id="popup-menu" class="popup-menu">
-            <ul id="popup-menu-ul">
-                <li>Foo</li>
-            </ul>
+            <ul id="popup-menu-ul"></ul>
         </div>
-        <form action="javascript:sendMessage().then(null)">
+        <form action="javascript:sendMessage().catch(error => console.log(error))">
             <label for="input"></label>
             <textarea id="input" placeholder="Type a message..."></textarea>
             <div class="button-container">
@@ -37,107 +38,38 @@
             </div>
         </form>
     </div>
-
-
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="/ui.js"></script>
     <script>
     // Initialize highlight.js
     hljs.highlightAll();
-    const chatbox = document.getElementById('chatbox');
 
-    document.getElementById('close-error-popup').addEventListener('click', () => {
-        document.getElementById('error-popup').classList.add('hidden');
-    });
+    const chatbox = document.getElementById('chatbox');
+    initErrorPopup();
+    initSendButtonResize();
 
     // Popup menu
-    const popupButton = document.getElementById('popup-button');
-    const popupMenu = document.getElementById('popup-menu');
     const popupMenuList = document.getElementById('popup-menu-ul');
     const refreshBookmarks = () => {
+        popupMenuList.innerHTML = `<span style="color: gray;"><em>You haven't created any bookmarks yet. When you see reply you want to save, click on the <i class="fa fa-bookmark" style="color: black; margin-right: 0;"></i> below the message.</em></span>`;
         fetch('/chat/bookmarks?is_test=false')
-            .then(response => throwOrJson(response))
-            .then(data => {
-                console.log(data)
-
-                popupMenuList.innerHTML = `<span style="color: gray;"><em>You haven't created any bookmarks yet. When you see reply you want to save, click on the <i class="fa fa-bookmark" style="color: black; margin-right: 0;"></i> below the message.</em></span>`;
-                data.forEach(function (item, idx) {
-                    if (idx === 0) {
-                        popupMenuList.innerHTML = '';
-                    }
-                    const li = document.createElement('li');
-                    li.innerHTML = `<a href="/?bookmark_id=${item['id']}"><i class="fa fa-bookmark"></i>${item['message_summary']}</a>`;
-                    popupMenuList.appendChild(li);
+                .then(response => throwOrJson(response))
+                .then(data => {
+                    data.forEach(function (item, idx) {
+                        if (idx === 0) {
+                            popupMenuList.innerHTML = '';
+                        }
+                        const li = document.createElement('li');
+                        li.innerHTML = `<a href="/?bookmark_id=${item['id']}"><i class="fa fa-bookmark"></i>${item['message_summary']}</a>`;
+                        popupMenuList.appendChild(li);
+                    })
                 })
-            })
-            .catch(error => handleError(error, 'Failed to fetch bookmarks:'));
-    }
-    document.addEventListener('DOMContentLoaded', function () {
-        refreshBookmarks();
-    });
-    popupButton.addEventListener('mouseenter', () => {
-        popupMenu.style.display = 'block';
-    });
-    popupButton.addEventListener('mouseleave', () => {
-        popupMenu.style.display = 'none';
-    });
-    popupMenu.addEventListener('mouseenter', () => {
-        popupMenu.style.display = 'block';
-    });
-    popupMenu.addEventListener('mouseleave', () => {
-        popupMenu.style.display = 'none';
-    });
+                .catch(error => handleError(error, 'Failed to fetch bookmarks:'));
+    };
+    initPopupMenu(refreshBookmarks);
 
     // Text input area
     let submittedText = [];
-    let submittedTextSelectionCursor = -1;
-    let textSubmissionCandidate = '';
-    const textarea = document.getElementById('input');
-    textarea.addEventListener('input', function() {
-        this.style.height = 'auto';
-        this.style.height = this.scrollHeight + 'px';
-        if (this.style.height < this.style.maxHeight) {
-            this.style.overflow = 'hidden';
-        } else {
-            this.style.overflow = 'auto';
-        }
-        // Update with each keystroke
-        textSubmissionCandidate = textarea.value;
-    });
-    textarea.addEventListener('keydown', function(event) {
-        if (event.key === 'ArrowUp' && textarea.selectionStart === 0) {
-            if (submittedText.length > 0 && (submittedText.length - 1) > submittedTextSelectionCursor) {
-                submittedTextSelectionCursor += 1;
-                let reversedSubmissions = submittedText.slice().reverse();
-                textarea.value = reversedSubmissions[submittedTextSelectionCursor];
-            }
-            event.preventDefault();
-        }
-        if (event.key === 'ArrowDown' && textarea.selectionStart === textarea.value.length) {
-            if (submittedText.length > 0 && submittedTextSelectionCursor > -1) {
-                submittedTextSelectionCursor -= 1;
-                if (submittedTextSelectionCursor === -1) {
-                    textarea.value = textSubmissionCandidate;
-                } else {
-                    let reversedSubmissions = submittedText.slice().reverse();
-                    textarea.value = reversedSubmissions[submittedTextSelectionCursor];
-                }
-            }
-            event.preventDefault();
-        }
-        if (event.key === 'Enter' && (!event.shiftKey)) {
-            event.preventDefault();
-            sendMessage();
-
-            this.style.height = 'auto';
-            this.style.overflow = 'auto';
-        }
-    });
-
-    // Check button size on load and resize
-    window.addEventListener('load', updateSendButton);
-    window.addEventListener('resize', updateSendButton);
+    initTextArea(submittedText, sendMessage);
 
     let chatCompletionMessageList = [];
     const queryParams = getQueryParams();
@@ -157,22 +89,37 @@
                 return throwOrJson(response);
             })
             .then(data => {
-                console.log(data)
-
                 let messageReceived = data['message_received'];
                 let messageReceivedContent = messageReceived['content'];
                 let messageReceivedChatFrame = JSON.parse(messageReceived['chat_frame']);
                 let messageReplied = data['message_replied'];
                 let messageRepliedContent = messageReplied['content'];
-                messageReceivedChatFrame.map(mesg => {
-                    if (mesg['role'] === 'assistant') {
-
-                    } else if (mesg['role'] === 'user') {
-
+                let messageRepliedRole = messageReplied['role'];
+                messageReceivedChatFrame.map(chatFrameMessage => {
+                    if (chatFrameMessage['role'] === 'user') {
+                        const userMessageBox = getUserMessageBox(chatFrameMessage['content']);
+                        userMessageBox.appendChild(getCopyTextLink(chatFrameMessage['content']));
+                        chatbox.appendChild(userMessageBox);
+                        chatCompletionMessageList.push({ role: "user", content: chatFrameMessage['content'] });
+                    } else {
+                        const assistantMessageBox = getAssistantMessageBox('assistant(bookmark)', chatFrameMessage['content']);
+                        assistantMessageBox.appendChild(getCopyTextLink(chatFrameMessage['content']));
+                        chatbox.appendChild(assistantMessageBox);
+                        chatCompletionMessageList.push({ role: chatFrameMessage['role'], content: chatFrameMessage['content'] });
                     }
+                    hljs.highlightAll();
+                    scrollChatBoxToBottom();
                 });
+                const receivedUserMessageBox = getUserMessageBox(messageReceivedContent);
+                receivedUserMessageBox.appendChild(getCopyTextLink(messageReceivedContent));
+                chatbox.appendChild(receivedUserMessageBox);
+                chatCompletionMessageList.push({ role: "user", content: messageReceivedContent });
 
-                //chatbox.innerHTML += `<div class="assistant-message-box"><i class="fa fa-database"></i><b>result:</b>${marked.parse(text)}</div>`;
+                const repliedAssistantMessageBox = getAssistantMessageBox(`${messageRepliedRole}(bookmark)`, messageRepliedContent);
+                repliedAssistantMessageBox.appendChild(getCopyTextLink(messageRepliedContent));
+                chatbox.appendChild(repliedAssistantMessageBox);
+                chatCompletionMessageList.push({ role: messageRepliedRole, content: messageRepliedContent });
+
                 hljs.highlightAll();
                 scrollChatBoxToBottom();
             })
@@ -185,12 +132,13 @@
 
     async function sendMessage() {
         const message = document.getElementById('input').value;
-        submittedText.push(message)
+        submittedText.push(message);
         document.getElementById('input').value = '';
 
-        // Render user message box
         const userMessageBox = getUserMessageBox(message);
-        chatbox.appendChild(userMessageBox)
+        userMessageBox.appendChild(getCopyTextLink(message));
+        chatbox.appendChild(userMessageBox);
+        hljs.highlightAll();
         scrollChatBoxToBottom();
         chatCompletionMessageList.push({ role: "user", content: message });
 
@@ -210,8 +158,6 @@
             return throwOrJson(response);
         })
         .then(data => {
-            console.log(data)
-
             const messageReceivedId = data['message_received_id'];
             const messageRepliedId = data['message_replied_id'];
             const responseData = data['response'];
@@ -224,20 +170,8 @@
             chatCompletionMessageList.push({ role: responseRole, content: responseContent });
 
             // Setup assistant message box
-            const assistantMessageBox = document.createElement('div');
-            assistantMessageBox.className = 'assistant-message-box';
-            assistantMessageBox.innerHTML = `<i class="fa fa-virus"></i><b>${responseRole}(${responseModel}):</b>`;
-            assistantMessageBox.innerHTML += `${marked.parse(responseContent)}</br>`;
-            assistantMessageBox.innerHTML += `<i>${responseReason}</i> | `;
-
-            // Render replied message copy button
-            const copyLink = document.createElement('a');
-            copyLink.className = "chatbox-message-link";
-            copyLink.innerHTML = `<i class="fa fa-copy">`;
-            copyLink.addEventListener('click', (event) => {
-                event.preventDefault();
-                navigator.clipboard.writeText(responseContent)
-            })
+            const assistantMessageBox = getAssistantMessageBox(`${responseRole}(${responseModel})`, responseContent, responseReason);
+            const copyLink = getCopyTextLink(responseContent);
             assistantMessageBox.appendChild(copyLink);
 
             // Render bookmark button
@@ -260,11 +194,11 @@
                 .then(response => throwOrJson(response))
                 .then(data => {
                     console.log('Bookmark created:', data);
-                    refreshBookmarks()
+                    refreshBookmarks();
                 })
                 .catch(error => {
-                    bookmarkLink.classList.remove('clicked-chatbox-message-link')
-                    handleError(error, 'Bookmark creation failed:')
+                    bookmarkLink.classList.remove('clicked-chatbox-message-link');
+                    handleError(error, 'Bookmark creation failed:');
                 });
             });
             assistantMessageBox.appendChild(bookmarkLink);
@@ -288,7 +222,7 @@
                 .then(response => throwOrJson(response))
                 .then(data => {
                     console.log('Thumbed down:', data);
-                    thumbsDownLink.classList.add('clicked-chatbox-message-link')
+                    thumbsDownLink.classList.add('clicked-chatbox-message-link');
                 })
                 .catch(error => handleError(error, 'Thumb down failed:'));
             });
@@ -304,6 +238,11 @@
             loadingIndicator.remove();
             handleError(error, 'Chat failed:');
         });
+    }
+    // Move this to a "clean screen" button.
+    if (window.history.replaceState) {
+        const url = window.location.protocol + "//" + window.location.host + window.location.pathname;
+        window.history.replaceState({ path: url }, '', url);
     }
     </script>
 </body>

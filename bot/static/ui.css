@@ -184,6 +184,9 @@ rem for better responsiveness.
 .button-container > button:last-child {
     margin-bottom: 0;
 }
+.chat-metadata {
+    color: dimgray;
+}
 .clicked-chatbox-message-link {
     color: blue; /* Set the same as `.chatbox-message-link:hover` */
 }

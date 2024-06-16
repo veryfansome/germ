@@ -7,7 +7,6 @@ from openai import OpenAI
 from pydantic import BaseModel
 from starlette.requests import Request
 import hashlib
-import json
 import os
 import subprocess
 
@@ -77,6 +76,7 @@ async def get_chat_bookmark(bookmark_id: int):
                 "message_replied": {
                     "id": message_replied_record.id,
                     "content": message_replied_record.content.decode("utf-8"),
+                    "role": message_replied_record.role,
                 },
             }
     except Exception as e:
@@ -249,7 +249,7 @@ async def post_chat_thumbs_down(payload: ChatThumbsDown) -> ChatThumbsDown:
 async def post_postgres_query(payload: SqlRequest,
                               db: str = Path(..., title="Postgres DB")):
     enabled_dbs = {
-        "germ": DATABASE_URL
+        "germ": f"postgresql://{DATABASE_URL}"
     }
     if db not in enabled_dbs:
         raise HTTPException(status_code=400, detail="Not supported")
