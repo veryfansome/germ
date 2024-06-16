@@ -59,13 +59,15 @@
         fetch('/chat/bookmarks?is_test=false')
             .then(response => throwOrJson(response))
             .then(data => {
+                console.log(data)
+
                 popupMenuList.innerHTML = `<span style="color: gray;"><em>You haven't created any bookmarks yet. When you see reply you want to save, click on the <i class="fa fa-bookmark" style="color: black; margin-right: 0;"></i> below the message.</em></span>`;
                 data.forEach(function (item, idx) {
                     if (idx === 0) {
                         popupMenuList.innerHTML = '';
                     }
                     const li = document.createElement('li');
-                    li.innerHTML = `<a href="/?bookmark_id=${item['bookmark_id']}"><i class="fa fa-bookmark"></i>${item['message_replied_content']}</a>`;
+                    li.innerHTML = `<a href="/?bookmark_id=${item['id']}"><i class="fa fa-bookmark"></i>${item['message_summary']}</a>`;
                     popupMenuList.appendChild(li);
                 })
             })
@@ -148,13 +150,15 @@
         chatbox.appendChild(loadingIndicator);
         scrollChatBoxToBottom();
 
-        fetch('/chat/bookmark/${queryParams["bookmark_id"]}')
+        fetch(`/chat/bookmark/${queryParams["bookmark_id"]}`)
             .then(response => {
                 // Stop showing loading indicator
                 loadingIndicator.remove();
                 return throwOrJson(response);
             })
             .then(data => {
+                console.log(data)
+
                 //chatbox.innerHTML += `<div class="assistant-message-box"><i class="fa fa-database"></i><b>result:</b>${marked.parse(text)}</div>`;
                 hljs.highlightAll();
                 scrollChatBoxToBottom();
@@ -202,10 +206,7 @@
         fetch('/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                is_test: false,
-                messages: chatCompletionMessageList,
-            }),
+            body: JSON.stringify({ messages: chatCompletionMessageList }),
         })
         .then(response => {
             // Stop showing loading indicator
@@ -214,6 +215,7 @@
         })
         .then(data => {
             console.log(data)
+
             const messageReceivedId = data['message_received_id'];
             const messageRepliedId = data['message_replied_id'];
             const responseData = data['response'];
@@ -283,6 +285,7 @@
                     body: JSON.stringify({
                         is_test: false,
                         message_received_id: messageReceivedId,
+                        message_replied_content: responseContent,
                         message_replied_id: messageRepliedId
                     })
                 })

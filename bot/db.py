@@ -22,16 +22,12 @@ class MessageBookmark(Base):
     message_received_id = Column(Integer, ForeignKey("message_received.id"), nullable=False)
     message_replied_id = Column(Integer, ForeignKey("message_replied.id"), nullable=False)
     message_summary = Column(LargeBinary)
-    __table_args__ = (
-        UniqueConstraint('message_received_id', 'message_replied_id', name='unique_message_received_id_message_replied_id'),
-    )
 
 
 # Define the ChatHistory model
 class MessageReceived(Base):
     __tablename__ = "message_received"
     id = Column(Integer, primary_key=True, index=True)
-    is_test = Column(Boolean, default=True)
     role = Column(String)
     content = Column(LargeBinary)
     chat_frame = Column(LargeBinary)
@@ -41,7 +37,6 @@ class MessageReceived(Base):
 class MessageReplied(Base):
     __tablename__ = "message_replied"
     id = Column(Integer, primary_key=True, index=True)
-    is_test = Column(Boolean, default=True)
     content = Column(LargeBinary)
     message_received_id = Column(Integer, ForeignKey("message_received.id"))
     timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))

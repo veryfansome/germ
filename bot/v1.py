@@ -37,28 +37,27 @@ ENABLED_TOOLS = {
 class ChatBookmark(BaseModel):
     id: Optional[int] = None
     is_test: Optional[bool] = True
-    message_received_id: int
-    message_replied_id: int
-    message_replied_content: str
+    message_received_id: Optional[int] = None
+    message_replied_id: Optional[int] = None
+    message_summary: Optional[str] = None
 
 
 class ChatMessage(BaseModel):
     content: str
-    is_test: Optional[bool] = True
     role: str
 
 
 class ChatRequest(BaseModel):
-    is_test: Optional[bool] = True
     messages: list[ChatMessage]
     system_message: Optional[str] = ""
     temperature: Optional[float] = 0.0
 
 
-class LinkedMessageIds(BaseModel):
+class ChatThumbsDown(BaseModel):
+    id: Optional[int] = None
     is_test: Optional[bool] = True
-    message_received_id: int
-    message_replied_id: int
+    message_received_id: Optional[int] = None
+    message_replied_id: Optional[int] = None
 
 
 class OpenAIChatBot:
@@ -69,7 +68,6 @@ class OpenAIChatBot:
         self.enabled_vector_stores = [self.default_vector_store]
 
     def chat(self, messages: list[ChatMessage],
-             is_test=True,
              system_message=None,
              temperature: float = 0.0) -> object:
         new_chat_message: ChatMessage = messages[-1]
@@ -116,7 +114,6 @@ class OpenAIChatBot:
         message_received = MessageReceived(
             chat_frame=json.dumps(chat_frame[:-1]).encode('utf-8'),
             content=new_chat_message.content.encode('utf-8'),
-            is_test=is_test,
             role=new_chat_message.role,
         )
         with SessionLocal() as session:
@@ -185,7 +182,6 @@ class OpenAIChatBot:
         # Update message history
         message_replied = MessageReplied(
             content=new_response.content.encode('utf-8'),
-            is_test=is_test,
             message_received_id=message_received.id,
         )
         with SessionLocal() as session:
