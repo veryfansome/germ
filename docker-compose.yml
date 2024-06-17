@@ -23,7 +23,7 @@ services:
       "--exporter_otlp_insecure=true",
       "--exporter_otlp_endpoint=http://germ-otel-collector:4318",
       "--exporter_otlp_protocol=http/protobuf",
-      "gunicorn", "-c", "bot/gunicorn_config.py", "bot.main:bot", "--bind", "0.0.0.0:8000"
+      "gunicorn", "-c", "gunicorn_config.py", "bot.main:bot", "--bind", "0.0.0.0:8000"
     ]
     ports:
       - "8001:8000"

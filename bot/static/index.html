@@ -10,13 +10,14 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
 
     <link rel="stylesheet" href="/ui.css">
+    <script src="/ui.js"></script>
     <style></style>
 </head>
 <body>
     <nav>
         <div class="logo"><a href="/"><i class="fa-solid fa-virus" style="padding-right: 4px"></i>GermBot</a></div>
         <div class="nav-links">
-            <a href="/"><i class="fa-solid fa-comment" style="padding-right: 4px"></i><u>Chat</u></a>
+            <a href="/"><i class="fa-solid fa-comment" style="padding-right: 4px"></i><u>Chat</u><i id="version-marker"></i></a>
             <a href="/postgres.html"><i class="fa-solid fa-code" style="padding-right: 4px"></i>Postgres</a>
         </div>
     </nav>
@@ -38,10 +39,12 @@
             </div>
         </form>
     </div>
-    <script src="/ui.js"></script>
     <script>
     // Initialize highlight.js
     hljs.highlightAll();
+
+    const queryParams = getQueryParams();
+    const botVersion = setVersionMarker('bot_version' in queryParams ? queryParams['bot_version'] : 'v1');
 
     const chatbox = document.getElementById('chatbox');
     initErrorPopup();
@@ -72,7 +75,6 @@
     initTextArea(submittedText, sendMessage);
 
     let chatCompletionMessageList = [];
-    const queryParams = getQueryParams();
     if ('bookmark_id' in queryParams) {
         // Reset the chatbox
         chatbox.innerHTML = '';
@@ -147,7 +149,7 @@
         chatbox.appendChild(loadingIndicator);
         scrollChatBoxToBottom();
 
-        fetch('/chat', {
+        fetch(`/chat?bot_version=${botVersion}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ messages: chatCompletionMessageList }),
@@ -209,6 +211,7 @@
             thumbsDownLink.innerHTML = `<i class="fa fa-thumbs-down">`;
             thumbsDownLink.addEventListener('click', (event) => {
                 event.preventDefault();
+                bookmarkLink.classList.add('clicked-chatbox-message-link');
                 fetch('/chat/thumbs-down', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -222,9 +225,12 @@
                 .then(response => throwOrJson(response))
                 .then(data => {
                     console.log('Thumbed down:', data);
-                    thumbsDownLink.classList.add('clicked-chatbox-message-link');
+                    // TODO
                 })
-                .catch(error => handleError(error, 'Thumb down failed:'));
+                .catch(error => {
+                    bookmarkLink.classList.remove('clicked-chatbox-message-link');
+                    handleError(error, 'Thumb down failed:')
+                });
             });
             assistantMessageBox.appendChild(thumbsDownLink);
 
@@ -238,11 +244,6 @@
             loadingIndicator.remove();
             handleError(error, 'Chat failed:');
         });
-    }
-    // Move this to a "clean screen" button.
-    if (window.history.replaceState) {
-        const url = window.location.protocol + "//" + window.location.host + window.location.pathname;
-        window.history.replaceState({ path: url }, '', url);
     }
     </script>
 </body>

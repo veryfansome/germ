@@ -1,19 +1,21 @@
 from typing import Optional
-
 from fastapi import FastAPI, HTTPException, Path
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
-from pydantic import BaseModel
 from starlette.requests import Request
 import hashlib
 import os
 import subprocess
 
-from bot.db import (DATABASE_URL, SessionLocal,
-                    MessageBookmark, MessageReceived, MessageReplied, MessageThumbsDown)
-from bot.logging_config import logging, setup_logging, traceback
-from bot.v1 import do_on_text, ChatBookmark, ChatRequest, ChatThumbsDown, OpenAIChatBot
+from api.models import ChatBookmark, ChatRequest, ChatThumbsDown, SqlRequest
+from bot.openai_utils import do_on_text
+from bot.v1 import OpenAIChatBotV1
+from bot.v2 import OpenAIChatBotV2
+from db.models import (DATABASE_URL, SessionLocal,
+                       MessageBookmark, MessageReceived, MessageReplied, MessageThumbsDown)
+from observability.logging import logging, setup_logging, traceback
+
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -21,11 +23,7 @@ logger = logging.getLogger(__name__)
 bot = FastAPI()
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
 
-chat_bot = OpenAIChatBot()
-
-
-class SqlRequest(BaseModel):
-    sql: str
+chat_bot = OpenAIChatBotV1()
 
 
 @bot.get("/chat/bookmarks")
@@ -140,9 +138,9 @@ async def get_ui_js():
 
 
 @bot.post("/chat")
-async def post_chat(payload: ChatRequest):
+async def post_chat(payload: ChatRequest, bot_version: str = "v1"):
     try:
-        response = chat_bot.chat(
+        response = version_selector(bot_version).chat(
             payload.messages,
             system_message=payload.system_message,
             temperature=payload.temperature,
@@ -277,3 +275,10 @@ async def post_postgres_query(payload: SqlRequest,
         os.remove(query_file)
         logger.error("%s: trace: %s", e, traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def version_selector(version):
+    if version == "v1":
+        return OpenAIChatBotV1()
+    elif version == "v2":
+        return OpenAIChatBotV2()

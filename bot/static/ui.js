@@ -142,6 +142,12 @@ function scrollChatBoxToBottom() {
     chatbox.scrollTop = chatbox.scrollHeight;
 }
 
+function setVersionMarker(version) {
+    const versionMarker = document.getElementById('version-marker');
+    versionMarker.innerText = version;
+    return version;
+}
+
 const showErrorPopup = (message) => {
     const errorPopup = document.getElementById('error-popup');
     const errorMessageText = document.getElementById('error-popup-message-text');
