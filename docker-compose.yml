@@ -5,7 +5,7 @@ services:
   bot:
     networks: [bots]
     container_name: germ-bot
-    links: [db, jaeger]
+    depends_on: [db, db-init, jaeger]
     build: .
     volumes:
       - ./:/src
@@ -47,11 +47,22 @@ services:
       timeout: 9s
       retries: 6
 
+  db-init:
+    networks: [ bots ]
+    container_name: germ-db-init
+    depends_on: [ db ]
+    build: .
+    volumes:
+      - ./:/src
+    environment: *local-dev
+    working_dir: /src
+    command: [ "db/init.sh" ]
+
   # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
   jaeger:
     networks: [bots]
     container_name: germ-jaeger
-    links: [prometheus]
+    depends_on: [otel-collector, prometheus]
     image: jaegertracing/all-in-one:latest
     environment:
       - COLLECTOR_OTLP_ENABLED=true
@@ -78,7 +89,7 @@ services:
   prometheus:
     networks: [bots]
     container_name: germ-prometheus
-    links: [otel-collector]
+    depends_on: [otel-collector]
     image: prom/prometheus:v2.52.0
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
@@ -104,11 +115,16 @@ services:
       - "4318:4318" # OTLP over HTTP
     command:
       - --config=/etc/otelcol/otel-collector-config.yml
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "4318"]
+      interval: 10s
+      timeout: 9s
+      retries: 6
 
   test:
     networks: [bots]
     container_name: germ-test
-    links: [db, bot]
+    depends_on: [db, db-init, bot]
     build: .
     volumes:
       - ./:/src
