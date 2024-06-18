@@ -4,14 +4,9 @@ import torch.optim as optim
 from transformers import BertModel, BertTokenizer
 import random
 
+from bot.openai_utils import ENABLED_MODELS
 
-# Load pre-trained BERT model and tokenizer
 BERT_MODEL_NAME = 'bert-base-uncased'  # TODO: Picked by gpt-4o, may not be the most current.
-ENABLED_MODELS = (
-    'dall-e-3',
-    'gpt-3.5-turbo',
-    'gpt-4o',
-)
 
 
 # Define a simple neural network for classification
@@ -31,6 +26,7 @@ class ModelSelector(nn.Module):
         return out
 
 
+# Load pre-trained BERT model and tokenizer
 bert_model = BertModel.from_pretrained(BERT_MODEL_NAME)
 bert_tokenizer = BertTokenizer.from_pretrained(BERT_MODEL_NAME)
 

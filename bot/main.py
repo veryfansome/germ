@@ -10,8 +10,8 @@ import subprocess
 
 from api.models import ChatBookmark, ChatRequest, ChatThumbsDown, SqlRequest
 from bot.openai_utils import do_on_text
-from bot.v1 import OpenAIChatBotV1
-from bot.v2 import OpenAIChatBotV2
+from bot.v1 import chat as v1_chat
+from bot.v2 import chat as v2_chat
 from db.models import (DATABASE_URL, SessionLocal,
                        MessageBookmark, MessageReceived, MessageReplied, MessageThumbsDown)
 from observability.logging import logging, setup_logging, traceback
@@ -22,8 +22,6 @@ logger = logging.getLogger(__name__)
 
 bot = FastAPI()
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
-
-chat_bot = OpenAIChatBotV1()
 
 
 @bot.get("/chat/bookmarks")
@@ -140,7 +138,7 @@ async def get_ui_js():
 @bot.post("/chat")
 async def post_chat(payload: ChatRequest, bot_version: str = "v1"):
     try:
-        response = version_selector(bot_version).chat(
+        response = version_selector(bot_version)(
             payload.messages,
             system_message=payload.system_message,
             temperature=payload.temperature,
@@ -279,6 +277,8 @@ async def post_postgres_query(payload: SqlRequest,
 
 def version_selector(version):
     if version == "v1":
-        return OpenAIChatBotV1()
+        return v1_chat
     elif version == "v2":
-        return OpenAIChatBotV2()
+        return v2_chat
+    else:
+        return v1_chat
