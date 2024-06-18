@@ -8,7 +8,6 @@ RUN mkdir -p /src
 # Copy the requirements file
 COPY requirements.txt /src
 
-# Install the Python dependencies
-RUN python -m venv germ && . germ/bin/activate
+# Install Python dependencies
 RUN pip install --no-cache-dir -r /src/requirements.txt
 RUN opentelemetry-bootstrap -a install
