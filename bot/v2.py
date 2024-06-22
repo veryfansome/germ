@@ -1,6 +1,7 @@
+from typing_extensions import Literal
+
 from api.models import ChatMessage
 from bot.v1 import chat as v1_chat
-from bot.openai_utils import ENABLED_TOOLS
 from bot.model_selector import ENABLED_MODELS, generate_embeddings, predict_model
 from observability.logging import logging
 
@@ -10,7 +11,8 @@ logger = logging.getLogger(__name__)
 def chat(messages: list[ChatMessage],
          system_message=None,
          temperature: float = 0.0,
-         tools: dict[str, dict] = ENABLED_TOOLS) -> object:
+         tools: dict[str, dict] = None,
+         tool_choice: Literal['auto', 'none'] = 'none') -> object:
     new_chat_message: ChatMessage = messages[-1]
     logger.debug("received: %s", new_chat_message.content)
 
@@ -47,4 +49,5 @@ def chat(messages: list[ChatMessage],
                    model=model,
                    system_message=system_message,
                    temperature=temperature,
-                   tools=tools)
+                   tools=tools,
+                   tool_choice=tool_choice)

@@ -1,9 +1,9 @@
-from typing import Optional
 from fastapi import FastAPI, HTTPException, Path
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from starlette.requests import Request
+from typing import Optional
 import hashlib
 import os
 import subprocess
@@ -221,6 +221,7 @@ async def post_chat_thumbs_down(payload: ChatThumbsDown) -> ChatThumbsDown:
             if existing_thumbs_down_record:
                 return ChatThumbsDown(
                     id=existing_thumbs_down_record.id,
+                    is_test=existing_thumbs_down_record.is_test,
                     message_received_id=existing_thumbs_down_record.message_received_id,
                     message_replied_id=existing_thumbs_down_record.message_replied_id,
                 )
@@ -234,6 +235,7 @@ async def post_chat_thumbs_down(payload: ChatThumbsDown) -> ChatThumbsDown:
             session.refresh(new_thumbs_down_record)
         return ChatThumbsDown(
             id=new_thumbs_down_record.id,
+            is_test=new_thumbs_down_record.is_test,
             message_received_id=new_thumbs_down_record.message_received_id,
             message_replied_id=new_thumbs_down_record.message_replied_id)
     except Exception as e:

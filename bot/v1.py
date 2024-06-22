@@ -1,3 +1,4 @@
+from typing_extensions import Literal
 import json
 import tiktoken
 
@@ -15,7 +16,8 @@ def chat(messages: list[ChatMessage],
          model: str = DEFAULT_CHAT_MODEL,
          system_message: str = None,
          temperature: float = 0.0,
-         tools: dict[str, dict] = ENABLED_TOOLS) -> object:
+         tools: dict[str, dict] = ENABLED_TOOLS,
+         tool_choice: Literal['auto', 'none'] = 'auto') -> object:
     new_chat_message: ChatMessage = messages[-1]
     logger.debug("received: %s", new_chat_message.content)
 
@@ -48,7 +50,8 @@ def chat(messages: list[ChatMessage],
     response = CHAT_COMPLETION_FUNCTIONS[model](chat_frame,
                                                 system_message=system_message,
                                                 temperature=temperature,
-                                                tools=tools)
+                                                tools=tools,
+                                                tool_choice=tool_choice)
     """
     $ curl -s localhost:8001/chat \
         -H 'content-type: application/json' \

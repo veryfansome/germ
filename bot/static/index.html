@@ -211,7 +211,7 @@
             thumbsDownLink.innerHTML = `<i class="fa fa-thumbs-down">`;
             thumbsDownLink.addEventListener('click', (event) => {
                 event.preventDefault();
-                bookmarkLink.classList.add('clicked-chatbox-message-link');
+                thumbsDownLink.classList.add('clicked-chatbox-message-link');
                 fetch('/chat/thumbs-down', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -228,7 +228,7 @@
                     // TODO
                 })
                 .catch(error => {
-                    bookmarkLink.classList.remove('clicked-chatbox-message-link');
+                    thumbsDownLink.classList.remove('clicked-chatbox-message-link');
                     handleError(error, 'Thumb down failed:')
                 });
             });

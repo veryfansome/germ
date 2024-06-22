@@ -1,5 +1,7 @@
 from openai import OpenAI
 from observability.logging import logging
+from typing_extensions import Literal
+
 
 logger = logging.getLogger(__name__)
 
@@ -7,8 +9,8 @@ DEFAULT_CHAT_MODEL = "gpt-4o"
 DEFAULT_IMAGE_MODEL = "dall-e-3"
 DEFAULT_TEMPERATURE = 0.0
 ENABLED_MODELS = (
-    #'dall-e-3',
-    'gpt-3.5-turbo',
+    'dall-e-3',
+    #'gpt-3.5-turbo',
     'gpt-4o',
 )
 ENABLED_TOOLS = {
@@ -41,7 +43,8 @@ class ChatClient:
     def complete_chat(self, chat_frame: list[dict],
                       system_message: str = None,
                       temperature: float = DEFAULT_TEMPERATURE,
-                      tools: dict[str, dict] = None):
+                      tools: dict[str, dict] = None,
+                      tool_choice: Literal['auto', 'none'] = 'none'):
         with OpenAI() as client:
             return client.chat.completions.create(
                 messages=(([{"role": "system", "content": system_message}] if system_message else [])
@@ -58,7 +61,7 @@ class ChatClient:
                 # or more tools. required means the model must call one or more tools. Specifying a particular tool via
                 # {"type": "function", "function": {"name": "my_function"}} forces the model to call that tool. `none`
                 # is the default when no tools are present. `auto` is the default if tools are present.
-                tool_choice="auto")
+                tool_choice=tool_choice)
 
 
 def do_on_text(directive: str,
@@ -75,11 +78,14 @@ def do_on_text(directive: str,
     return response.choices[0].message.content.strip()
 
 
-def generate_image(prompt: str, model=DEFAULT_IMAGE_MODEL) -> object:
+def generate_image(prompt: str,
+                   model=DEFAULT_IMAGE_MODEL,
+                   size: Literal['1024x1024', '1024x1792', '1792x1024'] = '1024x1024',
+                   style: Literal['natural', 'vivid'] = 'natural') -> object:
     response = OpenAI().images.generate(
         prompt=prompt,
         model=model,
-        n=1,
+        n=1, size=size, style=style
     )
     return response.data[0].url
 
