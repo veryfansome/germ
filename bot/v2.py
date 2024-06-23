@@ -1,15 +1,15 @@
 from typing_extensions import Literal
 
 from api.models import ChatMessage
-from bot.v1 import chat as v1_chat
 from bot.model_selector import ENABLED_MODELS, generate_embeddings, predict_model
+from bot.v1 import chat as v1_chat
 from observability.logging import logging
 
 logger = logging.getLogger(__name__)
 
 
 def chat(messages: list[ChatMessage],
-         system_message=None,
+         system_message: str = None,
          temperature: float = 0.0,
          tools: dict[str, dict] = None,
          tool_choice: Literal['auto', 'none'] = 'none') -> object:

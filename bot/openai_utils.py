@@ -1,7 +1,10 @@
 from openai import OpenAI
-from observability.logging import logging
+from openai.types.chat.chat_completion import ChatCompletion, Choice, ChatCompletionMessage
 from typing_extensions import Literal
+import time
 
+from api.models import ChatMessage
+from observability.logging import logging
 
 logger = logging.getLogger(__name__)
 
@@ -9,10 +12,15 @@ DEFAULT_CHAT_MODEL = "gpt-4o"
 DEFAULT_IMAGE_MODEL = "dall-e-3"
 DEFAULT_TEMPERATURE = 0.0
 ENABLED_MODELS = (
-    'dall-e-3',
+    DEFAULT_CHAT_MODEL,
+    DEFAULT_IMAGE_MODEL,
     #'gpt-3.5-turbo',
-    'gpt-4o',
 )
+ENABLE_TOKEN_LIMIT_CHECK = {
+    DEFAULT_IMAGE_MODEL: False,
+    DEFAULT_CHAT_MODEL: True,
+    'gpt-3.5-turbo': True
+}
 ENABLED_TOOLS = {
     "generate_image": {
         "type": "function",
@@ -44,7 +52,7 @@ class ChatClient:
                       system_message: str = None,
                       temperature: float = DEFAULT_TEMPERATURE,
                       tools: dict[str, dict] = None,
-                      tool_choice: Literal['auto', 'none'] = 'none'):
+                      tool_choice: Literal['auto', 'none'] = 'none') -> ChatCompletion:
         with OpenAI() as client:
             return client.chat.completions.create(
                 messages=(([{"role": "system", "content": system_message}] if system_message else [])
@@ -64,30 +72,75 @@ class ChatClient:
                 tool_choice=tool_choice)
 
 
+class ImageClient:
+
+    def __init__(self, model: str = DEFAULT_IMAGE_MODEL):
+        self.model = model
+
+    def complete_chat(self, chat_frame: list[ChatMessage],
+                      system_message: str = None,
+                      temperature: float = DEFAULT_TEMPERATURE,
+                      **kwargs) -> ChatCompletion:
+        new_chat_message: ChatMessage = chat_frame[-1]
+        prompt = do_on_text("Rephrase the following message as an image prompt", new_chat_message.content,
+                            system_message=system_message, temperature=temperature)
+        # TODO: Use a model to predict size and style
+        logger.info('image prompt: %s', prompt)
+        url = self.generate_image(prompt, size='1024x1024', style='natural')
+        return ChatCompletion(
+            id='none',
+            choices=[Choice(
+                finish_reason='stop',
+                index=0,
+                message=ChatCompletionMessage(
+                    content=f"[![{prompt}]({url})]({url})",
+                    role='assistant'
+                ),
+            )],
+            created=int(time.time()),
+            object="chat.completion",
+            model="dall-e-3",
+        )
+
+    def generate_image(self, prompt: str,
+                       size: Literal['1024x1024', '1024x1792', '1792x1024'] = '1024x1024',
+                       style: Literal['natural', 'vivid'] = 'natural') -> object:
+        with OpenAI() as client:
+            response = client.images.generate(
+                prompt=prompt,
+                model=self.model,
+                n=1, size=size, style=style
+            )
+            return response.data[0].url
+
+
 def do_on_text(directive: str,
                text: str,
                model=DEFAULT_CHAT_MODEL,
                max_tokens=480,
                stop=None,
+               system_message: str = None,
                temperature=DEFAULT_TEMPERATURE) -> str:
-    response = OpenAI().chat.completions.create(
-        messages=[{"role": "user", "content": f'{directive}: {text}'}],
-        model=model,
-        max_tokens=max_tokens, n=1, stop=stop, temperature=temperature,
-    )
-    return response.choices[0].message.content.strip()
+    with OpenAI() as client:
+        response = client.chat.completions.create(
+            messages=(([{"role": "system", "content": system_message}] if system_message else []) +
+                      [{"role": "user", "content": f'{directive}: {text}'}])
+            ,
+            model=model,
+            max_tokens=max_tokens, n=1, stop=stop, temperature=temperature,
+        )
+        return response.choices[0].message.content.strip()
+
+
+def is_token_limit_check_enabled(model: str) -> bool:
+    return False if model not in ENABLE_TOKEN_LIMIT_CHECK else ENABLE_TOKEN_LIMIT_CHECK[model]
 
 
 def generate_image(prompt: str,
                    model=DEFAULT_IMAGE_MODEL,
                    size: Literal['1024x1024', '1024x1792', '1792x1024'] = '1024x1024',
                    style: Literal['natural', 'vivid'] = 'natural') -> object:
-    response = OpenAI().images.generate(
-        prompt=prompt,
-        model=model,
-        n=1, size=size, style=style
-    )
-    return response.data[0].url
+    return ImageClient(model=model).generate_image(prompt, size=size, style=style)
 
 
 def tool_selection_wrapper(tools_with_callbacks: dict[str, dict]) -> list:
@@ -101,7 +154,7 @@ def tool_selection_wrapper(tools_with_callbacks: dict[str, dict]) -> list:
 
 
 def tool_wrapper(tool_func: str, arguments: dict) -> str:
-    logging.info("tool call: %s(%s)", tool_func, arguments)
+    logger.info("tool call: %s(%s)", tool_func, arguments)
     if "callback" in ENABLED_TOOLS[tool_func]:
         return ENABLED_TOOLS[tool_func]["callback"](
             globals()[tool_func](**arguments),
@@ -112,18 +165,7 @@ def tool_wrapper(tool_func: str, arguments: dict) -> str:
 
 
 CHAT_COMPLETION_FUNCTIONS = {
-    "dall-e-3": lambda messages: {
-        "choices": [{
-            "finish_reason": "stop",
-            "message": {
-                "content": generate_image(do_on_text(
-                    "Rephrase the following message as an image prompt", messages[-1]), model="dall-e-3"),
-                "role": "assistant",
-                "tool_calls": None,
-            },
-        }],
-        "model": "dall-e-3",
-    },
+    DEFAULT_CHAT_MODEL: ChatClient(model=DEFAULT_CHAT_MODEL).complete_chat,
+    DEFAULT_IMAGE_MODEL: ImageClient(model=DEFAULT_IMAGE_MODEL).complete_chat,
     "gpt-3.5-turbo": ChatClient(model="gpt-3.5-turbo").complete_chat,
-    "gpt-4o": ChatClient(model="gpt-4o").complete_chat,
 }

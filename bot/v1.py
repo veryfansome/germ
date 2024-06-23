@@ -5,7 +5,7 @@ import tiktoken
 from api.models import ChatMessage
 from bot.openai_utils import (CHAT_COMPLETION_FUNCTIONS,
                               DEFAULT_CHAT_MODEL,
-                              ENABLED_TOOLS, tool_wrapper)
+                              ENABLED_TOOLS, is_token_limit_check_enabled, tool_wrapper)
 from db.models import MessageReceived, MessageReplied, SessionLocal
 from observability.logging import logging
 
@@ -21,23 +21,26 @@ def chat(messages: list[ChatMessage],
     new_chat_message: ChatMessage = messages[-1]
     logger.debug("received: %s", new_chat_message.content)
 
-    # Trim message list to avoid hitting selected model's token limit.
-    enc = tiktoken.encoding_for_model(model)
-    total_tokens = len(enc.encode(system_message))
-    reversed_chat_frame = []
-    for chat_message in reversed(messages):  # In reverse because message list is ordered from oldest to newest.
-        message_dict = chat_message.model_dump()
-        message_tokens = len(enc.encode(message_dict['content']))
-        # If adding `message_tokens` pushes us over the limit, stop appending
-        if message_tokens + total_tokens > enc.max_token_value:
-            break
-        total_tokens += message_tokens
-        reversed_chat_frame.append(message_dict)
-    chat_frame = tuple(reversed(reversed_chat_frame))  # Undo previously reversed order
+    # A `chat_frame` is a list of `ChatMessage`s. It should be a list with a single element for new chats and a series
+    # of messages between the `user` and `assistant`.
+    chat_frame = messages
+    if is_token_limit_check_enabled(model):
+        # Trim message list to avoid hitting selected model's token limit.
+        enc = tiktoken.encoding_for_model(model)
+        total_tokens = len(enc.encode(system_message))
+        reversed_chat_frame = []
+        for chat_message in reversed(messages):  # In reverse because message list is ordered from oldest to newest.
+            message_tokens = len(enc.encode(chat_message.content))
+            # If adding `message_tokens` pushes us over the limit, stop appending
+            if message_tokens + total_tokens > enc.max_token_value:
+                break
+            total_tokens += message_tokens
+            reversed_chat_frame.append(chat_message)
+        chat_frame = tuple(reversed(reversed_chat_frame))  # Undo previously reversed order
 
     # Update message history
     message_received = MessageReceived(
-        chat_frame=json.dumps(chat_frame[:-1]).encode('utf-8'),
+        chat_frame=json.dumps([f.dict() for f in chat_frame[:-1]]).encode('utf-8'),
         content=new_chat_message.content.encode('utf-8'),
         role=new_chat_message.role,
     )
