@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Path
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -9,6 +10,7 @@ import os
 import subprocess
 
 from api.models import ChatBookmark, ChatRequest, ChatThumbsDown, SqlRequest
+from bot.model_selector import load_model_selector, save_model_selector
 from bot.openai_utils import do_on_text
 from bot.v1 import chat as v1_chat
 from bot.v2 import chat as v2_chat
@@ -16,12 +18,25 @@ from db.models import (DATABASE_URL, SessionLocal,
                        MessageBookmark, MessageReceived, MessageReplied, MessageThumbsDown)
 from observability.logging import logging, setup_logging, traceback
 
-
 setup_logging()
 logger = logging.getLogger(__name__)
 
 bot = FastAPI()
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
+model_dir = os.getenv("MODEL_DIR", "/src/models")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    model_selector_save_file = f"{model_dir}/model_selector.pth"
+
+    # On startup
+    if os.path.exists(model_selector_save_file):
+        load_model_selector(model_selector_save_file)
+
+    yield
+    # On shutdown
+    save_model_selector(model_selector_save_file)
 
 
 @bot.get("/chat/bookmarks")
@@ -80,11 +95,6 @@ async def get_chat_bookmark(bookmark_id: int):
         raise e if isinstance(e, HTTPException) else HTTPException(status_code=500, detail=str(e))
 
 
-@bot.get("/env", include_in_schema=False)
-async def get_env():
-    return {"environ": os.environ}
-
-
 @bot.get("/favicon.ico", include_in_schema=False)
 async def get_favicon():
     file_path = os.path.join(os.path.dirname(__file__), 'static', 'favicon.ico')
@@ -112,8 +122,9 @@ async def get_healthz():
     openai_client = OpenAI()
     openai_client.close()
     return {
+        "db_url": DATABASE_URL,
+        "environ": os.environ,
         "status": "OK",
-        "db_url": DATABASE_URL
     }
 
 

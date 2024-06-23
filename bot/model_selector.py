@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from transformers import BertModel, BertTokenizer
-import random
 
 from bot.openai_utils import ENABLED_MODELS
 
@@ -49,6 +48,14 @@ def generate_embeddings(text):
     return embeddings
 
 
+# Function to load the model and optimizer state
+def load_model_selector(file_path):
+    checkpoint = torch.load(file_path)
+    model_selector.load_state_dict(checkpoint['model_selector_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    model_selector.eval()  # Set the model to evaluation mode
+
+
 # Function to predict the best model
 def predict_model(embeddings):
     model_selector.eval()
@@ -56,6 +63,14 @@ def predict_model(embeddings):
         outputs = model_selector(embeddings)
     _, predicted = torch.max(outputs, 1)
     return predicted.item()
+
+
+# Function to save the model and optimizer state
+def save_model_selector(file_path):
+    torch.save({
+        'model_selector_state_dict': model_selector.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+    }, file_path)
 
 
 # Function to train the model
