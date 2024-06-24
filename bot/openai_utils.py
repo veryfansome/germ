@@ -1,6 +1,8 @@
 from openai import OpenAI
-from openai.types.chat.chat_completion import ChatCompletion, Choice, ChatCompletionMessage
+from openai.types.chat.chat_completion import ChatCompletion, Choice
+from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from typing_extensions import Literal
+import json
 import time
 
 from api.models import ChatMessage
@@ -14,12 +16,14 @@ DEFAULT_TEMPERATURE = 0.0
 ENABLED_MODELS = (
     DEFAULT_CHAT_MODEL,
     DEFAULT_IMAGE_MODEL,
-    #'gpt-3.5-turbo',
+    'dall-e-2',
+    'gpt-3.5-turbo',
 )
-ENABLE_TOKEN_LIMIT_CHECK = {
-    DEFAULT_IMAGE_MODEL: False,
+ENABLED_TOKEN_LIMIT_CHECKS = {
     DEFAULT_CHAT_MODEL: True,
-    'gpt-3.5-turbo': True
+    DEFAULT_IMAGE_MODEL: False,
+    'dall-e-2': False,
+    'gpt-3.5-turbo': True,
 }
 ENABLED_TOOLS = {
     "generate_image": {
@@ -38,7 +42,7 @@ ENABLED_TOOLS = {
                 "required": ["prompt"]
             },
         },
-        "callback": lambda url, arguments: f"[![{arguments['prompt']}]({url})]({url})"
+        "callback": lambda func_args: generate_image(func_args['prompt'])
     }
 }
 
@@ -99,7 +103,7 @@ class ImageClient:
             )],
             created=int(time.time()),
             object="chat.completion",
-            model="dall-e-3",
+            model=self.model,
         )
 
     def generate_image(self, prompt: str,
@@ -132,40 +136,93 @@ def do_on_text(directive: str,
         return response.choices[0].message.content.strip()
 
 
+def handle_negative_feedback(chat_frame: list[ChatMessage],
+                             lookback: int = 5,
+                             tools: dict[str, dict] = None) -> ChatCompletion:
+    logger.info('checking if message is negative feedback')
+    with OpenAI() as client:
+        completion = client.chat.completions.create(
+            messages=[{
+                "role": "system",
+                "content": (
+                        "If the user's last message provides negative feedback, "
+                        + "based on the feedback provide, use the most appropriate tool to respond."
+                )}] + chat_frame[-lookback:],
+            model=DEFAULT_CHAT_MODEL, n=1, temperature=DEFAULT_TEMPERATURE,
+            tool_choice='auto', tools=tool_selection_wrapper(tools)
+        )
+        completion_message = handle_tool_calls_in_completion_response(completion, tools=tools)
+        completion.choices[0].message = completion_message
+    return completion
+
+
+# If required, call out to tools and intercept the completed message.
+def handle_tool_calls_in_completion_response(completion: ChatCompletion,
+                                             tools: dict[str, dict] = None) -> ChatCompletionMessage:
+    completion_message = completion.choices[0].message
+    logger.debug("response: %s", completion_message.content)
+
+    # If tools should be used, call them.
+    if completion_message.tool_calls:
+        response_frame = [{
+            "role": "system",
+            "content": "Combine the assistant's messages into a single message.",
+        }]
+        for tool_call in completion_message.tool_calls:
+            tool_args = json.loads(tool_call.function.arguments)
+            if "callback" in (tools if tools else ENABLED_TOOLS)[tool_call.function.name]:
+                response_frame.append({
+                    "role": "assistant",
+                    "content": (tools if tools else ENABLED_TOOLS)[tool_call.function.name]["callback"](tool_args)
+                })
+            elif tool_call.function.name in globals():
+                response_frame.append({
+                    "role": "assistant",
+                    "content": globals()[tool_call.function.name](**tool_args)
+                })
+            else:
+                raise RuntimeError(f"Unknown tool call: {tool_call.function.name}")
+        response_frame_size = len(response_frame)
+        if response_frame_size == 2:  # One besides system message
+            completion_message.content = response_frame[1]['content']
+        elif response_frame_size > 2:
+            with OpenAI() as client:
+                summary_completion = client.chat.completions.create(
+                    messages=response_frame,
+                    model=DEFAULT_CHAT_MODEL,
+                    n=1, temperature=DEFAULT_TEMPERATURE
+                )
+                completion_message.content = summary_completion.choices[0].message.content
+    return completion_message
+
+
 def is_token_limit_check_enabled(model: str) -> bool:
-    return False if model not in ENABLE_TOKEN_LIMIT_CHECK else ENABLE_TOKEN_LIMIT_CHECK[model]
+    return False if model not in ENABLED_TOKEN_LIMIT_CHECKS else ENABLED_TOKEN_LIMIT_CHECKS[model]
 
 
 def generate_image(prompt: str,
                    model=DEFAULT_IMAGE_MODEL,
                    size: Literal['1024x1024', '1024x1792', '1792x1024'] = '1024x1024',
                    style: Literal['natural', 'vivid'] = 'natural') -> object:
-    return ImageClient(model=model).generate_image(prompt, size=size, style=style)
+    url = ImageClient(model=model).generate_image(prompt, size=size, style=style)
+    return f"[![{prompt}]({url})]({url})"
 
 
 def tool_selection_wrapper(tools_with_callbacks: dict[str, dict]) -> list:
     # Callbacks need to be removed because OpenAI rejects them
     tools_without_callbacks = []
-    for tool_spec in tools_with_callbacks.values():
-        new_spec = tool_spec.copy()
-        new_spec.pop("callback")
-        tools_without_callbacks.append(new_spec)
+    if tools_with_callbacks:
+        for tool_spec in tools_with_callbacks.values():
+            new_spec = tool_spec.copy()
+            if 'callback' in new_spec:
+                new_spec.pop("callback")
+            tools_without_callbacks.append(new_spec)
     return tools_without_callbacks
-
-
-def tool_wrapper(tool_func: str, arguments: dict) -> str:
-    logger.info("tool call: %s(%s)", tool_func, arguments)
-    if "callback" in ENABLED_TOOLS[tool_func]:
-        return ENABLED_TOOLS[tool_func]["callback"](
-            globals()[tool_func](**arguments),
-            arguments
-        )
-    else:
-        return globals()[tool_func](**arguments)
 
 
 CHAT_COMPLETION_FUNCTIONS = {
     DEFAULT_CHAT_MODEL: ChatClient(model=DEFAULT_CHAT_MODEL).complete_chat,
     DEFAULT_IMAGE_MODEL: ImageClient(model=DEFAULT_IMAGE_MODEL).complete_chat,
+    "dall-e-2": ImageClient(model="dall-e-2").complete_chat,
     "gpt-3.5-turbo": ChatClient(model="gpt-3.5-turbo").complete_chat,
 }

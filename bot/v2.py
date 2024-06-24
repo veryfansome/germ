@@ -1,10 +1,15 @@
+from concurrent.futures import ThreadPoolExecutor
 from typing_extensions import Literal
+import os
 
 from api.models import ChatMessage
-from bot.model_selector import ENABLED_MODELS, generate_embeddings, predict_model
+from bot.model_selector import ENABLED_MODELS, ENABLED_TOOLS, generate_embeddings, predict_model
+from bot.openai_utils import ChatCompletion, handle_negative_feedback
 from bot.v1 import chat as v1_chat
+from db.models import MessageReplied, SessionLocal
 from observability.logging import logging
 
+executor = ThreadPoolExecutor(max_workers=os.getenv("MAX_EXECUTOR_WORKERS", 1))
 logger = logging.getLogger(__name__)
 
 
@@ -16,8 +21,15 @@ def chat(messages: list[ChatMessage],
     new_chat_message: ChatMessage = messages[-1]
     logger.debug("received: %s", new_chat_message.content)
 
+    # Start background tasks
+    future = executor.submit(handle_negative_feedback, messages, 5, ENABLED_TOOLS)
+
     # Generate embeddings
     embeddings = generate_embeddings(new_chat_message.content)
+
+    # Predict the best model
+    model = ENABLED_MODELS[predict_model(embeddings)]
+    logger.info("predicted model: %s", model)
 
     ##
     # TODO: reinforcement learning based selection >>HERE<<
@@ -42,12 +54,25 @@ def chat(messages: list[ChatMessage],
     #
     # Ref: https://platform.openai.com/docs/api-reference/chat/create
 
-    # Predict the best model
-    model = ENABLED_MODELS[predict_model(embeddings)]
-    logger.info("predicted model: %s", model)
-    return v1_chat(messages,
-                   model=model,
-                   system_message=system_message,
-                   temperature=temperature,
-                   tools=tools,
-                   tool_choice=tool_choice)
+    chat_response = v1_chat(messages,
+                            model=model,
+                            system_message=system_message,
+                            temperature=temperature,
+                            tools=tools,
+                            tool_choice=tool_choice)
+    negative_feedback_completion: ChatCompletion = future.result()
+    # If the user is providing negative feedback, don't use the normal chat response.
+    if negative_feedback_completion.choices[0].message.tool_calls:
+        with SessionLocal() as session:
+            message_replied = session.query(MessageReplied).filter(
+                MessageReplied.id == chat_response.message_replied_id).first()
+            if message_replied:
+                message_replied.content = negative_feedback_completion.choices[0].message.content.encode('utf-8')
+                message_replied.tool_calls = [
+                    c.dict() for c in negative_feedback_completion.choices[0].message.tool_calls
+                ]
+            session.commit()
+        chat_response.response = negative_feedback_completion
+        return chat_response
+    else:
+        return chat_response

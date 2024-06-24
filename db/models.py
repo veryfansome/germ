@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Boolean, Column, DateTime, ForeignKey, Integer, LargeBinary, String
+from sqlalchemy import create_engine, Boolean, Column, DateTime, ForeignKey, Integer, JSON, LargeBinary, String
 from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
 import os
@@ -29,7 +29,7 @@ class MessageBookmark(Base):
 class MessageReceived(Base):
     __tablename__ = "message_received"
     id = Column(Integer, primary_key=True, index=True)
-    chat_frame = Column(LargeBinary)
+    chat_frame = Column(JSON)
     content = Column(LargeBinary)
     role = Column(String)
     timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
@@ -41,8 +41,8 @@ class MessageReplied(Base):
     content = Column(LargeBinary)
     message_received_id = Column(Integer, ForeignKey("message_received.id"))
     role = Column(String)
+    tool_calls = Column(JSON)
     timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
-    tool_func_name = Column(String)
 
 
 class MessageThumbsDown(Base):

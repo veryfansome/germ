@@ -1,4 +1,3 @@
-from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Path
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,19 +22,21 @@ logger = logging.getLogger(__name__)
 
 bot = FastAPI()
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
-model_dir = os.getenv("MODEL_DIR", "/src/models")
+
+model_dir = os.getenv("MODEL_DIR", "/src/data/germ")
+model_selector_save_file = f"{model_dir}/model_selector.pth"
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    model_selector_save_file = f"{model_dir}/model_selector.pth"
-
-    # On startup
+@bot.on_event("startup")
+async def on_startup():
+    logger.info("Starting up...")
     if os.path.exists(model_selector_save_file):
         load_model_selector(model_selector_save_file)
 
-    yield
-    # On shutdown
+
+@bot.on_event("shutdown")
+async def on_shutdown():
+    logger.info("Shutting down...")
     save_model_selector(model_selector_save_file)
 
 
@@ -81,7 +82,7 @@ async def get_chat_bookmark(bookmark_id: int):
                 "message_summary": bookmark_record.message_summary.decode("utf-8"),
                 "message_received": {
                     "id": message_received_record.id,
-                    "chat_frame": message_received_record.chat_frame.decode("utf-8"),
+                    "chat_frame": message_received_record.chat_frame,
                     "content": message_received_record.content.decode("utf-8"),
                 },
                 "message_replied": {
