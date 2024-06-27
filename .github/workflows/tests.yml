@@ -31,6 +31,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
+      - name: Build latest image
+        run: docker build -t germ:latest .
+
       - name: Run tests
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
