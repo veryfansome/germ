@@ -118,3 +118,7 @@ def train_model_selection_neural_network(message: str, correct_model: str):
     train_model_selector(generate_embeddings(message), ENABLED_MODELS.index(correct_model))
     return (f"Ok. I've updated my model selection behavior based on "
             + f"\"{message}\" and your feedback that `{correct_model}` is the correct model")
+
+
+if __name__ == '__main__':
+    print("woot")
