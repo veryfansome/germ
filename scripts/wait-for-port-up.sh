@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-set -ex
+set -e
 
-rm -f "/var/run/$WAIT_FOR_DONE_FILE"
-while ! nc -z "$WAIT_FOR_HOST" $WAIT_FOR_PORT; do
-    sleep 1
+MARK=$(date +%s)
+while ! nc -w 1 -z "$WAIT_FOR_HOST" $WAIT_FOR_PORT; do
+    if ! (($(date +%s)-MARK)); then
+        sleep 1  # Sleep if time since MARK is less than 1s
+    fi
+    MARK=$(date +%s)
 done
 if [ -n "$WAIT_FOR_AFTER_COMMAND" ]; then
     $WAIT_FOR_AFTER_COMMAND
 fi
-touch "/var/run/$WAIT_FOR_DONE_FILE"
-sleep infinity

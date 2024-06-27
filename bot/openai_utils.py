@@ -3,7 +3,9 @@ from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from typing_extensions import Literal
 import json
+import tiktoken
 import time
+
 
 from api.models import ChatMessage
 from observability.logging import logging
@@ -136,24 +138,33 @@ def do_on_text(directive: str,
         return response.choices[0].message.content.strip()
 
 
+def generate_image(prompt: str,
+                   model=DEFAULT_IMAGE_MODEL,
+                   size: Literal['1024x1024', '1024x1792', '1792x1024'] = '1024x1024',
+                   style: Literal['natural', 'vivid'] = 'natural') -> object:
+    url = ImageClient(model=model).generate_image(prompt, size=size, style=style)
+    return f"[![{prompt}]({url})]({url})"
+
+
 def handle_negative_feedback(chat_frame: list[ChatMessage],
-                             lookback: int = 5,
                              tools: dict[str, dict] = None) -> ChatCompletion:
     logger.info('checking if message is negative feedback')
     with OpenAI() as client:
         completion = client.chat.completions.create(
             messages=[{
+                # TODO: This can be overly sensitive if there is negative feedback in the  chat frame.
+                # TODO: Maybe we should do a check on the last message separately
                 "role": "system",
                 "content": (
                         "If the user's last message provides negative feedback, "
                         + "based on the feedback provide, use the most appropriate tool to respond."
-                )}] + chat_frame[-lookback:],
+                )}] + [m for m in chat_frame],  # Comprehension for list/tuple concatenation
             model=DEFAULT_CHAT_MODEL, n=1, temperature=DEFAULT_TEMPERATURE,
             tool_choice='auto', tools=tool_selection_wrapper(tools)
         )
         completion_message = handle_tool_calls_in_completion_response(completion, tools=tools)
         completion.choices[0].message = completion_message
-    return completion
+        return completion
 
 
 # If required, call out to tools and intercept the completed message.
@@ -170,7 +181,12 @@ def handle_tool_calls_in_completion_response(completion: ChatCompletion,
         }]
         for tool_call in completion_message.tool_calls:
             tool_args = json.loads(tool_call.function.arguments)
-            if "callback" in (tools if tools else ENABLED_TOOLS)[tool_call.function.name]:
+            if tool_call.function.name == "multi_tool_use.parallel":
+                # TODO: Logging for now to see what this looks like.
+                logging.info("multi_tool_use.parallel completion_message: %s", completion_message.dict())
+            elif tool_call.function.name not in tools if tools else ENABLED_TOOLS:
+                raise RuntimeError(f"Unknown tool call: {tool_call.function.name}")
+            elif "callback" in (tools if tools else ENABLED_TOOLS)[tool_call.function.name]:
                 response_frame.append({
                     "role": "assistant",
                     "content": (tools if tools else ENABLED_TOOLS)[tool_call.function.name]["callback"](tool_args)
@@ -180,8 +196,6 @@ def handle_tool_calls_in_completion_response(completion: ChatCompletion,
                     "role": "assistant",
                     "content": globals()[tool_call.function.name](**tool_args)
                 })
-            else:
-                raise RuntimeError(f"Unknown tool call: {tool_call.function.name}")
         response_frame_size = len(response_frame)
         if response_frame_size == 2:  # One besides system message
             completion_message.content = response_frame[1]['content']
@@ -200,14 +214,6 @@ def is_token_limit_check_enabled(model: str) -> bool:
     return False if model not in ENABLED_TOKEN_LIMIT_CHECKS else ENABLED_TOKEN_LIMIT_CHECKS[model]
 
 
-def generate_image(prompt: str,
-                   model=DEFAULT_IMAGE_MODEL,
-                   size: Literal['1024x1024', '1024x1792', '1792x1024'] = '1024x1024',
-                   style: Literal['natural', 'vivid'] = 'natural') -> object:
-    url = ImageClient(model=model).generate_image(prompt, size=size, style=style)
-    return f"[![{prompt}]({url})]({url})"
-
-
 def tool_selection_wrapper(tools_with_callbacks: dict[str, dict]) -> list:
     # Callbacks need to be removed because OpenAI rejects them
     tools_without_callbacks = []
@@ -218,6 +224,24 @@ def tool_selection_wrapper(tools_with_callbacks: dict[str, dict]) -> list:
                 new_spec.pop("callback")
             tools_without_callbacks.append(new_spec)
     return tools_without_callbacks
+
+
+def trim_chat_frame(messages: list[ChatMessage], model, system_message: str = None):
+    chat_frame = messages
+    if is_token_limit_check_enabled(model):
+        # Trim message list to avoid hitting selected model's token limit.
+        enc = tiktoken.encoding_for_model(model)
+        total_tokens = len(enc.encode(system_message))
+        reversed_chat_frame = []
+        for chat_message in reversed(messages):  # In reverse because message list is ordered from oldest to newest.
+            message_tokens = len(enc.encode(chat_message.content))
+            # If adding `message_tokens` pushes us over the limit, stop appending
+            if message_tokens + total_tokens > enc.max_token_value:
+                break
+            total_tokens += message_tokens
+            reversed_chat_frame.append(chat_message)
+        chat_frame = tuple(reversed(reversed_chat_frame))  # Undo previously reversed order
+    return chat_frame
 
 
 CHAT_COMPLETION_FUNCTIONS = {

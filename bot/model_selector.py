@@ -1,7 +1,10 @@
+from transformers import BertModel, BertTokenizer
+# from transformers import DistilBertModel, DistilBertTokenizer
+import os
+import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from transformers import BertModel, BertTokenizer
 
 from bot.openai_utils import ENABLED_MODELS
 
@@ -38,6 +41,9 @@ ENABLED_TOOLS = {
     }
 }
 
+model_dir = os.getenv("MODEL_DIR", "/src/data/germ")
+save_file = f"{model_dir}/model_selector.pth"
+
 
 # Define a simple neural network for classification
 class ModelSelector(nn.Module):
@@ -58,11 +64,12 @@ class ModelSelector(nn.Module):
 
 # Load pre-trained BERT model and tokenizer
 bert_model = BertModel.from_pretrained(BERT_MODEL_NAME)
+bert_model_embedding_size = bert_model.config.hidden_size
 bert_tokenizer = BertTokenizer.from_pretrained(BERT_MODEL_NAME)
 
 # Initialize the model, loss function, and optimizer
 model_selector = ModelSelector(
-    768,  # input_dim, # BERT embedding size
+    bert_model_embedding_size,  # input_dim
     128,  # hidden_dim
     len(ENABLED_MODELS)  # output_dim
 )
@@ -80,11 +87,12 @@ def generate_embeddings(text):
 
 
 # Function to load the model and optimizer state
-def load_model_selector(file_path):
-    checkpoint = torch.load(file_path)
-    model_selector.load_state_dict(checkpoint['model_selector_state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    model_selector.eval()  # Set the model to evaluation mode
+def load_model_selector():
+    if os.path.exists(save_file):
+        checkpoint = torch.load(save_file)
+        model_selector.load_state_dict(checkpoint['model_selector_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        model_selector.eval()  # Set the model to evaluation mode
 
 
 # Function to predict the best model
@@ -97,11 +105,11 @@ def predict_model(embeddings):
 
 
 # Function to save the model and optimizer state
-def save_model_selector(file_path):
+def save_model_selector():
     torch.save({
         'model_selector_state_dict': model_selector.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-    }, file_path)
+    }, save_file)
 
 
 def train_model_selector(embeddings, label):
@@ -121,4 +129,30 @@ def train_model_selection_neural_network(message: str, correct_model: str):
 
 
 if __name__ == '__main__':
-    print("woot")
+    from observability.logging import logging, setup_logging
+    import pandas as pd
+
+    setup_logging()
+    logger = logging.getLogger(__name__)
+
+    logger.info("initializing model_selector")
+    time_started = time.time()
+    try:
+        if not os.path.exists(save_file):
+            logger.info(f"did not find {save_file}, bootstrapping")
+
+            # Initial training data to bootstrap a viable network
+            examples_dir = f"{model_dir}/examples"
+            training_csv = f"{examples_dir}/prompts.csv"
+
+            df = pd.read_csv(training_csv, delimiter=',', quotechar='"')
+            df_shuffled = df.sample(frac=1).reset_index(drop=True)
+            logger.info(f"finished preparing dataframe after {time.time() - time_started}s")
+
+            for index, row in df_shuffled.iterrows():
+                train_model_selector(generate_embeddings(row['Prompt']), ENABLED_MODELS.index(row['Model']))
+                logger.info(f"finished case #{index} after {time.time() - time_started}s")
+            save_model_selector()
+        logger.info(f"finished model_selector initialization after {time.time() - time_started}s")
+    except Exception as exc:
+        logger.info(f"failed to initialize model_selector after {time.time() - time_started}s: %s", exc)

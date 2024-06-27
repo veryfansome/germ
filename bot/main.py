@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Path
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,24 +21,17 @@ from observability.logging import logging, setup_logging, traceback
 setup_logging()
 logger = logging.getLogger(__name__)
 
-bot = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info(f"Started")
+    load_model_selector()
+    yield
+    save_model_selector()
+
+
+bot = FastAPI(lifespan=lifespan)
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
-
-model_dir = os.getenv("MODEL_DIR", "/src/data/germ")
-model_selector_save_file = f"{model_dir}/model_selector.pth"
-
-
-@bot.on_event("startup")
-async def on_startup():
-    logger.info("Starting up...")
-    if os.path.exists(model_selector_save_file):
-        load_model_selector(model_selector_save_file)
-
-
-@bot.on_event("shutdown")
-async def on_shutdown():
-    logger.info("Shutting down...")
-    save_model_selector(model_selector_save_file)
 
 
 @bot.get("/chat/bookmarks")
@@ -108,12 +102,6 @@ async def get_landing():
     return FileResponse(file_path)
 
 
-@bot.get("/logo.webp", include_in_schema=False)
-async def get_logo_webp():
-    file_path = os.path.join(os.path.dirname(__file__), 'static', 'logo.webp')
-    return FileResponse(file_path)
-
-
 @bot.get("/healthz")
 async def get_healthz():
     # Is PostgreSQL usable?
@@ -132,18 +120,6 @@ async def get_healthz():
 @bot.get("/postgres.html", include_in_schema=False)
 async def get_postgres_landing(request: Request):
     file_path = os.path.join(os.path.dirname(__file__), 'static', 'postgres.html')
-    return FileResponse(file_path)
-
-
-@bot.get("/ui.css", include_in_schema=False)
-async def get_ui_css():
-    file_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.css')
-    return FileResponse(file_path)
-
-
-@bot.get("/ui.js", include_in_schema=False)
-async def get_ui_js():
-    file_path = os.path.join(os.path.dirname(__file__), 'static', 'ui.js')
     return FileResponse(file_path)
 
 

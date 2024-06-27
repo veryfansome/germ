@@ -9,8 +9,8 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
 
-    <link rel="stylesheet" href="/ui.css">
-    <script src="/ui.js"></script>
+    <link rel="stylesheet" href="/static/ui.css">
+    <script src="/static/ui.js"></script>
     <style></style>
 </head>
 <body>
@@ -93,7 +93,7 @@
             .then(data => {
                 let messageReceived = data['message_received'];
                 let messageReceivedContent = messageReceived['content'];
-                let messageReceivedChatFrame = JSON.parse(messageReceived['chat_frame']);
+                let messageReceivedChatFrame = messageReceived['chat_frame'];
                 let messageReplied = data['message_replied'];
                 let messageRepliedContent = messageReplied['content'];
                 let messageRepliedRole = messageReplied['role'];

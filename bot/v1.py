@@ -1,11 +1,10 @@
 from typing_extensions import Literal
-import json
-import tiktoken
 
 from api.models import ChatMessage, ChatResponse
 from bot.openai_utils import (CHAT_COMPLETION_FUNCTIONS,
                               DEFAULT_CHAT_MODEL,
-                              ENABLED_TOOLS, handle_tool_calls_in_completion_response, is_token_limit_check_enabled)
+                              ENABLED_TOOLS,
+                              handle_tool_calls_in_completion_response, is_token_limit_check_enabled, trim_chat_frame)
 from db.models import MessageReceived, MessageReplied, SessionLocal
 from observability.logging import logging
 
@@ -26,20 +25,7 @@ def chat(messages: list[ChatMessage],
 
     # A `chat_frame` is a list of `ChatMessage`s. It should be a list with a single element for new chats and a series
     # of messages between the `user` and `assistant`.
-    chat_frame = messages
-    if is_token_limit_check_enabled(model):
-        # Trim message list to avoid hitting selected model's token limit.
-        enc = tiktoken.encoding_for_model(model)
-        total_tokens = len(enc.encode(system_message))
-        reversed_chat_frame = []
-        for chat_message in reversed(messages):  # In reverse because message list is ordered from oldest to newest.
-            message_tokens = len(enc.encode(chat_message.content))
-            # If adding `message_tokens` pushes us over the limit, stop appending
-            if message_tokens + total_tokens > enc.max_token_value:
-                break
-            total_tokens += message_tokens
-            reversed_chat_frame.append(chat_message)
-        chat_frame = tuple(reversed(reversed_chat_frame))  # Undo previously reversed order
+    chat_frame = trim_chat_frame(messages, model, system_message=system_message)
 
     # Update message history
     message_received = MessageReceived(

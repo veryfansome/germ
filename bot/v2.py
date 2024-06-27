@@ -4,7 +4,7 @@ import os
 
 from api.models import ChatMessage
 from bot.model_selector import ENABLED_MODELS, ENABLED_TOOLS, generate_embeddings, predict_model
-from bot.openai_utils import ChatCompletion, handle_negative_feedback
+from bot.openai_utils import DEFAULT_CHAT_MODEL, ChatCompletion, handle_negative_feedback, trim_chat_frame
 from bot.v1 import chat as v1_chat
 from db.models import MessageReplied, SessionLocal
 from observability.logging import logging
@@ -22,7 +22,10 @@ def chat(messages: list[ChatMessage],
     logger.debug("received: %s", new_chat_message.content)
 
     # Start background tasks
-    future = executor.submit(handle_negative_feedback, messages, 5, ENABLED_TOOLS)
+    future_negative_feedback_completion = executor.submit(
+        handle_negative_feedback,
+        trim_chat_frame(messages, DEFAULT_CHAT_MODEL, system_message=system_message),
+        ENABLED_TOOLS)
 
     # Generate embeddings
     embeddings = generate_embeddings(new_chat_message.content)
@@ -60,7 +63,7 @@ def chat(messages: list[ChatMessage],
                             temperature=temperature,
                             tools=tools,
                             tool_choice=tool_choice)
-    negative_feedback_completion: ChatCompletion = future.result()
+    negative_feedback_completion: ChatCompletion = future_negative_feedback_completion.result()
     # If the user is providing negative feedback, don't use the normal chat response.
     if negative_feedback_completion.choices[0].message.tool_calls:
         with SessionLocal() as session:

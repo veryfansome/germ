@@ -7,13 +7,13 @@ services:
     container_name: germ-bot
     depends_on:
       db-init:
-        condition: service_healthy
+        condition: service_completed_successfully
       jaeger-init:
-        condition: service_healthy
+        condition: service_completed_successfully
       model-selector-init:
-        condition: service_healthy
+        condition: service_completed_successfully
       test:
-        condition: service_healthy
+        condition: service_completed_successfully
     build:
       context: .
       dockerfile: Dockerfile
@@ -63,17 +63,10 @@ services:
     environment:
       <<: *local-dev
       WAIT_FOR_AFTER_COMMAND: python -m db.models
-      WAIT_FOR_DONE_FILE: up.db
       WAIT_FOR_HOST: *db-host
       WAIT_FOR_PORT: 5432
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
-    healthcheck:
-      test: ["CMD", "stat", "/var/run/up.db"]
-      interval: 1s
-      timeout: 1s
-      retries: 300
-    stop_grace_period: 0s
 
   # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
   jaeger:
@@ -81,9 +74,9 @@ services:
     container_name: &jaeger-host germ-jaeger
     depends_on:
       otel-collector-init:
-        condition: service_healthy
+        condition: service_completed_successfully
       prometheus-init:
-        condition: service_healthy
+        condition: service_completed_successfully
     image: jaegertracing/all-in-one:latest
     environment:
       - COLLECTOR_OTLP_ENABLED=true
@@ -108,32 +101,22 @@ services:
     volumes:
       - ./:/src
     environment:
-      WAIT_FOR_DONE_FILE: up.jaeger
       WAIT_FOR_HOST: *jaeger-host
       WAIT_FOR_PORT: 4317
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
-    healthcheck:
-      test: ["CMD", "stat", "/var/run/up.jaeger"]
-      interval: 1s
-      timeout: 1s
-      retries: 300
-    stop_grace_period: 0s
 
   model-selector-init:
     container_name: germ-model-selector-init
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: "germ:latest"
     volumes:
       - ./:/src
     environment: *local-dev
     working_dir: /src
-    command: [ "bot/model-selector-init.sh" ]
-    healthcheck:
-      test: ["CMD", "stat", "/var/run/done.model_selector"]
-      interval: 1s
-      timeout: 1s
-      retries: 300
-    stop_grace_period: 0s
+    command: ["python", "-m", "bot.model_selector"]
 
   # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
   prometheus:
@@ -141,7 +124,7 @@ services:
     container_name: &prometheus-host germ-prometheus
     depends_on:
       otel-collector-init:
-        condition: service_healthy
+        condition: service_completed_successfully
     image: prom/prometheus:v2.52.0
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
@@ -158,17 +141,10 @@ services:
     volumes:
       - ./:/src
     environment:
-      WAIT_FOR_DONE_FILE: up.prometheus
       WAIT_FOR_HOST: *prometheus-host
       WAIT_FOR_PORT: 9090
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
-    healthcheck:
-      test: ["CMD", "stat", "/var/run/up.prometheus"]
-      interval: 1s
-      timeout: 1s
-      retries: 300
-    stop_grace_period: 0s
 
   # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
   otel-collector:
@@ -189,35 +165,24 @@ services:
     volumes:
       - ./:/src
     environment:
-      WAIT_FOR_DONE_FILE: up.otel
       WAIT_FOR_HOST: *otel-collector-host
       WAIT_FOR_PORT: 4318
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
-    healthcheck:
-      test: ["CMD", "stat", "/var/run/up.otel"]
-      interval: 1s
-      timeout: 1s
-      retries: 300
-    stop_grace_period: 0s
 
   test:
     networks: [bots]
     container_name: germ-test
+    links: [db]
     depends_on:
       db-init:
-        condition: service_healthy
-      model-selector-init:
-        condition: service_healthy
+        condition: service_completed_successfully
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: "germ:latest"
     volumes:
       - ./:/src
     environment: *local-dev
     working_dir: /src
     command: ["tests/run.sh"]
-    healthcheck:
-      test: ["CMD", "stat", "/src/tests/report.xml"]
-      interval: 1s
-      timeout: 1s
-      retries: 300
-    stop_grace_period: 0s
