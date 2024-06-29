@@ -11,7 +11,7 @@ def test_healthz():
     assert response.json()["status"] == "OK"
 
 
-def test_chat_pageload():
+def test_chat_page_load():
     response = client.get("/")
     assert response.status_code == 200
 
@@ -41,15 +41,6 @@ def test_basic_interactions():
     bookmark_post_data = bookmark_post_response.json()
     assert "id" in bookmark_post_data
 
-    # Thumbs down
-    thumbs_down_response = client.post("/chat/thumbs-down", json={
-        'message_received_id': chat_data["message_received_id"],
-        'message_replied_id': chat_data["message_replied_id"],
-    })
-    assert thumbs_down_response.status_code == 200
-    thumbs_down_data = thumbs_down_response.json()
-    assert "id" in thumbs_down_data
-
     # Retrieve bookmarked messages
     bookmark_get_response = client.get(f"/chat/bookmark/{bookmark_post_data['id']}")
     assert bookmark_get_response.status_code == 200
@@ -64,7 +55,7 @@ def test_basic_interactions():
     assert bookmark_get_data["message_replied"]["id"] == chat_data["message_replied_id"]
 
 
-def test_postgres_pageload():
+def test_postgres_page_load():
     response = client.get("/postgres.html")
     assert response.status_code == 200
 

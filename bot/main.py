@@ -9,13 +9,13 @@ import hashlib
 import os
 import subprocess
 
-from api.models import ChatBookmark, ChatRequest, ChatThumbsDown, SqlRequest
+from api.models import ChatBookmark, ChatRequest, SqlRequest
 from bot.model_selector import load_model_selector, save_model_selector
 from bot.openai_utils import do_on_text
 from bot.v1 import chat as v1_chat
 from bot.v2 import chat as v2_chat
 from db.models import (DATABASE_URL, SessionLocal,
-                       MessageBookmark, MessageReceived, MessageReplied, MessageThumbsDown)
+                       MessageBookmark, MessageReceived, MessageReplied)
 from observability.logging import logging, setup_logging, traceback
 
 setup_logging()
@@ -196,40 +196,6 @@ async def post_chat_bookmark(payload: ChatBookmark) -> ChatBookmark:
     except Exception as e:
         logger.error("%s: trace: %s", e, traceback.format_exc())
         raise e if isinstance(e, HTTPException) else HTTPException(status_code=500, detail=str(e))
-
-
-@bot.post("/chat/thumbs-down")
-async def post_chat_thumbs_down(payload: ChatThumbsDown) -> ChatThumbsDown:
-    try:
-        with SessionLocal() as session:
-            # If already bookmarked, return existing
-            existing_thumbs_down_record = session.query(MessageThumbsDown).where(
-                MessageThumbsDown.message_received_id == payload.message_received_id,
-                MessageThumbsDown.message_replied_id == payload.message_replied_id,
-                ).one_or_none()
-            if existing_thumbs_down_record:
-                return ChatThumbsDown(
-                    id=existing_thumbs_down_record.id,
-                    is_test=existing_thumbs_down_record.is_test,
-                    message_received_id=existing_thumbs_down_record.message_received_id,
-                    message_replied_id=existing_thumbs_down_record.message_replied_id,
-                )
-
-            new_thumbs_down_record = MessageThumbsDown(
-                is_test=payload.is_test,
-                message_received_id=payload.message_received_id,
-                message_replied_id=payload.message_replied_id)
-            session.add(new_thumbs_down_record)
-            session.commit()
-            session.refresh(new_thumbs_down_record)
-        return ChatThumbsDown(
-            id=new_thumbs_down_record.id,
-            is_test=new_thumbs_down_record.is_test,
-            message_received_id=new_thumbs_down_record.message_received_id,
-            message_replied_id=new_thumbs_down_record.message_replied_id)
-    except Exception as e:
-        logger.error("%s: trace: %s", e, traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @bot.post("/postgres/{db}/query")

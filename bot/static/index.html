@@ -205,35 +205,6 @@
             });
             assistantMessageBox.appendChild(bookmarkLink);
 
-            // Render thumbs-down button
-            const thumbsDownLink = document.createElement('a');
-            thumbsDownLink.className = "chatbox-message-link";
-            thumbsDownLink.innerHTML = `<i class="fa fa-thumbs-down">`;
-            thumbsDownLink.addEventListener('click', (event) => {
-                event.preventDefault();
-                thumbsDownLink.classList.add('clicked-chatbox-message-link');
-                fetch('/chat/thumbs-down', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        is_test: false,
-                        message_received_id: messageReceivedId,
-                        message_replied_content: responseContent,
-                        message_replied_id: messageRepliedId
-                    })
-                })
-                .then(response => throwOrJson(response))
-                .then(data => {
-                    console.log('Thumbed down:', data);
-                    // TODO
-                })
-                .catch(error => {
-                    thumbsDownLink.classList.remove('clicked-chatbox-message-link');
-                    handleError(error, 'Thumb down failed:')
-                });
-            });
-            assistantMessageBox.appendChild(thumbsDownLink);
-
             // Render response
             chatbox.appendChild(assistantMessageBox);
             hljs.highlightAll();

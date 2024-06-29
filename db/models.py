@@ -45,14 +45,5 @@ class MessageReplied(Base):
     timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
 
 
-class MessageThumbsDown(Base):
-    __tablename__ = "message_thumbs_down"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    is_test = Column(Boolean, default=True)
-    message_received_id = Column(Integer, ForeignKey("message_received.id"), nullable=False)
-    message_replied_id = Column(Integer, ForeignKey("message_replied.id"), nullable=False)
-    timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
-
-
 # Create the tables in the database
 Base.metadata.create_all(bind=engine)

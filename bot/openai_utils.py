@@ -157,7 +157,7 @@ def handle_negative_feedback(chat_frame: list[ChatMessage],
                 "role": "system",
                 "content": (
                         "If the user's last message provides negative feedback, "
-                        + "based on the feedback provide, use the most appropriate tool to respond."
+                        + "based on the feedback provided, use the most appropriate tool to respond."
                 )}] + [m for m in chat_frame],  # Comprehension for list/tuple concatenation
             model=DEFAULT_CHAT_MODEL, n=1, temperature=DEFAULT_TEMPERATURE,
             tool_choice='auto', tools=tool_selection_wrapper(tools)

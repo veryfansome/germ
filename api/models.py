@@ -28,12 +28,5 @@ class ChatResponse(BaseModel):
     response: Optional[ChatCompletion] = None
 
 
-class ChatThumbsDown(BaseModel):
-    id: Optional[int] = None
-    is_test: Optional[bool] = True
-    message_received_id: Optional[int] = None
-    message_replied_id: Optional[int] = None
-
-
 class SqlRequest(BaseModel):
     sql: str
