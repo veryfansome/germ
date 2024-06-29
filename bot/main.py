@@ -32,6 +32,9 @@ async def lifespan(app: FastAPI):
 
 bot = FastAPI(lifespan=lifespan)
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
+if os.path.exists("bot/static/tests"):
+    bot.mount("/tests", StaticFiles(directory="bot/static/tests"), name="tests")
+    bot.mount("/tests/cov", StaticFiles(directory="bot/static/tests/cov"), name="tests_cov")
 
 
 @bot.get("/chat/bookmarks")
@@ -174,10 +177,8 @@ async def post_chat_bookmark(payload: ChatBookmark) -> ChatBookmark:
 
             # 70 characters is a "guideline" because we don't enforce it with a `max_tokens=`.
             message_summary = do_on_text(
-                "Summarize the following prompt and response in 70 characters or less",
-                ('# Prompt:\n\n' + message_received_record.content.decode('utf-8')
-                 + '\n\n# Response:\n\n' + message_replied_record.content.decode('utf-8'))
-            )
+                "Summarize the following in 70 characters or less",
+                message_received_record.content.decode('utf-8'), max_tokens=70)
             new_bookmark_record = MessageBookmark(
                 is_test=payload.is_test,
                 message_received_id=payload.message_received_id,

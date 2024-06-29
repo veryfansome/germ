@@ -184,7 +184,7 @@ def handle_tool_calls_in_completion_response(completion: ChatCompletion,
             if tool_call.function.name == "multi_tool_use.parallel":
                 # TODO: Logging for now to see what this looks like.
                 logging.info("multi_tool_use.parallel completion_message: %s", completion_message.dict())
-            elif tool_call.function.name not in tools if tools else ENABLED_TOOLS:
+            elif tool_call.function.name not in (tools if tools else ENABLED_TOOLS):
                 raise RuntimeError(f"Unknown tool call: {tool_call.function.name}")
             elif "callback" in (tools if tools else ENABLED_TOOLS)[tool_call.function.name]:
                 response_frame.append({

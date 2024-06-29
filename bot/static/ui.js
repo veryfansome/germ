@@ -145,6 +145,8 @@ function scrollChatBoxToBottom() {
 function setVersionMarker(version) {
     const versionMarker = document.getElementById('version-marker');
     versionMarker.innerText = version;
+    const chatNavLink = document.getElementById("chat-nav-link")
+    chatNavLink.href = `/?bot_version=${version}`
     return version;
 }
 

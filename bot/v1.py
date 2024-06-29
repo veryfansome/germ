@@ -49,7 +49,7 @@ def chat(messages: list[ChatMessage],
 
     # Update message history
     message_replied = MessageReplied(
-        content=None if completion_message.tool_calls else completion_message.content.encode('utf-8'),
+        content=completion_message.content.encode('utf-8'),
         message_received_id=message_received.id,
         role=completion_message.role,
         tool_calls=None if not completion_message.tool_calls else [c.dict() for c in completion_message.tool_calls]
