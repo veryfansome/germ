@@ -10,6 +10,7 @@ psycopg2-binary
 pydantic~=2.7.3
 pytest
 pytest-cov
+pytest-xdist
 python-dotenv
 sqlalchemy~=2.0.30
 tiktoken~=0.7.0

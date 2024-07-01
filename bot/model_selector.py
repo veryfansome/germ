@@ -8,7 +8,7 @@ import torch.optim as optim
 
 from bot.openai_utils import ENABLED_MODELS
 
-BERT_MODEL_NAME = 'bert-base-uncased'  # TODO: Picked by gpt-4o, may not be the most current.
+BERT_MODEL_NAME = os.getenv('BERT_MODEL_NAME', 'bert-base-uncased')
 ENABLED_TOOLS = {
     "train_model_selection_neural_network": {
         "type": "function",
