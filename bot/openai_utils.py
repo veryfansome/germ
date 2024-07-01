@@ -1,15 +1,17 @@
+from concurrent.futures import ThreadPoolExecutor
 from openai import OpenAI
 from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from typing_extensions import Literal
 import json
+import os
 import tiktoken
 import time
-
 
 from api.models import ChatMessage
 from observability.logging import logging
 
+executor = ThreadPoolExecutor(max_workers=os.getenv("MAX_EXECUTOR_WORKERS", 1))
 logger = logging.getLogger(__name__)
 
 DEFAULT_CHAT_MODEL = "gpt-4o"
@@ -146,9 +148,35 @@ def generate_image(prompt: str,
     return f"[![{prompt}]({url})]({url})"
 
 
-def handle_negative_feedback(chat_frame: list[ChatMessage],
-                             tools: dict[str, dict] = None) -> ChatCompletion:
-    logger.info('checking if message is negative feedback')
+def is_feedback(message: str, system_message: str = None) -> str:
+    prompt = ' '.join((
+        "Is the **Message** below expressing agreement/disagreement, approval/disapproval,"
+        "pointing out a correct choice, suggesting an alternate choice, or otherwise giving feedback?",
+
+        "If no, answer 'No'.",
+
+        "If yes, answer 'Yes', except if the message expresses agreement/approval, like \"you got it right\",",
+        "or disagreement/disapproval, like \"that's not right\",",
+        "but does not specifically mention a preferred choice or alternative,",
+        "don't answer 'Yes, instead, answer 'Partial'.",
+    ))
+    completion_content = prompt + f"""
+**Message**: {message}
+"""
+    with OpenAI() as client:
+        completion = client.chat.completions.create(
+            messages=(([{"role": "system", "content": system_message}] if system_message else [])
+                      + [{"role": "user", "content": completion_content}]),
+            model=DEFAULT_CHAT_MODEL, n=1, temperature=0.0
+        )
+        completion_message_content = completion.choices[0].message.content.strip().strip('.')
+        logger.info("is feedback answer: %s", completion_message_content)
+        return completion_message_content
+
+
+def handle_feedback(chat_frame: list[ChatMessage],
+                    tools: dict[str, dict]) -> ChatCompletion:
+    logger.info('checking if message is user giving feedback')
     with OpenAI() as client:
         completion = client.chat.completions.create(
             messages=[{
@@ -212,6 +240,26 @@ def handle_tool_calls_in_completion_response(completion: ChatCompletion,
 
 def is_token_limit_check_enabled(model: str) -> bool:
     return False if model not in ENABLED_TOKEN_LIMIT_CHECKS else ENABLED_TOKEN_LIMIT_CHECKS[model]
+
+
+def summarize_multiple_completions(completions: list[ChatCompletion]) -> ChatCompletion:
+    completions_len = len(completions)
+    if completions_len == 1:
+        return completions[0]
+    elif completions_len > 1:
+        prompt = "Summarize the following **Messages**:" + """
+# **Messages**:
+"""
+        logger.info(f"consolidating {completions_len} completions:\n{prompt}")
+        for completion in completions:
+            prompt += f"\n- {completion.message.content.strip()}"
+        with OpenAI() as client:
+            summary_completion = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model=DEFAULT_CHAT_MODEL,
+                n=1, temperature=0.0
+            )
+            return summary_completion
 
 
 def tool_selection_wrapper(tools_with_callbacks: dict[str, dict]) -> list:

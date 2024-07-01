@@ -3,14 +3,25 @@ from typing_extensions import Literal
 import os
 
 from api.models import ChatMessage
-from bot.model_selector import ENABLED_MODELS, ENABLED_TOOLS, generate_embeddings, predict_model
-from bot.openai_utils import DEFAULT_CHAT_MODEL, ChatCompletion, handle_negative_feedback, trim_chat_frame
+from bot.model_selector import (ENABLED_MODELS,
+                                ENABLED_TOOLS as MODEL_SELECTOR_TOOLS,
+                                generate_embeddings, predict_model)
+from bot.openai_utils import (DEFAULT_CHAT_MODEL, ChatCompletion,
+                              handle_feedback, summarize_multiple_completions, trim_chat_frame)
 from bot.v1 import chat as v1_chat
 from db.models import MessageReplied, SessionLocal
 from observability.logging import logging
 
 executor = ThreadPoolExecutor(max_workers=os.getenv("MAX_EXECUTOR_WORKERS", 1))
 logger = logging.getLogger(__name__)
+
+# TODO: Use a real class?
+subscribers = {
+    "model_selector_trainer": {
+        "message_handler": handle_feedback,
+        "tools": MODEL_SELECTOR_TOOLS,
+    }
+}
 
 
 def chat(messages: list[ChatMessage],
@@ -21,14 +32,16 @@ def chat(messages: list[ChatMessage],
     new_chat_message: ChatMessage = messages[-1]
     logger.debug("received: %s", new_chat_message.content)
 
-    # Start background tasks
-    future_negative_feedback_completion = executor.submit(
-        handle_negative_feedback,
-        trim_chat_frame(messages, DEFAULT_CHAT_MODEL, system_message=system_message),
-        ENABLED_TOOLS)
-
     # Generate embeddings
     embeddings = generate_embeddings(new_chat_message.content)
+
+    # Start background tasks
+    subscriber_task_results = {}
+    for subscriber, attr in subscribers:
+        subscriber_task_results[subscriber] = executor.submit(
+            attr['message_handler'],
+            trim_chat_frame(messages, DEFAULT_CHAT_MODEL, system_message=system_message),
+            attr['tools'],)
 
     # Predict the best model
     model = ENABLED_MODELS[predict_model(embeddings)]
@@ -63,19 +76,26 @@ def chat(messages: list[ChatMessage],
                             temperature=temperature,
                             tools=tools,
                             tool_choice=tool_choice)
-    negative_feedback_completion: ChatCompletion = future_negative_feedback_completion.result()
-    # If the user is providing negative feedback, don't use the normal chat response.
-    if negative_feedback_completion.choices[0].message.tool_calls:
+
+    replacement_candidates: list[ChatCompletion] = []
+    for subscriber, future_result in subscriber_task_results:
+        task_result_completion: ChatCompletion = future_result.result()
+        if task_result_completion.choices[0].message.tool_calls:
+            replacement_candidates.append(task_result_completion)
+
+    if replacement_candidates:
+        new_completion = summarize_multiple_completions(replacement_candidates)
+        # Update chat history
         with SessionLocal() as session:
             message_replied = session.query(MessageReplied).filter(
                 MessageReplied.id == chat_response.message_replied_id).first()
             if message_replied:
-                message_replied.content = negative_feedback_completion.choices[0].message.content.encode('utf-8')
+                message_replied.content = new_completion.choices[0].message.content.encode('utf-8')
                 message_replied.tool_calls = [
-                    c.dict() for c in negative_feedback_completion.choices[0].message.tool_calls
+                    c.dict() for c in new_completion.choices[0].message.tool_calls
                 ]
             session.commit()
-        chat_response.response = negative_feedback_completion
+        chat_response.response = new_completion
         return chat_response
     else:
         return chat_response
