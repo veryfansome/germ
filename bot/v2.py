@@ -12,7 +12,7 @@ from bot.v1 import chat as v1_chat
 from db.models import MessageReplied, SessionLocal
 from observability.logging import logging
 
-executor = ThreadPoolExecutor(max_workers=os.getenv("MAX_EXECUTOR_WORKERS", 1))
+executor = ThreadPoolExecutor(max_workers=os.getenv("MAX_EXECUTOR_WORKERS", 3))
 logger = logging.getLogger(__name__)
 
 # TODO: Use a real class?
@@ -37,7 +37,7 @@ def chat(messages: list[ChatMessage],
 
     # Start background tasks
     subscriber_task_results = {}
-    for subscriber, attr in subscribers:
+    for subscriber, attr in subscribers.items():
         subscriber_task_results[subscriber] = executor.submit(
             attr['message_handler'],
             trim_chat_frame(messages, DEFAULT_CHAT_MODEL, system_message=system_message),
@@ -78,7 +78,7 @@ def chat(messages: list[ChatMessage],
                             tool_choice=tool_choice)
 
     replacement_candidates: list[ChatCompletion] = []
-    for subscriber, future_result in subscriber_task_results:
+    for subscriber, future_result in subscriber_task_results.items():
         task_result_completion: ChatCompletion = future_result.result()
         if task_result_completion.choices[0].message.tool_calls:
             replacement_candidates.append(task_result_completion)

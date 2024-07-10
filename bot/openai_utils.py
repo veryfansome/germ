@@ -148,51 +148,39 @@ def generate_image(prompt: str,
     return f"[![{prompt}]({url})]({url})"
 
 
-def is_feedback(message: str, system_message: str = None) -> str:
-    prompt = ' '.join((
-        "Is the **Message** below expressing agreement/disagreement, approval/disapproval,"
-        "pointing out a correct choice, suggesting an alternate choice, or otherwise giving feedback?",
-
-        "If no, answer 'No'.",
-
-        "If yes, answer 'Yes', except if the message expresses agreement/approval, like \"you got it right\",",
-        "or disagreement/disapproval, like \"that's not right\",",
-        "but does not specifically mention a preferred choice or alternative,",
-        "don't answer 'Yes, instead, answer 'Partial'.",
-    ))
-    completion_content = prompt + f"""
-**Message**: {message}
-"""
-    with OpenAI() as client:
-        completion = client.chat.completions.create(
-            messages=(([{"role": "system", "content": system_message}] if system_message else [])
-                      + [{"role": "user", "content": completion_content}]),
-            model=DEFAULT_CHAT_MODEL, n=1, temperature=0.0
-        )
-        completion_message_content = completion.choices[0].message.content.strip().strip('.')
-        logger.info("is feedback answer: %s", completion_message_content)
-        return completion_message_content
-
-
 def handle_feedback(chat_frame: list[ChatMessage],
                     tools: dict[str, dict]) -> ChatCompletion:
-    logger.info('checking if message is user giving feedback')
-    with OpenAI() as client:
-        completion = client.chat.completions.create(
-            messages=[{
-                # TODO: This can be overly sensitive if there is negative feedback in the  chat frame.
-                # TODO: Maybe we should do a check on the last message separately
-                "role": "system",
-                "content": (
-                        "If the user's last message provides negative feedback, "
-                        + "based on the feedback provided, use the most appropriate tool to respond."
-                )}] + [m for m in chat_frame],  # Comprehension for list/tuple concatenation
-            model=DEFAULT_CHAT_MODEL, n=1, temperature=DEFAULT_TEMPERATURE,
-            tool_choice='auto', tools=tool_selection_wrapper(tools)
+    if is_feedback(chat_frame[-1].content) == 'Yes':
+        with OpenAI() as client:
+            completion = client.chat.completions.create(
+                messages=[{
+                    "role": "system",
+                    "content": ' '.join((
+                        "The user's last message provides feedback.",
+                        "Based on this feedback, use a tool to respond if appropriate."
+                        "If no tool seems appropriate, respond, 'Missing appropriate tools'."
+                    ))}] + [m for m in chat_frame],  # Comprehension for list/tuple concatenation
+                model=DEFAULT_CHAT_MODEL, n=1, temperature=DEFAULT_TEMPERATURE,
+                tool_choice='auto', tools=tool_selection_wrapper(tools)
+            )
+            completion_message = handle_tool_calls_in_completion_response(completion, tools=tools)
+            completion.choices[0].message = completion_message
+            return completion
+    else:
+        return ChatCompletion(
+            id='none',
+            choices=[Choice(
+                finish_reason='stop',
+                index=0,
+                message=ChatCompletionMessage(
+                    content="Not feedback.",
+                    role='assistant'
+                ),
+            )],
+            created=int(time.time()),
+            object="chat.completion",
+            model=DEFAULT_CHAT_MODEL,
         )
-        completion_message = handle_tool_calls_in_completion_response(completion, tools=tools)
-        completion.choices[0].message = completion_message
-        return completion
 
 
 # If required, call out to tools and intercept the completed message.
@@ -236,6 +224,33 @@ def handle_tool_calls_in_completion_response(completion: ChatCompletion,
                 )
                 completion_message.content = summary_completion.choices[0].message.content
     return completion_message
+
+
+def is_feedback(message: str, system_message: str = None) -> str:
+    prompt = ' '.join((
+        "Is the **Message** below expressing agreement/disagreement, approval/disapproval,"
+        "pointing out a correct choice, suggesting an alternate choice, or otherwise giving feedback?",
+
+        "If no, answer 'No'.",
+
+        "If yes, answer 'Yes', except if the message expresses agreement/approval, like \"you got it right\",",
+        "or disagreement/disapproval, like \"that's not right\",",
+        "but does not specifically mention a preferred choice or alternative,",
+        "don't answer 'Yes, instead, answer 'Partial'.",
+    ))
+    completion_content = prompt + f"""
+**Message**: {message}
+"""
+    logger.info('checking if message is user giving feedback')
+    with OpenAI() as client:
+        completion = client.chat.completions.create(
+            messages=(([{"role": "system", "content": system_message}] if system_message else [])
+                      + [{"role": "user", "content": completion_content}]),
+            model=DEFAULT_CHAT_MODEL, n=1, temperature=0.0
+        )
+        completion_message_content = completion.choices[0].message.content.strip().strip('.')
+        logger.info("is feedback answer: %s", completion_message_content)
+        return completion_message_content
 
 
 def is_token_limit_check_enabled(model: str) -> bool:
