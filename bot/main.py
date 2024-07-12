@@ -3,7 +3,19 @@ from fastapi import FastAPI, HTTPException, Path
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
+from opentelemetry import metrics, trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.prometheus import PrometheusMetricReader
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider, SynchronousMultiSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.trace import SpanKind
+from prometheus_client import make_asgi_app
+from starlette.middleware.base import RequestResponseEndpoint
 from starlette.requests import Request
+from starlette.responses import Response
 from typing import Optional
 import hashlib
 import os
@@ -18,16 +30,51 @@ from db.models import (DATABASE_URL, SessionLocal,
                        MessageBookmark, MessageReceived, MessageReplied)
 from observability.logging import logging, setup_logging, traceback
 
+resource = Resource.create({
+    "service.name": os.getenv("SERVICE_NAME", "germ-bot"),
+})
+
+##
+# Logging
+
 setup_logging()
 logger = logging.getLogger(__name__)
+
+##
+# Metrics
+
+#metric_reader = PrometheusMetricReader()
+#metrics.set_meter_provider(
+#    MeterProvider(resource=resource, metric_readers=[metric_reader])
+#)
+
+##
+# Tracing
+
+multi_span_processor = SynchronousMultiSpanProcessor()
+multi_span_processor.add_span_processor(
+    BatchSpanProcessor(
+        OTLPSpanExporter(
+            endpoint="http://{otlp_host}:{otlp_port}/v1/traces".format(
+                otlp_host=os.getenv("OTLP_HOST", "germ-otel-collector"),
+                otlp_port=os.getenv("OTLP_PORT", "4318")
+            ),
+        )
+    )
+)
+trace.set_tracer_provider(
+    TracerProvider(resource=resource, active_span_processor=multi_span_processor)
+)
+tracer = trace.get_tracer(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Started")
-    load_model_selector()
+    # load_model_selector()
     yield
-    save_model_selector()
+    # save_model_selector()
+    pass
 
 
 bot = FastAPI(lifespan=lifespan)
@@ -35,6 +82,20 @@ bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
 if os.path.exists("bot/static/tests"):
     bot.mount("/tests", StaticFiles(directory="bot/static/tests"), name="tests")
     bot.mount("/tests/cov", StaticFiles(directory="bot/static/tests/cov"), name="tests_cov")
+#bot.mount("/metrics", make_asgi_app())
+
+# Instrument the FastAPI app
+FastAPIInstrumentor.instrument_app(bot)
+
+
+@bot.middleware("http")
+async def dispatch(request: Request, call_next: RequestResponseEndpoint) -> Response:
+    with tracer.start_as_current_span(f"{request.method} {request.url}", kind=SpanKind.SERVER) as span:
+        response = await call_next(request)
+        span.set_attribute("http.method", request.method)
+        span.set_attribute("http.url", str(request.url))
+        span.set_attribute("http.status_code", response.status_code)
+        return response
 
 
 @bot.get("/chat/bookmarks")

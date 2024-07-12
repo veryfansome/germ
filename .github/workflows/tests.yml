@@ -37,6 +37,7 @@ jobs:
       - name: Run tests
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SKIP_TESTS: 'false'
         run: |
           cat > .env <<EOF
           OPENAI_API_KEY=$OPENAI_API_KEY

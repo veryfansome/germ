@@ -7,6 +7,10 @@ import torch.nn as nn
 import torch.optim as optim
 
 from bot.openai_utils import ENABLED_MODELS
+from observability.logging import logging
+
+logger = logging.getLogger(__name__)
+
 
 BERT_MODEL_NAME = os.getenv('BERT_MODEL_NAME', 'bert-base-uncased')
 ENABLED_TOOLS = {
@@ -15,7 +19,8 @@ ENABLED_TOOLS = {
         "function": {
             "name": "train_model_selection_neural_network",
             "description": "Improve the model that predicts which LLM is best for replying to the user. "
-                           + "This tool should be used when the user gives negative feedback on a previous reply.",
+                           #+ "This tool should be used when the user gives negative feedback on a previous reply.",
+                           + "This tool should be used when the user gives feedback on a previous reply.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -26,7 +31,8 @@ ENABLED_TOOLS = {
                     },
                     "correct_model": {
                         "type": "string",
-                        "description": "The name of the correct model that should have been used."
+                        #"description": "The name of the correct model that should have been used.",
+                        "description": "The name of the correct model.",
                     }
                 },
                 "required": [
@@ -97,6 +103,7 @@ def load_model_selector():
 
 # Function to predict the best model
 def predict_model(embeddings):
+    load_model_selector()
     model_selector.eval()
     with torch.no_grad():
         outputs = model_selector(embeddings)
@@ -123,7 +130,16 @@ def train_model_selector(embeddings, label):
 
 # Function to train the model
 def train_model_selection_neural_network(message: str, correct_model: str):
+    time_started = time.time()
+    load_model_selector()
+    logger.info(f"finished loading model_selector after {time.time() - time_started}s")
+
     train_model_selector(generate_embeddings(message), ENABLED_MODELS.index(correct_model))
+    logger.info(f"finished training run after {time.time() - time_started}s")
+
+    save_model_selector()
+    logger.info(f"finished saving model_selector after {time.time() - time_started}s")
+
     return (f"Ok. I've updated my model selection behavior based on "
             + f"\"{message}\" and your feedback that `{correct_model}` is the correct model")
 
@@ -133,10 +149,9 @@ if __name__ == '__main__':
     import pandas as pd
 
     setup_logging()
-    logger = logging.getLogger(__name__)
 
     logger.info("initializing model_selector")
-    time_started = time.time()
+    time_init_started = time.time()
     try:
         if not os.path.exists(save_file):
             logger.info(f"did not find {save_file}, bootstrapping")
@@ -147,12 +162,12 @@ if __name__ == '__main__':
 
             df = pd.read_csv(training_csv, delimiter=',', quotechar='"')
             df_shuffled = df.sample(frac=1).reset_index(drop=True)
-            logger.info(f"finished preparing dataframe after {time.time() - time_started}s")
 
             for index, row in df_shuffled.iterrows():
+                time_case_started = time.time()
                 train_model_selector(generate_embeddings(row['Prompt']), ENABLED_MODELS.index(row['Model']))
-                logger.info(f"finished case #{index} after {time.time() - time_started}s")
+                logger.info(f"finished case #{index} after {time.time() - time_case_started}s")
             save_model_selector()
-        logger.info(f"finished model_selector initialization after {time.time() - time_started}s")
+        logger.info(f"finished model_selector initialization after {time.time() - time_init_started}s")
     except Exception as exc:
-        logger.info(f"failed to initialize model_selector after {time.time() - time_started}s: %s", exc)
+        logger.info(f"failed to initialize model_selector after {time.time() - time_init_started}s: %s", exc)

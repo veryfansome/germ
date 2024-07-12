@@ -12,6 +12,8 @@ services:
         condition: service_completed_successfully
       model-selector-init:
         condition: service_completed_successfully
+      otel-collector-init:
+        condition: service_completed_successfully
       test:
         condition: service_completed_successfully
     build:
@@ -28,13 +30,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
     working_dir: /src
     command: [
-      "opentelemetry-instrument",
-      "--service_name=germ-bot",
-      "--metrics_exporter=none",
-      # https://www.jaegertracing.io/docs/1.58/spm/#architecture
-      "--exporter_otlp_insecure=true",
-      "--exporter_otlp_endpoint=http://germ-otel-collector:4318",
-      "--exporter_otlp_protocol=http/protobuf",
       "gunicorn", "-c", "gunicorn_config.py", "bot.main:bot", "--bind", "0.0.0.0:8000"
     ]
     ports:
@@ -73,16 +68,16 @@ services:
     networks: [bots]
     container_name: &jaeger-host germ-jaeger
     depends_on:
-      otel-collector-init:
-        condition: service_completed_successfully
       prometheus-init:
         condition: service_completed_successfully
     image: jaegertracing/all-in-one:latest
     environment:
       - COLLECTOR_OTLP_ENABLED=true
-      - COLLECTOR_OTLP_GRPC_PORT=4317
+      - COLLECTOR_OTLP_GRPC_HOST_PORT=0.0.0.0:4317
       - COLLECTOR_OTLP_METRICS_ENABLED=true
       - LOG_LEVEL=warn
+      #- LOG_LEVEL=info
+      #- LOG_LEVEL=debug
       - METRICS_STORAGE_TYPE=prometheus
       - PROMETHEUS_SERVER_URL=http://germ-prometheus:9090
       - PROMETHEUS_QUERY_SUPPORT_SPANMETRICS_CONNECTOR=true
@@ -132,6 +127,7 @@ services:
       - '9090:9090'
     command:
       - --config.file=/etc/prometheus/prometheus.yml
+      #- --log.level=debug
       - --log.level=warn
 
   prometheus-init:

@@ -9,16 +9,17 @@ exporters:
     endpoint: "0.0.0.0:8889"
 
   otlp:
-    endpoint: germ-jaeger:4317
+    endpoint: "germ-jaeger:4317"
     tls:
       insecure: true
+    timeout: 30s
 
 connectors:
   spanmetrics:
 
 processors:
   batch:
-    timeout: 10s
+    timeout: 30s
 
 service:
   pipelines:
@@ -31,3 +32,7 @@ service:
     metrics/spanmetrics:
       receivers: [spanmetrics]
       exporters: [prometheus]
+  telemetry:
+    logs:
+      #level: debug
+      level: warn
