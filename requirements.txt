@@ -3,11 +3,11 @@ gunicorn
 httpx
 openai~=1.31.0
 opentelemetry-distro
-opentelemetry-exporter-otlp-proto-grpc
 opentelemetry-exporter-otlp-proto-http
-opentelemetry-exporter-prometheus
 opentelemetry-instrumentation-fastapi
+opentelemetry-instrumentation-sqlalchemy
 pandas
+prometheus_client
 psycopg2-binary
 pydantic~=2.7.3
 pytest

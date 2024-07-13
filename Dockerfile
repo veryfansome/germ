@@ -9,5 +9,6 @@ RUN mkdir -p /src
 COPY requirements.txt /src
 
 # Install Python dependencies
+RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r /src/requirements.txt
 RUN opentelemetry-bootstrap -a install

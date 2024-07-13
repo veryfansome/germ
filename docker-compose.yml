@@ -63,6 +63,24 @@ services:
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
 
+  grafana:
+    networks: [bots]
+    container_name: germ-grafana
+    depends_on:
+      prometheus-init:
+        condition: service_completed_successfully
+    image: grafana/grafana:latest
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+      - "grafana-storage:/var/lib/grafana"
+    environment:
+      - GF_LOG_LEVEL=warn
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_NAME=Main Org.
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    ports:
+      - "3000:3000"
+
   # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
   jaeger:
     networks: [bots]
@@ -118,7 +136,7 @@ services:
     networks: [bots]
     container_name: &prometheus-host germ-prometheus
     depends_on:
-      otel-collector-init:
+      otel-collector-init:  # Scrapes otel-collector for span metrics
         condition: service_completed_successfully
     image: prom/prometheus:v2.52.0
     volumes:
@@ -142,6 +160,7 @@ services:
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
 
+  # Has a loose dependency on jaeger - exports data to jaeger but not until bot is up.
   # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
   otel-collector:
     networks: [bots]
@@ -182,3 +201,6 @@ services:
     environment: *local-dev
     working_dir: /src
     command: ["tests/run.sh"]
+
+volumes:
+  grafana-storage: {}

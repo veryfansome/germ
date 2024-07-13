@@ -3,16 +3,14 @@ from fastapi import FastAPI, HTTPException, Path
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
-from opentelemetry import metrics, trace
+from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.exporter.prometheus import PrometheusMetricReader
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider, SynchronousMultiSpanProcessor
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import SpanKind
-from prometheus_client import make_asgi_app
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
@@ -22,7 +20,6 @@ import os
 import subprocess
 
 from api.models import ChatBookmark, ChatRequest, SqlRequest
-from bot.model_selector import load_model_selector, save_model_selector
 from bot.openai_utils import do_on_text
 from bot.v1 import chat as v1_chat
 from bot.v2 import chat as v2_chat
@@ -39,14 +36,6 @@ resource = Resource.create({
 
 setup_logging()
 logger = logging.getLogger(__name__)
-
-##
-# Metrics
-
-#metric_reader = PrometheusMetricReader()
-#metrics.set_meter_provider(
-#    MeterProvider(resource=resource, metric_readers=[metric_reader])
-#)
 
 ##
 # Tracing
@@ -68,13 +57,15 @@ trace.set_tracer_provider(
 tracer = trace.get_tracer(__name__)
 
 
+##
+# App
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Started")
-    # load_model_selector()
     yield
-    # save_model_selector()
-    pass
+    logger.info(f"Stopping")
 
 
 bot = FastAPI(lifespan=lifespan)
@@ -82,10 +73,13 @@ bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
 if os.path.exists("bot/static/tests"):
     bot.mount("/tests", StaticFiles(directory="bot/static/tests"), name="tests")
     bot.mount("/tests/cov", StaticFiles(directory="bot/static/tests/cov"), name="tests_cov")
-#bot.mount("/metrics", make_asgi_app())
 
 # Instrument the FastAPI app
 FastAPIInstrumentor.instrument_app(bot)
+
+
+##
+# Endpoints
 
 
 @bot.middleware("http")
@@ -259,6 +253,11 @@ async def post_chat_bookmark(payload: ChatBookmark) -> ChatBookmark:
         raise e if isinstance(e, HTTPException) else HTTPException(status_code=500, detail=str(e))
 
 
+@bot.get("/metrics")
+async def get_metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 @bot.post("/postgres/{db}/query")
 async def post_postgres_query(payload: SqlRequest,
                               db: str = Path(..., title="Postgres DB")):
@@ -291,6 +290,10 @@ async def post_postgres_query(payload: SqlRequest,
         os.remove(query_file)
         logger.error("%s: trace: %s", e, traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
+
+
+##
+# Functions
 
 
 def version_selector(version):
