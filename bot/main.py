@@ -6,6 +6,7 @@ from openai import OpenAI
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider, SynchronousMultiSpanProcessor
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -20,11 +21,11 @@ import os
 import subprocess
 
 from api.models import ChatBookmark, ChatRequest, SqlRequest
-from bot.openai_utils import do_on_text
+from utils.openai_utils import do_on_text
 from bot.v1 import chat as v1_chat
 from bot.v2 import chat as v2_chat
 from db.models import (DATABASE_URL, SessionLocal,
-                       MessageBookmark, MessageReceived, MessageReplied)
+                       MessageBookmark, MessageReceived, MessageReplied, engine)
 from observability.logging import logging, setup_logging, traceback
 
 resource = Resource.create({
@@ -74,8 +75,11 @@ if os.path.exists("bot/static/tests"):
     bot.mount("/tests", StaticFiles(directory="bot/static/tests"), name="tests")
     bot.mount("/tests/cov", StaticFiles(directory="bot/static/tests/cov"), name="tests_cov")
 
-# Instrument the FastAPI app
+
+##
+# Enabled instrumentation
 FastAPIInstrumentor.instrument_app(bot)
+SQLAlchemyInstrumentor().instrument(engine=engine)
 
 
 ##
@@ -302,4 +306,5 @@ def version_selector(version):
     elif version == "v2":
         return v2_chat
     else:
+        logger.warning("unknown version: %s, defaulting to v1", version)
         return v1_chat

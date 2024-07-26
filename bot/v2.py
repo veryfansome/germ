@@ -3,11 +3,12 @@ from typing_extensions import Literal
 import os
 
 from api.models import ChatMessage
-from bot.model_selector import (ENABLED_MODELS,
-                                ENABLED_TOOLS as MODEL_SELECTOR_TOOLS,
-                                generate_embeddings, predict_model)
-from bot.openai_utils import (DEFAULT_CHAT_MODEL, ChatCompletion,
-                              handle_feedback, summarize_multiple_completions, trim_chat_frame)
+from ml.message_categorizer import extract_message_features
+from ml.model_selector import (ENABLED_MODELS,
+                               ENABLED_TOOLS as MODEL_SELECTOR_TOOLS,
+                               generate_embeddings, predict_model)
+from utils.openai_utils import (DEFAULT_CHAT_MODEL, ChatCompletion,
+                                handle_feedback, summarize_multiple_completions, trim_chat_frame)
 from bot.v1 import chat as v1_chat
 from db.models import MessageReplied, SessionLocal
 from observability.logging import logging
@@ -32,18 +33,19 @@ def chat(messages: list[ChatMessage],
     new_chat_message: ChatMessage = messages[-1]
     logger.debug("received: %s", new_chat_message.content)
 
-    # Generate embeddings
-    embeddings = generate_embeddings(new_chat_message.content)
+    # Extract message features
+    message_features = extract_message_features(
+        trim_chat_frame(messages, DEFAULT_CHAT_MODEL, system_message=system_message))
+    logger.info(message_features)
 
     # Start background tasks
     subscriber_task_results = {}
     for subscriber, attr in subscribers.items():
         subscriber_task_results[subscriber] = executor.submit(
-            attr['message_handler'],
-            trim_chat_frame(messages, DEFAULT_CHAT_MODEL, system_message=system_message),
-            attr['tools'],)
+            attr['message_handler'], messages, attr['tools'],)
 
-    # Predict the best model
+    # Generate embeddings and predict the best model
+    embeddings = generate_embeddings(new_chat_message.content, message_features)
     model = ENABLED_MODELS[predict_model(embeddings)]
     logger.info("predicted model: %s", model)
 

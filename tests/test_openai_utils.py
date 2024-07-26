@@ -1,27 +1,19 @@
-from api.models import ChatMessage
-from bot.model_selector import ENABLED_TOOLS
-from bot.openai_utils import handle_feedback, is_feedback
 import os
 import pandas as pd
+
+from utils.openai_utils import is_feedback
 
 model_dir = os.getenv("MODEL_DIR", "/src/data/germ")
 prompts_df = pd.read_csv(f"{model_dir}/examples/prompts.csv", delimiter=',', quotechar='"')
 
-#def test_handle_feedback():
-#    chat_frame: list[ChatMessage] = [
-#        ChatMessage(role="user",
-#                    content="draw a cow"),
-#        ChatMessage(role="assistant",
-#                    content="I can generate an image of a cow based on a textual prompt. Let me do that for you."),
-#        ChatMessage(role="user",
-#                    content="you used the wrong model to respond, the correct model would have been dall-e-2"),
-#        ChatMessage(role="assistant",
-#                    content="Ok. I've updated my model selection behavior based on \"draw a cow\" "
-#                            + "and your feedback that `dall-e-2` is the correct model"),
-#        ChatMessage(role="user",
-#                    content="draw a duck"),
+
+#def test_extract_text_features():
+#    cases = [
+#        "hi",
+#        "dall-e-2 is the model you should have used here.",
 #    ]
-#    completion = handle_feedback(chat_frame, ENABLED_TOOLS)
+#    for case in cases:
+#        extract_text_features(case)
 
 
 def test_is_feedback():

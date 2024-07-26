@@ -23,11 +23,12 @@ services:
     volumes:
       - ./:/src
     environment: &local-dev
-      OPENAI_API_KEY: "${OPENAI_API_KEY}"
       DB_HOST: &db-host germ-db
       HF_HOME: /src/data/huggingface
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_USER: ${POSTGRES_USER}
+      SKIP_TESTS: ${SKIP_TESTS}
     working_dir: /src
     command: [
       "gunicorn", "-c", "gunicorn_config.py", "bot.main:bot", "--bind", "0.0.0.0:8000"
@@ -129,7 +130,7 @@ services:
       - ./:/src
     environment: *local-dev
     working_dir: /src
-    command: ["python", "-m", "bot.model_selector"]
+    command: ["python", "-m", "ml.model_selector"]
 
   # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
   prometheus:
@@ -188,9 +189,11 @@ services:
   test:
     networks: [bots]
     container_name: germ-test
-    links: [db]
+    links: [db, otel-collector]
     depends_on:
       db-init:
+        condition: service_completed_successfully
+      otel-collector-init:
         condition: service_completed_successfully
     build:
       context: .

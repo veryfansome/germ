@@ -1,4 +1,3 @@
-from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from sqlalchemy import create_engine, Boolean, Column, DateTime, ForeignKey, Integer, JSON, LargeBinary, String
 from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
@@ -11,7 +10,6 @@ DATABASE_URL = "{name}:{password}@{host}/germ".format(
     password=os.getenv("POSTGRES_PASSWORD"),
 )
 engine = create_engine(f"postgresql+psycopg2://{DATABASE_URL}")
-SQLAlchemyInstrumentor().instrument(engine=engine)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

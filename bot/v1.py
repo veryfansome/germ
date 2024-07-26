@@ -1,10 +1,11 @@
+from datetime import datetime
 from typing_extensions import Literal
 
 from api.models import ChatMessage, ChatResponse
-from bot.openai_utils import (CHAT_COMPLETION_FUNCTIONS,
-                              DEFAULT_CHAT_MODEL,
-                              ENABLED_TOOLS,
-                              handle_tool_calls_in_completion_response, is_token_limit_check_enabled, trim_chat_frame)
+from utils.openai_utils import (CHAT_COMPLETION_FUNCTIONS,
+                                DEFAULT_CHAT_MODEL,
+                                ENABLED_TOOLS,
+                                handle_tool_calls_in_completion_response, trim_chat_frame)
 from db.models import MessageReceived, MessageReplied, SessionLocal
 from observability.logging import logging
 
@@ -20,12 +21,18 @@ def chat(messages: list[ChatMessage],
          temperature: float = 0.0,
          tools: dict[str, dict] = ENABLED_TOOLS,
          tool_choice: Literal['auto', 'none'] = 'auto') -> ChatResponse:
+    system_message_content = f"""Use the following metadata in your responses if applicable:
+- **Current time**: {datetime.now()}
+"""
+    if system_message:
+        system_message_content += f"""
+{system_message}
+"""
     new_chat_message: ChatMessage = messages[-1]
-    logger.debug("received: %s", new_chat_message.content)
 
     # A `chat_frame` is a list of `ChatMessage`s. It should be a list with a single element for new chats and a series
     # of messages between the `user` and `assistant`.
-    chat_frame = trim_chat_frame(messages, model, system_message=system_message)
+    chat_frame = trim_chat_frame(messages, model, system_message=system_message_content)
 
     # Update message history
     message_received = MessageReceived(
@@ -40,7 +47,7 @@ def chat(messages: list[ChatMessage],
 
     # Do completion request
     completion = CHAT_COMPLETION_FUNCTIONS[model](chat_frame,
-                                                  system_message=system_message,
+                                                  system_message=system_message_content,
                                                   temperature=temperature,
                                                   tools=tools,
                                                   tool_choice=tool_choice)
