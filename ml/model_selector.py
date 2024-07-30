@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from ml.message_categorizer import FEATURES, extract_message_features
-from observability.logging import logging
+from observability.logging import logging, setup_logging
 from utils.openai_utils import ENABLED_MODELS
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,7 @@ ENABLED_TOOLS = {
                 ]
             },
         },
+        # Currently, training is done in the foreground, but we should schedule it as a background task
         "callback": lambda func_args: train_model_selection_neural_network(
             func_args['user_message_that_resulted_incorrect_model_selection'],
             func_args['correct_model'])
@@ -150,11 +151,7 @@ def train_model_selection_neural_network(message: str, correct_model: str):
 
 
 if __name__ == '__main__':
-    from observability.logging import logging, setup_logging
-    import pandas as pd
-
     setup_logging()
-
     logger.info("initializing model_selector")
     #time_init_started = time.time()
     #try:

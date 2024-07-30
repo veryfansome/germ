@@ -16,6 +16,12 @@ from observability.logging import logging
 executor = ThreadPoolExecutor(max_workers=os.getenv("MAX_EXECUTOR_WORKERS", 3))
 logger = logging.getLogger(__name__)
 
+
+class UserMessageSubscriber:
+    def __init__(self):
+        pass
+
+
 # TODO: Use a real class?
 subscribers = {
     "model_selector_trainer": {
@@ -33,16 +39,16 @@ def chat(messages: list[ChatMessage],
     new_chat_message: ChatMessage = messages[-1]
     logger.debug("received: %s", new_chat_message.content)
 
-    # Extract message features
-    message_features = extract_message_features(
-        trim_chat_frame(messages, DEFAULT_CHAT_MODEL, system_message=system_message))
-    logger.info(message_features)
-
     # Start background tasks
     subscriber_task_results = {}
     for subscriber, attr in subscribers.items():
         subscriber_task_results[subscriber] = executor.submit(
             attr['message_handler'], messages, attr['tools'],)
+
+    # Extract message features
+    message_features = extract_message_features(
+        trim_chat_frame(messages, DEFAULT_CHAT_MODEL, system_message=system_message))
+    logger.info(message_features)
 
     # Generate embeddings and predict the best model
     embeddings = generate_embeddings(new_chat_message.content, message_features)
