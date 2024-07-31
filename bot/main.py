@@ -1,5 +1,6 @@
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Path
+from fastapi import FastAPI, HTTPException, Path, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
@@ -11,26 +12,26 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider, SynchronousMultiSpanProcessor
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import SpanKind
-from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import Gauge, generate_latest, CONTENT_TYPE_LATEST
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.websockets import WebSocketDisconnect
 from typing import Optional
+import asyncio
 import hashlib
 import os
 import subprocess
 
 from api.models import ChatBookmark, ChatRequest, SqlRequest
-from utils.openai_utils import do_on_text
-from bot.v1 import chat as v1_chat
-from bot.v2 import chat as v2_chat
+from bot.chat import WebSocketConnectionManager, version_selector
 from db.models import (DATABASE_URL, SessionLocal,
-                       MessageBookmark, MessageReceived, MessageReplied, engine)
+                       ChatSession, MessageBookmark, MessageReceived, MessageReplied, engine)
 from observability.logging import logging, setup_logging, traceback
+from utils.openai_utils import do_on_text
 
-resource = Resource.create({
-    "service.name": os.getenv("SERVICE_NAME", "germ-bot"),
-})
+scheduler = AsyncIOScheduler()
 
 ##
 # Logging
@@ -41,6 +42,9 @@ logger = logging.getLogger(__name__)
 ##
 # Tracing
 
+resource = Resource.create({
+    "service.name": os.getenv("SERVICE_NAME", "germ-bot"),
+})
 multi_span_processor = SynchronousMultiSpanProcessor()
 multi_span_processor.add_span_processor(
     BatchSpanProcessor(
@@ -59,15 +63,35 @@ tracer = trace.get_tracer(__name__)
 
 
 ##
+# Metrics
+
+METRIC_CHAT_SESSION_ROW_COUNT = Gauge(
+    "chat_session_row_count", "Number of rows in the chat_session table")
+
+METRIC_MESSAGE_RECEIVED_ROW_COUNT = Gauge(
+    "message_received_row_count", "Number of rows in the message_received table")
+
+METRIC_MESSAGE_REPLIED_ROW_COUNT = Gauge(
+    "message_replied_row_count", "Number of rows in the message_replied table")
+
+
+##
 # App
+
+websocket_connection_manager = WebSocketConnectionManager()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"Started")
+    async def db_stats_job():
+        await run_in_threadpool(db_stats)
+    await db_stats_job()  # Warms up DB connections on startup
+    scheduler.add_job(db_stats_job, 'interval', seconds=60)
+    scheduler.start()
+    # Started
     yield
-    logger.info(f"Stopping")
-
+    # Stopping
+    await websocket_connection_manager.disconnect_all()
 
 bot = FastAPI(lifespan=lifespan)
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
@@ -83,7 +107,7 @@ SQLAlchemyInstrumentor().instrument(engine=engine)
 
 
 ##
-# Endpoints
+# Middleware
 
 
 @bot.middleware("http")
@@ -94,6 +118,10 @@ async def dispatch(request: Request, call_next: RequestResponseEndpoint) -> Resp
         span.set_attribute("http.url", str(request.url))
         span.set_attribute("http.status_code", response.status_code)
         return response
+
+
+##
+# Endpoints
 
 
 @bot.get("/chat/bookmarks")
@@ -257,6 +285,20 @@ async def post_chat_bookmark(payload: ChatBookmark) -> ChatBookmark:
         raise e if isinstance(e, HTTPException) else HTTPException(status_code=500, detail=str(e))
 
 
+@bot.websocket("/chat/websocket")
+async def websocket_chat(ws: WebSocket):
+    async def conduct_chat_session():
+        logger.info("WebSocket connecting")
+        chat_session_id = await websocket_connection_manager.connect(ws)
+        try:
+            while True:
+                await websocket_connection_manager.receive(chat_session_id)
+        except WebSocketDisconnect:
+            logger.info(f"WebSocket for chat_session {chat_session_id} disconnected")
+            await websocket_connection_manager.disconnect(chat_session_id)
+    await asyncio.create_task(conduct_chat_session())
+
+
 @bot.get("/metrics")
 async def get_metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
@@ -300,11 +342,16 @@ async def post_postgres_query(payload: SqlRequest,
 # Functions
 
 
-def version_selector(version):
-    if version == "v1":
-        return v1_chat
-    elif version == "v2":
-        return v2_chat
-    else:
-        logger.warning("unknown version: %s, defaulting to v1", version)
-        return v1_chat
+def db_stats():
+    with SessionLocal() as session:
+        chat_session_count = session.query(ChatSession).count()
+        METRIC_CHAT_SESSION_ROW_COUNT.set(chat_session_count)
+        message_received_count = session.query(MessageReceived).count()
+        METRIC_MESSAGE_RECEIVED_ROW_COUNT.set(message_received_count)
+        message_replied_count = session.query(MessageReplied).count()
+        METRIC_MESSAGE_REPLIED_ROW_COUNT.set(message_replied_count)
+        logger.info("db_stats: %s", " ".join((
+            f"chat_session_count={chat_session_count}",
+            f"message_received_count={message_received_count}",
+            F"message_replied_count={message_replied_count}"
+        )))

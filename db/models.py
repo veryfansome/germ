@@ -15,6 +15,13 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+class ChatSession(Base):
+    __tablename__ = "chat_session"
+    chat_session_id = Column(Integer, primary_key=True, autoincrement=True)
+    time_started = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
+    time_stopped = Column(DateTime)
+
+
 class MessageBookmark(Base):
     __tablename__ = "message_bookmark"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -25,7 +32,6 @@ class MessageBookmark(Base):
     timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
 
 
-# Define the ChatHistory model
 class MessageReceived(Base):
     __tablename__ = "message_received"
     id = Column(Integer, primary_key=True, index=True)

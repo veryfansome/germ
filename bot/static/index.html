@@ -132,6 +132,59 @@
             });
     }
 
+    function handleMessageReceived(data) {
+        const messageReceivedId = data['message_received_id'];
+        const messageRepliedId = data['message_replied_id'];
+        const responseData = data['response'];
+
+        const responseModel = responseData['model'];
+        const responseChoice = responseData['choices'][0];
+        const responseReason = responseChoice['finish_reason'];
+        const responseRole = responseChoice['message']['role'];
+        const responseContent = responseChoice['message']['content'];
+        chatCompletionMessageList.push({ role: responseRole, content: responseContent });
+
+        // Setup assistant message box
+        const assistantMessageBox = getAssistantMessageBox(`${responseRole}(${responseModel})`, responseContent, responseReason);
+        const copyLink = getCopyTextLink(responseContent);
+        assistantMessageBox.appendChild(copyLink);
+
+        // Render bookmark button
+        const bookmarkLink = document.createElement('a');
+        bookmarkLink.className = "chatbox-message-link";
+        bookmarkLink.innerHTML = `<i class="fa fa-bookmark">`;
+        bookmarkLink.addEventListener('click', (event) => {
+            event.preventDefault();
+            bookmarkLink.classList.add('clicked-chatbox-message-link');
+            fetch('/chat/bookmark', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    is_test: false,
+                    message_received_id: messageReceivedId,
+                    message_replied_content: responseContent,
+                    message_replied_id: messageRepliedId,
+                })
+            })
+            .then(response => throwOrJson(response))
+            .then(data => {
+                console.log('Bookmark created:', data);
+                refreshBookmarks();
+            })
+            .catch(error => {
+                bookmarkLink.classList.remove('clicked-chatbox-message-link');
+                handleError(error, 'Bookmark creation failed:');
+            });
+        });
+        assistantMessageBox.appendChild(bookmarkLink);
+
+        // Render response
+        chatbox.appendChild(assistantMessageBox);
+        hljs.highlightAll();
+        scrollChatBoxToBottom();
+    }
+
+    const ws = new WebSocket("ws://localhost:8001/chat/websocket")
     async function sendMessage() {
         const message = document.getElementById('input').value;
         submittedText.push(message);
@@ -149,72 +202,34 @@
         chatbox.appendChild(loadingIndicator);
         scrollChatBoxToBottom();
 
-        fetch(`/chat?bot_version=${botVersion}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: chatCompletionMessageList }),
-        })
-        .then(response => {
-            // Stop showing loading indicator
-            loadingIndicator.remove();
-            return throwOrJson(response);
-        })
-        .then(data => {
-            const messageReceivedId = data['message_received_id'];
-            const messageRepliedId = data['message_replied_id'];
-            const responseData = data['response'];
-
-            const responseModel = responseData['model'];
-            const responseChoice = responseData['choices'][0];
-            const responseReason = responseChoice['finish_reason'];
-            const responseRole = responseChoice['message']['role'];
-            const responseContent = responseChoice['message']['content'];
-            chatCompletionMessageList.push({ role: responseRole, content: responseContent });
-
-            // Setup assistant message box
-            const assistantMessageBox = getAssistantMessageBox(`${responseRole}(${responseModel})`, responseContent, responseReason);
-            const copyLink = getCopyTextLink(responseContent);
-            assistantMessageBox.appendChild(copyLink);
-
-            // Render bookmark button
-            const bookmarkLink = document.createElement('a');
-            bookmarkLink.className = "chatbox-message-link";
-            bookmarkLink.innerHTML = `<i class="fa fa-bookmark">`;
-            bookmarkLink.addEventListener('click', (event) => {
-                event.preventDefault();
-                bookmarkLink.classList.add('clicked-chatbox-message-link');
-                fetch('/chat/bookmark', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        is_test: false,
-                        message_received_id: messageReceivedId,
-                        message_replied_content: responseContent,
-                        message_replied_id: messageRepliedId,
-                    })
-                })
-                .then(response => throwOrJson(response))
-                .then(data => {
-                    console.log('Bookmark created:', data);
-                    refreshBookmarks();
-                })
-                .catch(error => {
-                    bookmarkLink.classList.remove('clicked-chatbox-message-link');
-                    handleError(error, 'Bookmark creation failed:');
-                });
+        ws.onmessage = function(event) {
+            loadingIndicator.remove(); // Stop showing loading indicator
+            try {
+                handleMessageReceived(JSON.parse(event.data));
+            } catch (error) {
+                handleError(error, 'Failed to handle message:');
+            }
+        }
+        if (botVersion === 'v3') {
+            ws.send(JSON.stringify({ messages: chatCompletionMessageList }));
+        } else {
+            fetch(`/chat?bot_version=${botVersion}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages: chatCompletionMessageList }),
+            })
+            .then(response => {
+                loadingIndicator.remove(); // Stop showing loading indicator
+                return throwOrJson(response);
+            })
+            .then(data => {
+                return handleMessageReceived(data);
+            })
+            .catch(error => {
+                loadingIndicator.remove(); // Stop showing loading indicator
+                handleError(error, 'Chat failed:');
             });
-            assistantMessageBox.appendChild(bookmarkLink);
-
-            // Render response
-            chatbox.appendChild(assistantMessageBox);
-            hljs.highlightAll();
-            scrollChatBoxToBottom();
-        })
-        .catch(error => {
-            // Stop showing loading indicator
-            loadingIndicator.remove();
-            handleError(error, 'Chat failed:');
-        });
+        }
     }
     </script>
 </body>

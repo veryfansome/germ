@@ -1,3 +1,4 @@
+apscheduler
 fastapi~=0.111.0
 gunicorn
 httpx
@@ -15,9 +16,9 @@ pytest-cov
 pytest-xdist
 python-dotenv
 sqlalchemy~=2.0.30
+starlette~=0.37.2
 tiktoken~=0.7.0
-torch~=2.3.1
 torchtext
+torch~=2.3.1
 transformers~=4.41.2
 uvicorn
-starlette~=0.37.2
