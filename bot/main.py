@@ -92,6 +92,7 @@ async def lifespan(app: FastAPI):
     # Started
     yield
     # Stopping
+    # TODO: Debug why I'm not seeing sessions get saved on this kind of disconnect
     await websocket_connection_manager.disconnect_all()
 
 bot = FastAPI(lifespan=lifespan)
