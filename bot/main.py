@@ -18,19 +18,18 @@ from starlette.middleware.base import RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.websockets import WebSocketDisconnect
-from typing import Optional
 import asyncio
 import hashlib
 import os
 import subprocess
 
-from api.models import ChatBookmark, ChatSessionSummary, SqlRequest
-from bot.chat import BasicChatHandler, WebSocketConnectionManager, get_chat_session_summaries
+from api.models import ChatMessage, ChatSessionSummary, SqlRequest
+from bot.chat import (BasicChatHandler, WebSocketConnectionManager,
+                      get_chat_session_messages, get_chat_session_summaries, update_chat_session_is_hidden)
 from db.models import (DATABASE_URL, SessionLocal,
                        ChatSession, ChatRequestReceived, ChatResponseSent,
-                       MessageBookmark, MessageReceived, MessageReplied, engine)
+                       engine)
 from observability.logging import logging, setup_logging, traceback
-from utils.openai_utils import do_on_text
 
 scheduler = AsyncIOScheduler()
 
@@ -127,49 +126,18 @@ async def dispatch(request: Request, call_next: RequestResponseEndpoint) -> Resp
 
 
 @bot.get("/chat/sessions")
-async def get_chat_sessions() -> list[ChatSessionSummary]:
+async def get_chat_session_list() -> list[ChatSessionSummary]:
     return await run_in_threadpool(get_chat_session_summaries)
 
 
-@bot.get("/chat/bookmark/{bookmark_id}")
-async def get_chat_bookmark(bookmark_id: int):
-    try:
-        with SessionLocal() as session:
-            bookmark_record = session.query(MessageBookmark).where(
-                MessageBookmark.id == bookmark_id,
-            ).one_or_none()
-            if not bookmark_record:
-                raise HTTPException(status_code=404,
-                                    detail=f"MessageBookmark.id == {bookmark_id} not found")
-            message_received_record = session.query(MessageReceived).where(
-                MessageReceived.id == bookmark_record.message_received_id,
-            ).one_or_none()
-            if not message_received_record:
-                raise HTTPException(status_code=404,
-                                    detail=f"MessageReceived.id == {bookmark_record.message_received_id} not found")
-            message_replied_record = session.query(MessageReplied).where(
-                MessageReplied.id == bookmark_record.message_replied_id,
-            ).one_or_none()
-            if not message_replied_record:
-                raise HTTPException(status_code=404,
-                                    detail=f"MessageReplied.id == {bookmark_record.message_replied_id} not found")
-            return {
-                "id": bookmark_record.id,
-                "message_summary": bookmark_record.message_summary.decode("utf-8"),
-                "message_received": {
-                    "id": message_received_record.id,
-                    "chat_frame": message_received_record.chat_frame,
-                    "content": message_received_record.content.decode("utf-8"),
-                },
-                "message_replied": {
-                    "id": message_replied_record.id,
-                    "content": message_replied_record.content.decode("utf-8"),
-                    "role": message_replied_record.role,
-                },
-            }
-    except Exception as e:
-        logger.error("%s: trace: %s", e, traceback.format_exc())
-        raise e if isinstance(e, HTTPException) else HTTPException(status_code=500, detail=str(e))
+@bot.get("/chat/session/{chat_session_id}")
+async def get_chat_session_message_list(chat_session_id: int) -> list[ChatMessage]:
+    return await run_in_threadpool(get_chat_session_messages, chat_session_id)
+
+
+@bot.delete("/chat/session/{chat_session_id}")
+async def delete_chat_session_bookmark(chat_session_id: int):
+    return await run_in_threadpool(update_chat_session_is_hidden, chat_session_id)
 
 
 @bot.get("/favicon.ico", include_in_schema=False)
@@ -197,70 +165,6 @@ async def get_healthz():
         "environ": os.environ,
         "status": "OK",
     }
-
-
-@bot.get("/postgres.html", include_in_schema=False)
-async def get_postgres_landing(request: Request):
-    file_path = os.path.join(os.path.dirname(__file__), 'static', 'postgres.html')
-    return FileResponse(file_path)
-
-
-@bot.post("/chat/bookmark")
-async def post_chat_bookmark(payload: ChatBookmark) -> ChatBookmark:
-    try:
-        if not payload.message_received_id or not payload.message_replied_id:
-            raise HTTPException(status_code=400,
-                                detail=f"message_received_id:{payload.message_received_id} "
-                                       + f"and message_replied_id:{payload.message_replied_id} are required")
-        with SessionLocal() as session:
-            # If already bookmarked, return existing
-            existing_bookmark_record = session.query(MessageBookmark).where(
-                MessageBookmark.message_received_id == payload.message_received_id,
-                MessageBookmark.message_replied_id == payload.message_replied_id,
-            ).one_or_none()
-            if existing_bookmark_record:
-                return ChatBookmark(
-                    id=existing_bookmark_record.id,
-                    message_received_id=existing_bookmark_record.message_received_id,
-                    message_replied_id=existing_bookmark_record.message_replied_id,
-                    message_summary=existing_bookmark_record.message_summary.decode("utf-8"),
-                )
-
-            message_received_record = session.query(MessageReceived).where(
-                MessageReceived.id == payload.message_received_id
-            ).one_or_none()
-            if not message_received_record:
-                raise HTTPException(status_code=404,
-                                    detail=f"MessageReceived.id == {payload.message_received_id} not found")
-
-            message_replied_record = session.query(MessageReplied).where(
-                MessageReplied.id == payload.message_replied_id
-            ).one_or_none()
-            if not message_replied_record:
-                raise HTTPException(status_code=404,
-                                    detail=f"MessageReplied.id == {payload.message_replied_id} not found")
-
-            # 70 characters is a "guideline" because we don't enforce it with a `max_tokens=`.
-            message_summary = do_on_text(
-                "Summarize the following in 70 characters or less",
-                message_received_record.content.decode('utf-8'), max_tokens=70)
-            new_bookmark_record = MessageBookmark(
-                is_test=payload.is_test,
-                message_received_id=payload.message_received_id,
-                message_replied_id=payload.message_replied_id,
-                message_summary=message_summary.encode("utf-8"))
-            session.add(new_bookmark_record)
-            session.commit()
-            session.refresh(new_bookmark_record)
-            return ChatBookmark(
-                id=new_bookmark_record.id,
-                is_test=new_bookmark_record.is_test,
-                message_received_id=new_bookmark_record.message_received_id,
-                message_replied_id=new_bookmark_record.message_replied_id,
-                message_summary=new_bookmark_record.message_summary)
-    except Exception as e:
-        logger.error("%s: trace: %s", e, traceback.format_exc())
-        raise e if isinstance(e, HTTPException) else HTTPException(status_code=500, detail=str(e))
 
 
 @bot.websocket("/chat/websocket")

@@ -17,12 +17,12 @@
     <nav>
         <div class="logo"><a href="/"><i class="fa-solid fa-virus" style="padding-right: 4px"></i>GermBot</a></div>
         <div class="nav-links">
-            <a id="chat-nav-link" href="/"><i class="fa-solid fa-comment" style="padding-right: 4px"></i><u>Chat</u><i id="version-marker"></i></a>
-            <a href="/postgres.html"><i class="fa-solid fa-code" style="padding-right: 4px"></i>Postgres</a>
+            <a id="chat-nav-link" href="/"><i class="fa-solid fa-comment" style="padding-right: 4px"></i><u>Chat</u></a>
+            <a href="/static/postgres.html"><i class="fa-solid fa-code" style="padding-right: 4px"></i>Postgres</a>
         </div>
     </nav>
     <div id="error-popup" class="hidden">
-        <button id="close-error-popup">X</button>
+        <button id="close-error-popup"><i class="fa fa-x"></i></button>
         <span id="error-popup-message-text"></span>
     </div>
     <div id="chatbox"></div>
@@ -45,9 +45,7 @@
 
     const host = window.location.hostname;
     const port = window.location.port;
-
     const queryParams = getQueryParams();
-    const botVersion = setVersionMarker('bot_version' in queryParams ? queryParams['bot_version'] : 'v1');
 
     const chatbox = document.getElementById('chatbox');
     initErrorPopup();
@@ -56,7 +54,7 @@
     // Popup menu
     const popupMenuList = document.getElementById('popup-menu-ul');
     const refreshBookmarks = () => {
-        popupMenuList.innerHTML = `<span style="color: gray;"><em>You may not have had any conversations yet. Try sending a message!</em></span>`;
+        popupMenuList.innerHTML = `<span style="color: gray;"><em>Have you had any conversations yet? Try sending a message!</em></span>`;
         fetch('/chat/sessions')
                 .then(response => throwOrJson(response))
                 .then(data => {
@@ -65,7 +63,28 @@
                             popupMenuList.innerHTML = '';
                         }
                         const li = document.createElement('li');
-                        li.innerHTML = `<i class="fa fa-x"></i><a href="/?chat_session_id=${item['chat_session_id']}">${item['summary']}</a>`;
+
+                        const remove_link = document.createElement('a');
+                        remove_link.innerHTML = '<i class="fa fa-x"></i>';
+                        li.appendChild(remove_link);
+
+                        const load_link = document.createElement('a');
+                        load_link.href = `/?chat_session_id=${item['chat_session_id']}`;
+                        load_link.innerText = item['summary'];
+                        li.appendChild(load_link);
+
+                        remove_link.addEventListener('click', function(event) {
+                            fetch(`/chat/session/${item['chat_session_id']}`, {
+                                method: 'DELETE'
+                            })
+                            .then(() => {
+                                li.remove();
+                            })
+                            .catch(error => {
+                                handleError(error, 'Delete failed:');
+                            })
+                        });
+
                         popupMenuList.appendChild(li);
                     })
                 })
@@ -78,7 +97,7 @@
     initTextArea(submittedText, sendMessage);
 
     let chatCompletionMessageList = [];
-    if ('bookmark_id' in queryParams) {
+    if ('chat_session_id' in queryParams) {
         // Reset the chatbox
         chatbox.innerHTML = '';
 
@@ -87,57 +106,40 @@
         chatbox.appendChild(loadingIndicator);
         scrollChatBoxToBottom();
 
-        fetch(`/chat/bookmark/${queryParams["bookmark_id"]}`)
-            .then(response => {
-                // Stop showing loading indicator
-                loadingIndicator.remove();
-                return throwOrJson(response);
-            })
-            .then(data => {
-                let messageReceived = data['message_received'];
-                let messageReceivedContent = messageReceived['content'];
-                let messageReceivedChatFrame = messageReceived['chat_frame'];
-                let messageReplied = data['message_replied'];
-                let messageRepliedContent = messageReplied['content'];
-                let messageRepliedRole = messageReplied['role'];
-                messageReceivedChatFrame.map(chatFrameMessage => {
-                    if (chatFrameMessage['role'] === 'user') {
-                        const userMessageBox = getUserMessageBox(chatFrameMessage['content']);
-                        userMessageBox.appendChild(getCopyTextLink(chatFrameMessage['content']));
-                        chatbox.appendChild(userMessageBox);
-                        chatCompletionMessageList.push({ role: "user", content: chatFrameMessage['content'] });
-                    } else {
-                        const assistantMessageBox = getAssistantMessageBox('assistant(bookmark)', chatFrameMessage['content']);
-                        assistantMessageBox.appendChild(getCopyTextLink(chatFrameMessage['content']));
-                        chatbox.appendChild(assistantMessageBox);
-                        chatCompletionMessageList.push({ role: chatFrameMessage['role'], content: chatFrameMessage['content'] });
-                    }
-                    hljs.highlightAll();
-                    scrollChatBoxToBottom();
+        fetch(`/chat/session/${queryParams["chat_session_id"]}`)
+                .then(response => {
+                    // Stop showing loading indicator
+                    loadingIndicator.remove();
+                    return throwOrJson(response);
+                })
+                .then(data => {
+                    data.map(chatFrameMessage => {
+                        if (chatFrameMessage['role'] === 'user') {
+                            const userMessageBox = getUserMessageBox(chatFrameMessage['content']);
+                            userMessageBox.appendChild(getCopyTextLink(chatFrameMessage['content']));
+                            chatbox.appendChild(userMessageBox);
+                            chatCompletionMessageList.push({ role: "user", content: chatFrameMessage['content'] });
+                        } else {
+                            const assistantMessageBox = getAssistantMessageBox('assistant(bookmark)', chatFrameMessage['content']);
+                            assistantMessageBox.appendChild(getCopyTextLink(chatFrameMessage['content']));
+                            chatbox.appendChild(assistantMessageBox);
+                            chatCompletionMessageList.push({ role: chatFrameMessage['role'], content: chatFrameMessage['content'] });
+                        }
+                        hljs.highlightAll();
+                        scrollChatBoxToBottom();
+                    });
+                    const url = new URL(window.location.href);
+                    url.search = '';
+                    history.replaceState(null, '', url);
+                })
+                .catch(error => {
+                    // Stop showing loading indicator
+                    loadingIndicator.remove();
+                    handleError(error, 'Query failed:');
                 });
-                const receivedUserMessageBox = getUserMessageBox(messageReceivedContent);
-                receivedUserMessageBox.appendChild(getCopyTextLink(messageReceivedContent));
-                chatbox.appendChild(receivedUserMessageBox);
-                chatCompletionMessageList.push({ role: "user", content: messageReceivedContent });
-
-                const repliedAssistantMessageBox = getAssistantMessageBox(`${messageRepliedRole}(bookmark)`, messageRepliedContent);
-                repliedAssistantMessageBox.appendChild(getCopyTextLink(messageRepliedContent));
-                chatbox.appendChild(repliedAssistantMessageBox);
-                chatCompletionMessageList.push({ role: messageRepliedRole, content: messageRepliedContent });
-
-                hljs.highlightAll();
-                scrollChatBoxToBottom();
-            })
-            .catch(error => {
-                // Stop showing loading indicator
-                loadingIndicator.remove();
-                handleError(error, 'Query failed:');
-            });
     }
 
     function handleMessageReceived(data) {
-        const messageReceivedId = data['message_received_id'];
-        const messageRepliedId = data['message_replied_id'];
         const responseData = data['response'];
 
         const responseModel = responseData['model'];

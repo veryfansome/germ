@@ -175,6 +175,16 @@ def new_chat_session() -> int:
         return cs.chat_session_id
 
 
+def update_chat_session_is_hidden(chat_session_id: int):
+    with SessionLocal() as session:
+        cs = session.query(ChatSession).filter_by(chat_session_id=chat_session_id).first()
+        if cs:
+            cs.is_hidden = True
+            session.commit()
+        else:
+            logger.error(f"ChatSession.chat_session_id == {chat_session_id} not found")
+
+
 def update_chat_session_summary(chat_session_id: int, summary: str):
     with SessionLocal() as session:
         cs = session.query(ChatSession).filter_by(chat_session_id=chat_session_id).first()

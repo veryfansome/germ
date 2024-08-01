@@ -157,10 +157,6 @@ elements. Ensure the parent elements manage the layout appropriately.
     padding: 5px 10px;
     transition: width 0.3s;
 }
-#version-marker {
-    color: darkred;
-    font-size: large;
-}
 .assistant-message-box {
     background-color: #d1ecf1; /* Light blue */
     border-radius: 10px;
@@ -246,6 +242,9 @@ rem for better responsiveness.
 }
 .popup-menu li:hover {
     background-color: #f0f0f0;
+}
+.popup-menu i:hover {
+    color: #a60101ff;
 }
 .user-message-box {
     background-color: #d4edda; /* Light green */

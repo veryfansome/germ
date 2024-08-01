@@ -17,8 +17,8 @@
     <nav>
         <div class="logo"><a href="/"><i class="fa-solid fa-virus" style="padding-right: 4px"></i>GermBot</a></div>
         <div class="nav-links">
-            <a id="chat-nav-link" href="/"><i class="fa-solid fa-comment" style="padding-right: 4px"></i>Chat<i id="version-marker"></i></a>
-            <a href="/postgres.html"><i class="fa-solid fa-code" style="padding-right: 4px"></i><u>Postgres</u></a>
+            <a id="chat-nav-link" href="/"><i class="fa-solid fa-comment" style="padding-right: 4px"></i>Chat</a>
+            <a href="/static/postgres.html"><i class="fa-solid fa-code" style="padding-right: 4px"></i><u>Postgres</u></a>
         </div>
     </nav>
     <div id="error-popup" class="hidden">
@@ -43,7 +43,6 @@
     hljs.highlightAll();
 
     const queryParams = getQueryParams();
-    setVersionMarker('bot_version' in queryParams ? queryParams['bot_version'] : 'v1');
 
     const chatbox = document.getElementById('chatbox');
     initErrorPopup();
