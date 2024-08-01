@@ -24,10 +24,11 @@ import hashlib
 import os
 import subprocess
 
-from api.models import ChatBookmark, ChatRequest, SqlRequest
-from bot.chat import WebSocketConnectionManager, version_selector
+from api.models import ChatBookmark, ChatSessionSummary, SqlRequest
+from bot.chat import BasicChatHandler, WebSocketConnectionManager, get_chat_session_summaries
 from db.models import (DATABASE_URL, SessionLocal,
-                       ChatSession, MessageBookmark, MessageReceived, MessageReplied, engine)
+                       ChatSession, ChatRequestReceived, ChatResponseSent,
+                       MessageBookmark, MessageReceived, MessageReplied, engine)
 from observability.logging import logging, setup_logging, traceback
 from utils.openai_utils import do_on_text
 
@@ -68,17 +69,18 @@ tracer = trace.get_tracer(__name__)
 METRIC_CHAT_SESSION_ROW_COUNT = Gauge(
     "chat_session_row_count", "Number of rows in the chat_session table")
 
-METRIC_MESSAGE_RECEIVED_ROW_COUNT = Gauge(
-    "message_received_row_count", "Number of rows in the message_received table")
+METRIC_CHAT_REQUEST_RECEIVED_ROW_COUNT = Gauge(
+    "chat_request_received_row_count", "Number of rows in the chat_request_received table")
 
-METRIC_MESSAGE_REPLIED_ROW_COUNT = Gauge(
-    "message_replied_row_count", "Number of rows in the message_replied table")
+METRIC_CHAT_RESPONSE_SENT_ROW_COUNT = Gauge(
+    "chat_response_sent_row_count", "Number of rows in the chat_response_sent table")
 
 
 ##
 # App
 
 websocket_connection_manager = WebSocketConnectionManager()
+websocket_connection_manager.add_event_handler(BasicChatHandler())
 
 
 @asynccontextmanager
@@ -124,19 +126,9 @@ async def dispatch(request: Request, call_next: RequestResponseEndpoint) -> Resp
 # Endpoints
 
 
-@bot.get("/chat/bookmarks")
-async def get_chat_bookmarks(is_test: Optional[bool] = True) -> list[ChatBookmark]:
-    bookmark_list = []
-    with SessionLocal() as session:
-        results = session.query(MessageBookmark).where(MessageBookmark.is_test == is_test).all()
-        for message_bookmark in results:
-            bookmark_list.append(ChatBookmark(
-                id=message_bookmark.id,
-                message_received_id=message_bookmark.message_received_id,
-                message_replied_id=message_bookmark.message_replied_id,
-                message_summary=message_bookmark.message_summary.decode("utf-8"),
-            ))
-    return bookmark_list
+@bot.get("/chat/sessions")
+async def get_chat_sessions() -> list[ChatSessionSummary]:
+    return await run_in_threadpool(get_chat_session_summaries)
 
 
 @bot.get("/chat/bookmark/{bookmark_id}")
@@ -211,20 +203,6 @@ async def get_healthz():
 async def get_postgres_landing(request: Request):
     file_path = os.path.join(os.path.dirname(__file__), 'static', 'postgres.html')
     return FileResponse(file_path)
-
-
-@bot.post("/chat")
-async def post_chat(payload: ChatRequest, bot_version: str = "v1"):
-    try:
-        response = version_selector(bot_version)(
-            payload.messages,
-            system_message=payload.system_message,
-            temperature=payload.temperature,
-        )
-        return response
-    except Exception as e:
-        logger.error("%s: trace: %s", e, traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @bot.post("/chat/bookmark")
@@ -346,12 +324,12 @@ def db_stats():
     with SessionLocal() as session:
         chat_session_count = session.query(ChatSession).count()
         METRIC_CHAT_SESSION_ROW_COUNT.set(chat_session_count)
-        message_received_count = session.query(MessageReceived).count()
-        METRIC_MESSAGE_RECEIVED_ROW_COUNT.set(message_received_count)
-        message_replied_count = session.query(MessageReplied).count()
-        METRIC_MESSAGE_REPLIED_ROW_COUNT.set(message_replied_count)
+        chat_request_received_count = session.query(ChatRequestReceived).count()
+        METRIC_CHAT_REQUEST_RECEIVED_ROW_COUNT.set(chat_request_received_count)
+        chat_response_sent_count = session.query(ChatResponseSent).count()
+        METRIC_CHAT_RESPONSE_SENT_ROW_COUNT.set(chat_response_sent_count)
         logger.info("db_stats: %s", " ".join((
             f"chat_session_count={chat_session_count}",
-            f"message_received_count={message_received_count}",
-            F"message_replied_count={message_replied_count}"
+            f"chat_request_received_count={chat_request_received_count}",
+            F"chat_response_sent_count={chat_response_sent_count}"
         )))

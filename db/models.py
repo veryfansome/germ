@@ -18,8 +18,27 @@ Base = declarative_base()
 class ChatSession(Base):
     __tablename__ = "chat_session"
     chat_session_id = Column(Integer, primary_key=True, autoincrement=True)
+    is_hidden = Column(Boolean, default=False)
+    summary = Column(String)
     time_started = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
     time_stopped = Column(DateTime)
+
+
+class ChatRequestReceived(Base):
+    __tablename__ = "chat_request_received"
+    chat_session_id = Column(Integer, ForeignKey("chat_session.chat_session_id"), nullable=False)
+    chat_request_received_id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_request = Column(JSON)
+    time_received = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
+
+
+class ChatResponseSent(Base):
+    __tablename__ = "chat_response_sent"
+    chat_session_id = Column(Integer, ForeignKey("chat_session.chat_session_id"), nullable=False)
+    chat_request_received_id = Column(Integer, ForeignKey("chat_request_received.chat_request_received_id"), nullable=False)
+    chat_response_sent_id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_response = Column(JSON)
+    time_sent = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
 
 
 class MessageBookmark(Base):

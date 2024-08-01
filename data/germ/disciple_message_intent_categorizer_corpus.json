@@ -1,0 +1,82 @@
+[
+  [
+    "description",
+    "I'm just feeling kinda down right now"
+  ],
+  [
+    "correction",
+    "no, dall-e-2 was the model you should have used to respond"
+  ],
+  [
+    "complaint, description",
+    "in my version of scikit-learn, I see this warning `Unresolved attribute reference 'labels_' for class 'object'` on `print(clustering.labels_)` from your example of how to do `Dynamic Category Handling`"
+  ],
+  [
+    "greeting",
+    "Hi!"
+  ],
+  [
+    "farewell",
+    "I'm going to bed"
+  ],
+  [
+    "correction",
+    "You used the wrong model to respond. you should have used gpt-4o"
+  ],
+  [
+    "request",
+    "Generate an image of a cat"
+  ],
+  [
+    "question",
+    "Who was the protagonist in 'To Kill a Mockingbird'?"
+  ],
+  [
+    "question, description",
+    "when I ran this code, I got `[-1 -1 -1 -1 -1 -1]`, which means everything was considered noise, correct? this code that uses `sklearn` seems completely disconnected from the categories used with openai"
+  ],
+  [
+    "question, suggestion",
+    "I want to use the categories as input features to train ML models. In this example, there are two binary categories. This is too simple. Let's say I want to do intent classification. I might start with a small list of intent categories but over time, I would want to identify new categories so this list might grow. how I can account for that in an ML system?"
+  ],
+  [
+    "suggestion",
+    "It would be great if you could add a dark mode option to the interface."
+  ],
+  [
+    "complaint",
+    "The app keeps crashing every time I try to upload a photo."
+  ],
+  [
+    "feedback, greeting",
+    "I really appreciate how quickly you respond to my questions. Keep up the good work!"
+  ],
+  [
+    "summary, question",
+    "So, to summarize, I need to install the latest version of the library, update my dependencies, and then rerun the script, right?"
+  ],
+  [
+    "suggestion",
+    "I think it would be helpful if you could provide more detailed error messages when something goes wrong. For example, instead of just saying 'Error occurred,' you could specify what kind of error it is and possible solutions."
+  ],
+  [
+    "request",
+    "Can you explain how to set up a virtual environment in Python?"
+  ],
+  [
+    "feedback",
+    "The new update has a sleek design, but it seems to be running slower than the previous version."
+  ],
+  [
+    "question, complaint",
+    "Why does the app take so long to load after the latest update? It used to be much faster."
+  ],
+  [
+    "feedback",
+    "The new feature you added is really intuitive and easy to use, especially the drag-and-drop functionality."
+  ],
+  [
+    "description",
+    "The weather today is absolutely beautiful, with clear skies and a gentle breeze."
+  ]
+]

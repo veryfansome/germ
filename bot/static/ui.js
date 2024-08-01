@@ -74,6 +74,11 @@ function initTextArea(submittedTextList, sendMessageFunc) {
             this.style.overflow = 'auto';
         }
     });
+    window.addEventListener('keydown', (event) => {
+        if (document.activeElement !== textarea) {
+            textarea.focus()
+        }
+    })
 }
 
 function getAssistantMessageBox(name, content, stopReason = null, iconClass = "fa fa-virus") {

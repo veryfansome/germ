@@ -43,6 +43,9 @@
     // Initialize highlight.js
     hljs.highlightAll();
 
+    const host = window.location.hostname;
+    const port = window.location.port;
+
     const queryParams = getQueryParams();
     const botVersion = setVersionMarker('bot_version' in queryParams ? queryParams['bot_version'] : 'v1');
 
@@ -53,8 +56,8 @@
     // Popup menu
     const popupMenuList = document.getElementById('popup-menu-ul');
     const refreshBookmarks = () => {
-        popupMenuList.innerHTML = `<span style="color: gray;"><em>You haven't created any bookmarks yet. When you see reply you want to save, click on the <i class="fa fa-bookmark" style="color: black; margin-right: 0;"></i> below the message.</em></span>`;
-        fetch('/chat/bookmarks?is_test=false')
+        popupMenuList.innerHTML = `<span style="color: gray;"><em>You may not have had any conversations yet. Try sending a message!</em></span>`;
+        fetch('/chat/sessions')
                 .then(response => throwOrJson(response))
                 .then(data => {
                     data.forEach(function (item, idx) {
@@ -62,11 +65,11 @@
                             popupMenuList.innerHTML = '';
                         }
                         const li = document.createElement('li');
-                        li.innerHTML = `<a href="/?bookmark_id=${item['id']}"><i class="fa fa-bookmark"></i>${item['message_summary']}</a>`;
+                        li.innerHTML = `<i class="fa fa-x"></i><a href="/?chat_session_id=${item['chat_session_id']}">${item['summary']}</a>`;
                         popupMenuList.appendChild(li);
                     })
                 })
-                .catch(error => handleError(error, 'Failed to fetch bookmarks:'));
+                .catch(error => handleError(error, 'Failed to session history:'));
     };
     initPopupMenu(refreshBookmarks);
 
@@ -149,42 +152,13 @@
         const copyLink = getCopyTextLink(responseContent);
         assistantMessageBox.appendChild(copyLink);
 
-        // Render bookmark button
-        const bookmarkLink = document.createElement('a');
-        bookmarkLink.className = "chatbox-message-link";
-        bookmarkLink.innerHTML = `<i class="fa fa-bookmark">`;
-        bookmarkLink.addEventListener('click', (event) => {
-            event.preventDefault();
-            bookmarkLink.classList.add('clicked-chatbox-message-link');
-            fetch('/chat/bookmark', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    is_test: false,
-                    message_received_id: messageReceivedId,
-                    message_replied_content: responseContent,
-                    message_replied_id: messageRepliedId,
-                })
-            })
-            .then(response => throwOrJson(response))
-            .then(data => {
-                console.log('Bookmark created:', data);
-                refreshBookmarks();
-            })
-            .catch(error => {
-                bookmarkLink.classList.remove('clicked-chatbox-message-link');
-                handleError(error, 'Bookmark creation failed:');
-            });
-        });
-        assistantMessageBox.appendChild(bookmarkLink);
-
         // Render response
         chatbox.appendChild(assistantMessageBox);
         hljs.highlightAll();
         scrollChatBoxToBottom();
     }
 
-    const ws = new WebSocket("ws://localhost:8001/chat/websocket")
+    const ws = new WebSocket(`ws://${host}:${port}/chat/websocket`)
     async function sendMessage() {
         const message = document.getElementById('input').value;
         submittedText.push(message);
@@ -210,26 +184,7 @@
                 handleError(error, 'Failed to handle message:');
             }
         }
-        if (botVersion === 'v3') {
-            ws.send(JSON.stringify({ messages: chatCompletionMessageList }));
-        } else {
-            fetch(`/chat?bot_version=${botVersion}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ messages: chatCompletionMessageList }),
-            })
-            .then(response => {
-                loadingIndicator.remove(); // Stop showing loading indicator
-                return throwOrJson(response);
-            })
-            .then(data => {
-                return handleMessageReceived(data);
-            })
-            .catch(error => {
-                loadingIndicator.remove(); // Stop showing loading indicator
-                handleError(error, 'Chat failed:');
-            });
-        }
+        ws.send(JSON.stringify({ messages: chatCompletionMessageList }));
     }
     </script>
 </body>
