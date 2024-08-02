@@ -10,8 +10,6 @@ services:
         condition: service_completed_successfully
       jaeger-init:
         condition: service_completed_successfully
-      model-selector-init:
-        condition: service_completed_successfully
       otel-collector-init:
         condition: service_completed_successfully
       test:
@@ -119,18 +117,6 @@ services:
       WAIT_FOR_PORT: 4317
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
-
-  model-selector-init:
-    container_name: germ-model-selector-init
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: "germ:latest"
-    volumes:
-      - ./:/src
-    environment: *local-dev
-    working_dir: /src
-    command: ["python", "-m", "ml.model_selector"]
 
   # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
   prometheus:

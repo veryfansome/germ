@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from fastapi import WebSocket
+from openai import OpenAI
 from prometheus_client import Gauge
 from sqlalchemy.sql import desc
 from starlette.concurrency import run_in_threadpool
@@ -8,8 +9,8 @@ import datetime
 import logging
 
 from api.models import ChatMessage, ChatRequest, ChatResponse, ChatSessionSummary
+from chat.openai_settings import DEFAULT_CHAT_MODEL
 from db.models import ChatSession, ChatRequestReceived, ChatResponseSent, SessionLocal
-from utils.openai_utils import CHAT_COMPLETION_FUNCTIONS, DEFAULT_CHAT_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -63,12 +64,17 @@ class WebSocketConnectionManager:
             update_chat_session_time_stopped(chat_session_id)
             messages = await run_in_threadpool(get_chat_session_messages, chat_session_id)
             if len(messages) > 2:  # A conversation should have at least a message and a reply
-                completion = CHAT_COMPLETION_FUNCTIONS[DEFAULT_CHAT_MODEL](
-                    ([m.dict() for m in messages]
-                     + [{"role": "user", "content": "Give this conversation a title using 10 or fewer words."}]),
-                    temperature=0.0,
-                )
-                update_chat_session_summary(chat_session_id, completion.choices[0].message.content)
+                with OpenAI() as client:
+                    completion = client.chat.completions.create(
+                        messages=([m.dict() for m in messages] + [{
+                            "role": "user", "content": "Give this conversation a title using 10 or fewer words."
+                        }]),
+                        model=DEFAULT_CHAT_MODEL, n=1,
+                        temperature=0.0,
+                    )
+                    update_chat_session_summary(chat_session_id, completion.choices[0].message.content)
+            else:
+                logger.info("skipped adding chat session summary")
         await asyncio.create_task(runnable())
         self.active_connections.pop(chat_session_id, None)
         METRIC_CHAT_SESSIONS_IN_PROGRESS.dec()

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Boolean, Column, DateTime, ForeignKey, Integer, JSON, LargeBinary, String
+from sqlalchemy import create_engine, Boolean, Column, DateTime, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
 import os
@@ -39,35 +39,6 @@ class ChatResponseSent(Base):
     chat_response_sent_id = Column(Integer, primary_key=True, autoincrement=True)
     chat_response = Column(JSON)
     time_sent = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
-
-
-class MessageBookmark(Base):
-    __tablename__ = "message_bookmark"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    is_test = Column(Boolean, default=True)
-    message_received_id = Column(Integer, ForeignKey("message_received.id"), nullable=False)
-    message_replied_id = Column(Integer, ForeignKey("message_replied.id"), nullable=False)
-    message_summary = Column(LargeBinary)
-    timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
-
-
-class MessageReceived(Base):
-    __tablename__ = "message_received"
-    id = Column(Integer, primary_key=True, index=True)
-    chat_frame = Column(JSON)
-    content = Column(LargeBinary)
-    role = Column(String)
-    timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
-
-
-class MessageReplied(Base):
-    __tablename__ = "message_replied"
-    id = Column(Integer, primary_key=True, index=True)
-    content = Column(LargeBinary)
-    message_received_id = Column(Integer, ForeignKey("message_received.id"))
-    role = Column(String)
-    tool_calls = Column(JSON)
-    timestamp = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
 
 
 # Create the tables in the database
