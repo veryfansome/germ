@@ -26,7 +26,7 @@ class WebSocketSender:
         self.chat_request_received_id = chat_request_received_id
         self.connection = connection
 
-    async def send(self, chat_response: ChatResponse):
+    async def send_chat_response(self, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
         new_chat_response_sent(self.chat_session_id, self.chat_request_received_id, chat_response)
 
@@ -37,18 +37,6 @@ class WebSocketEventHandler(ABC):
                          chat_session_id: int, chat_request_received_id: id,
                          chat_request: ChatRequest, response_sender: WebSocketSender):
         pass
-
-
-class BasicChatHandler(WebSocketEventHandler):
-    async def on_receive(self,
-                         chat_session_id: int, chat_request_received_id: int,
-                         chat_request: ChatRequest, response_sender: WebSocketSender):
-        completion = CHAT_COMPLETION_FUNCTIONS[DEFAULT_CHAT_MODEL](
-            chat_request.messages,
-            system_message=chat_request.system_message,
-            temperature=chat_request.temperature,
-        )
-        await response_sender.send(ChatResponse(response=completion))
 
 
 class WebSocketConnectionManager:

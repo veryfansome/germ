@@ -160,7 +160,7 @@
         scrollChatBoxToBottom();
     }
 
-    const ws = new WebSocket(`ws://${host}:${port}/chat/websocket`)
+    const ws = new WebSocket(`ws://${host}:${port}/chat`)
     async function sendMessage() {
         const message = document.getElementById('input').value;
         submittedText.push(message);

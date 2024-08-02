@@ -24,8 +24,10 @@ import os
 import subprocess
 
 from api.models import ChatMessage, ChatSessionSummary, SqlRequest
-from bot.chat import (BasicChatHandler, WebSocketConnectionManager,
-                      get_chat_session_messages, get_chat_session_summaries, update_chat_session_is_hidden)
+from bot.websocket import (WebSocketConnectionManager,
+                           get_chat_session_messages, get_chat_session_summaries,
+                           update_chat_session_is_hidden)
+from chat.openai_handlers import CHAT_HANDLERS
 from db.models import (DATABASE_URL, SessionLocal,
                        ChatSession, ChatRequestReceived, ChatResponseSent,
                        engine)
@@ -78,8 +80,10 @@ METRIC_CHAT_RESPONSE_SENT_ROW_COUNT = Gauge(
 ##
 # App
 
-websocket_connection_manager = WebSocketConnectionManager()
-websocket_connection_manager.add_event_handler(BasicChatHandler())
+websocket_manager = WebSocketConnectionManager()
+for model_name, chat_handler in CHAT_HANDLERS.items():
+    websocket_manager.add_event_handler(chat_handler)
+    logger.info(f"added %s %s", model_name, chat_handler)
 
 
 @asynccontextmanager
@@ -93,7 +97,7 @@ async def lifespan(app: FastAPI):
     yield
     # Stopping
     # TODO: Debug why I'm not seeing sessions get saved on this kind of disconnect
-    await websocket_connection_manager.disconnect_all()
+    await websocket_manager.disconnect_all()
 
 bot = FastAPI(lifespan=lifespan)
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
@@ -126,6 +130,11 @@ async def dispatch(request: Request, call_next: RequestResponseEndpoint) -> Resp
 # Endpoints
 
 
+@bot.delete("/chat/session/{chat_session_id}")
+async def delete_chat_session_bookmark(chat_session_id: int):
+    return await run_in_threadpool(update_chat_session_is_hidden, chat_session_id)
+
+
 @bot.get("/chat/sessions")
 async def get_chat_session_list() -> list[ChatSessionSummary]:
     return await run_in_threadpool(get_chat_session_summaries)
@@ -134,11 +143,6 @@ async def get_chat_session_list() -> list[ChatSessionSummary]:
 @bot.get("/chat/session/{chat_session_id}")
 async def get_chat_session_message_list(chat_session_id: int) -> list[ChatMessage]:
     return await run_in_threadpool(get_chat_session_messages, chat_session_id)
-
-
-@bot.delete("/chat/session/{chat_session_id}")
-async def delete_chat_session_bookmark(chat_session_id: int):
-    return await run_in_threadpool(update_chat_session_is_hidden, chat_session_id)
 
 
 @bot.get("/favicon.ico", include_in_schema=False)
@@ -166,20 +170,6 @@ async def get_healthz():
         "environ": os.environ,
         "status": "OK",
     }
-
-
-@bot.websocket("/chat/websocket")
-async def websocket_chat(ws: WebSocket):
-    async def conduct_chat_session():
-        logger.info("WebSocket connecting")
-        chat_session_id = await websocket_connection_manager.connect(ws)
-        try:
-            while True:
-                await websocket_connection_manager.receive(chat_session_id)
-        except WebSocketDisconnect:
-            logger.info(f"WebSocket for chat_session {chat_session_id} disconnected")
-            await websocket_connection_manager.disconnect(chat_session_id)
-    await asyncio.create_task(conduct_chat_session())
 
 
 @bot.get("/metrics")
@@ -219,6 +209,20 @@ async def post_postgres_query(payload: SqlRequest,
         os.remove(query_file)
         logger.error("%s: trace: %s", e, traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@bot.websocket("/chat")
+async def websocket_chat(ws: WebSocket):
+    async def conduct_chat_session():
+        logger.info("WebSocket connecting")
+        chat_session_id = await websocket_manager.connect(ws)
+        try:
+            while True:
+                await websocket_manager.receive(chat_session_id)
+        except WebSocketDisconnect:
+            logger.info(f"WebSocket for chat_session {chat_session_id} disconnected")
+            await websocket_manager.disconnect(chat_session_id)
+    await asyncio.create_task(conduct_chat_session())
 
 
 ##
