@@ -9,7 +9,7 @@ import datetime
 import logging
 
 from api.models import ChatMessage, ChatRequest, ChatResponse, ChatSessionSummary
-from chat.openai_settings import DEFAULT_CHAT_MODEL
+from settings.openai_settings import DEFAULT_CHAT_MODEL
 from db.models import ChatSession, ChatRequestReceived, ChatResponseSent, SessionLocal
 
 logger = logging.getLogger(__name__)

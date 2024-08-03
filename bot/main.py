@@ -31,6 +31,7 @@ from chat.openai_handlers import CHAT_HANDLERS
 from db.models import (DATABASE_URL, SessionLocal,
                        ChatSession, ChatRequestReceived, ChatResponseSent,
                        engine)
+from ml.event_handlers import ML_HANDLERS
 from observability.logging import logging, setup_logging, traceback
 
 scheduler = AsyncIOScheduler()
@@ -84,6 +85,9 @@ websocket_manager = WebSocketConnectionManager()
 for model_name, chat_handler in CHAT_HANDLERS.items():
     websocket_manager.add_event_handler(chat_handler)
     logger.info(f"added %s %s", model_name, chat_handler)
+for handler in ML_HANDLERS:
+    websocket_manager.add_event_handler(handler)
+    logger.info(f"added %s", handler)
 
 
 @asynccontextmanager

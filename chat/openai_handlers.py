@@ -7,9 +7,13 @@ import time
 
 from api.models import ChatRequest, ChatResponse
 from bot.websocket import WebSocketEventHandler, WebSocketSender
-from chat.openai_settings import DEFAULT_CHAT_MODEL, ENABLED_CHAT_MODELS, ENABLED_IMAGE_MODELS
+from ml.bert_classifier import BertClassificationPredictor, new_activation_predictor
+from settings.openai_settings import (DEFAULT_CHAT_MODEL,
+                                      ENABLED_CHAT_MODELS, ENABLED_IMAGE_MODELS,
+                                      ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE)
 
-CHAT_HANDLERS = {}
+ACTIVATION_PREDICTORS: dict[str, BertClassificationPredictor] = {}
+CHAT_HANDLERS: dict[str, WebSocketEventHandler] = {}
 
 
 class ChatModelEventHandler(WebSocketEventHandler):
@@ -65,6 +69,25 @@ class ImageModelEventHandler(WebSocketEventHandler):
             return f"[![{image_model_inputs['prompt']}]({submission.data[0].url})]({submission.data[0].url})"
 
 
+def messages_to_transcript(chat_request: ChatRequest):
+    """
+    GPT-4o recommended the following format because it captures directionality and provides clear boundaries to
+    messages, which is helpful when trying to get embeddings that capture the context of the conversation.
+
+    [USER] Hi! [ASSISTANT]
+    [ASSISTANT] Hey! How can I help you? [USER]
+    [USER] Tell me a joke [ASSISTANT]
+
+    :param chat_request:
+    :return: transcript as a string
+    """
+    transcript_lines = []
+    for message in chat_request.messages:
+        end_tag = "user" if message.role == "assistant" else "assistant"
+        transcript_lines.append(f"[{message.role.upper()}] {message.content} [{end_tag.upper()}]")
+    return "\n".join(transcript_lines)
+
+
 def generate_image_model_inputs(chat_request: ChatRequest):
     with OpenAI() as client:
         completion = client.chat.completions.create(
@@ -109,5 +132,7 @@ def generate_image_model_inputs(chat_request: ChatRequest):
 
 for m in ENABLED_CHAT_MODELS:
     CHAT_HANDLERS[m] = ChatModelEventHandler(m)
+for m in ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE:
+    ACTIVATION_PREDICTORS[m] = new_activation_predictor(m)
 #for m in ENABLED_IMAGE_MODELS:
 #    CHAT_HANDLERS[m] = ImageModelEventHandler(m)

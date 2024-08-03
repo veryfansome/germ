@@ -1,3 +1,4 @@
+from dns import tokenizer
 from transformers import BertModel, BertTokenizer
 import os
 import torch
@@ -50,11 +51,47 @@ class BertClassificationPredictor:
         self.optimizer = optim.Adam(self.bert_classifier.parameters(), lr=0.001)
 
     def generate_embeddings(self, text):
-        text_inputs = self.tokenizer(text, return_tensors='pt')
+        text_inputs = self.tokenizer(text,
+                                     return_tensors='pt', truncation=True, padding=True,
+                                     max_length=self.tokenizer.model_max_length)
         with torch.no_grad():
             text_outputs = self.model(**text_inputs)
         text_embeddings = text_outputs.last_hidden_state[:, 0, :]  # Use the [CLS] token
         return text_embeddings
+
+    def generate_concatenated_embeddings(self, text):
+        """
+        Tokenize the text and generate embeddings with a sliding window. This approach ensures that we can
+        handle long conversations without losing important context due to token truncation. By using a sliding
+        window, we process the text in manageable chunks and combine the embeddings to form a comprehensive
+        representation. The caveat is that this is computationally heavy. When tested, training times increased
+        by an order of magnitude.
+
+        :param text:
+        :return: combined embeddings
+        """
+        tokens = self.tokenizer(text, return_tensors='pt', truncation=False, padding=False)['input_ids'][0]
+        max_length = self.tokenizer.model_max_length
+        stride = 256  # Overlap between windows
+
+        embeddings_list = []
+        for idx in range(0, len(tokens), stride):
+            window_tokens = tokens[idx:idx + max_length]
+            if len(window_tokens) < max_length:
+                padding_length = max_length - len(window_tokens)
+                window_tokens = torch.cat([
+                    window_tokens,
+                    torch.zeros(max_length - len(window_tokens), dtype=torch.long)
+                ])
+                attention_mask = torch.cat([torch.ones(len(window_tokens) - padding_length), torch.zeros(padding_length)])
+            else:
+                attention_mask = torch.ones(max_length)
+            inputs = {'input_ids': window_tokens.unsqueeze(0), 'attention_mask': attention_mask.unsqueeze(0)}
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+            embeddings = outputs.last_hidden_state[:, 0, :]  # Use [CLS] token representation
+            embeddings_list.append(embeddings)
+        return torch.cat(embeddings_list, dim=0)
 
     def load(self, save_file: str = None):
         if save_file is None:
@@ -89,29 +126,33 @@ class BertClassificationPredictor:
         self.optimizer.step()
 
 
+def new_activation_predictor(classifier_name: str):
+    return BertClassificationPredictor(classifier_name, ["off", "on"])
+
+
 if __name__ == "__main__":
     import random
     import time
 
     setup_logging()
 
-    labels = ["go", "don't go"]
+    go_no_go_labels = ["go", "don't go"]
     tests = [
         {"label": "go", "text": "You should go."},
         {"label": "don't go", "text": "You should not go."},
     ]
     examples = tests * 10  # Ok to have dupes
-    predictor = BertClassificationPredictor('go-no-go', labels)
+    predictor = BertClassificationPredictor('go-no-go', go_no_go_labels)
     for i in range(10):
         logger.info(f"round {i}")
         time_round_started = time.time()
         random.shuffle(examples)
         for exp in examples:
-            embeddings = predictor.generate_embeddings(exp['text'])
-            predictor.train_bert_classifier(exp['label'], embeddings)
+            exp_embeddings = predictor.generate_embeddings(exp['text'])
+            predictor.train_bert_classifier(exp['label'], exp_embeddings)
         logger.info(f"finished round {i} after {time.time() - time_round_started}s")
     tests = tests * 10
     random.shuffle(tests)
     for exp in tests:
-        embeddings = predictor.generate_embeddings(exp['text'])
-        assert exp['label'] == predictor.predict_label(embeddings)
+        exp_embeddings = predictor.generate_embeddings(exp['text'])
+        assert exp['label'] == predictor.predict_label(exp_embeddings)
