@@ -45,7 +45,7 @@ docker-compose run test
 
 ## Interface
 
-So basic, your grandma could use it!
+So basic, anyone could use it!
 
 ### Chat
 
