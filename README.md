@@ -4,7 +4,7 @@
 
 Germ is a chatbot project that aims to create a chat-driven ML exploration system that is simple to run, maintain, and expand. The underlying chat completion capability is powered by OpenAI's GPT (3.5, 4, 4o, etc.). DALL-E can also be used to return image requests. Other OpenAI models can be integrated but have not been integrated yet (PRs plz!).
 
-The chat experience and interface is barebones compared to ChatGPT, but it does a good enough job. The pacing is slightly different because ChatGPT streams responses, which results in an immediate response that can take a long time to complete. Germ doesn't stream, it asks for the whole responses all at once, which means a slower initial response but a faster overall result on longer form responses, which is often the case when you're asking for generated code.
+The chat experience and interface is barebones compared to ChatGPT, but it does a good enough job. The pacing is slightly different because ChatGPT streams responses, which results in immediate responses that can take a long time to complete. Germ doesn't stream, it asks for whole responses at once, which means slower initial response but a faster overall result on longer form answers, which is often the case when you're having a technical discussion or asking for generated code.
 
 ### Core Features
 You might be thinking, "Meh, why not just use ChatGPT?". Well, you own all your data and have more control to customize your experience. Here are some features I find appealing.
@@ -15,6 +15,11 @@ You might be thinking, "Meh, why not just use ChatGPT?". Well, you own all your 
 - "Handler" pattern enable rich multi-model responses and make it easy to explore new ideas
 
 ### Design
+
+#### Why WebSocket?
+
+Initially, Germ's `/chat` endpoint was implemented with HTTP POST but this limited chats to single direction message/response interactions initiated by the user. With WebSocket, as long as the connection remains open, the bot could eventually have agency to reply with one or more clarifying questions before returning a more desirable answer. This makes it unnecessary for users to craft finely tuned prompts. WebSocket also makes it possible for the bot to initiate new messages on an idle connection, e.g. "Oh hey! I have an update on the thing you asked me to run earlier." Or, "Hey! My logs are filling up `/xyz`. You should clear that up."
+
 ![Design diagram](https://github.com/user-attachments/assets/fdee35ea-c40b-4538-a0c3-df11765e54c2)
 
 ## Setup
