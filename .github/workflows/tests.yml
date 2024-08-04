@@ -44,4 +44,4 @@ jobs:
           POSTGRES_USER=germ
           POSTGRES_PASSWORD=bacteria4life
           EOF
-          docker-compose run test
+          docker compose run test
