@@ -42,8 +42,3 @@ docker-compose up --build
 ```bash
 docker-compose run test
 ```
-
-## Foo
-
-GPT is decently good at generating close-enough code.
-This project started with a ChatGPT prompt asking for a simple Gunicorn, FastAPI application setup with docker compose and with tests that run on Github Actions. Since then, every major component has been designed and implemented by GPT-4 and GPT-4o with human guidance.
