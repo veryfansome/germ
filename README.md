@@ -10,6 +10,8 @@ Germ is a chatbot project built using FastAPI and Gunicorn.
 
 The aim of this project is to create a chat-driven ML exploration system that is simple to run, maintain, and expand.
 
+![9519CC62-34E7-468F-BEFA-90E8BE112C2F_1_105_c](https://github.com/user-attachments/assets/fdee35ea-c40b-4538-a0c3-df11765e54c2)
+
 ### Core Features To-Date
 
 - Persistent chat history
