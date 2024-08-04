@@ -75,6 +75,9 @@ function initTextArea(submittedTextList, sendMessageFunc) {
         }
     });
     window.addEventListener('keydown', (event) => {
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+            return;  // Do nothing if keydown is a modifier key.
+        }
         if (document.activeElement !== textarea) {
             textarea.focus()
         }
