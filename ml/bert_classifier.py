@@ -1,16 +1,20 @@
-from dns import tokenizer
+from starlette.concurrency import run_in_threadpool
 from transformers import BertModel, BertTokenizer
 import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from observability.annotations import measure_exec_seconds
 from observability.logging import logging, setup_logging
+
 logger = logging.getLogger(__name__)
 
 
-# Define a simple neural network for classification
 class BertClassifier(nn.Module):
+    """
+    A simple neural network for classifying text using a BERT model.
+    """
     def __init__(self, input_dim, hidden_dim, output_dim, dropout_prob=0.5):
         super(BertClassifier, self).__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
@@ -32,7 +36,8 @@ class BertClassificationPredictor:
     def __init__(self, classifier_name: str, labels: list[str],
                  bert_model_name: str = "bert-large-cased"):
         model_dir = os.getenv("MODEL_DIR", "/src/data/germ")
-
+        self.bert_classifier = None
+        self.optimizer = None
         self.criterion = nn.CrossEntropyLoss()
         self.labels = labels
         self.model = BertModel.from_pretrained(bert_model_name)
@@ -41,15 +46,9 @@ class BertClassificationPredictor:
         self.name = classifier_name
         self.save_file = f"{model_dir}/{classifier_name}_{bert_model_name}.pth"
         self.tokenizer = BertTokenizer.from_pretrained(self.model_name)
+        self.load_from_save_file()
 
-        self.bert_classifier = BertClassifier(
-            self.model_embedding_size,  # input_dim
-            128,  # hidden_dim
-            len(labels),  # output_dim
-            dropout_prob=0.5
-        )
-        self.optimizer = optim.Adam(self.bert_classifier.parameters(), lr=0.001)
-
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
     def generate_embeddings(self, text):
         text_inputs = self.tokenizer(text,
                                      return_tensors='pt', truncation=True, padding=True,
@@ -59,13 +58,14 @@ class BertClassificationPredictor:
         text_embeddings = text_outputs.last_hidden_state[:, 0, :]  # Use the [CLS] token
         return text_embeddings
 
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
     def generate_concatenated_embeddings(self, text):
         """
         Tokenize the text and generate embeddings with a sliding window. This approach ensures that we can
         handle long conversations without losing important context due to token truncation. By using a sliding
         window, we process the text in manageable chunks and combine the embeddings to form a comprehensive
-        representation. The caveat is that this is computationally heavy. When tested, training times increased
-        by an order of magnitude.
+        representation. The caveat is that this is computationally heavy. When initially tested, training times
+        increased by an order of magnitude.
 
         :param text:
         :return: combined embeddings
@@ -93,15 +93,35 @@ class BertClassificationPredictor:
             embeddings_list.append(embeddings)
         return torch.cat(embeddings_list, dim=0)
 
-    def load(self, save_file: str = None):
-        if save_file is None:
-            save_file = self.save_file
-        if os.path.exists(save_file):
-            checkpoint = torch.load(save_file)
-            self.bert_classifier.load_state_dict(checkpoint['bert_classifier_state_dict'])
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            self.bert_classifier.eval()  # Set the model to evaluation mode
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
+    def load_from_save_file(self):
+        """
+        Load the saved model and tokenizer from disk into new classifier and optimizer and then
+        replace the existing one. This ensures we can continue to serve predictions while periodically
+        refreshing models from disk.
 
+        :return:
+        """
+        bert_classifier, optimizer = self.new_bert_classifier()
+        load_from_save_file(bert_classifier, optimizer, self.save_file)
+        self.bert_classifier = bert_classifier
+        self.optimizer = optimizer
+
+    async def load_from_save_file_runnable(self):
+        await run_in_threadpool(self.load_from_save_file)
+
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
+    def new_bert_classifier(self):
+        bert_classifier = BertClassifier(
+            self.model_embedding_size,  # input_dim
+            128,  # hidden_dim
+            len(self.labels),  # output_dim
+            dropout_prob=0.5
+        )
+        optimizer = optim.Adam(bert_classifier.parameters(), lr=0.001)
+        return bert_classifier, optimizer
+
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
     def predict_label(self, embeddings):
         self.bert_classifier.eval()
         with torch.no_grad():
@@ -109,6 +129,7 @@ class BertClassificationPredictor:
         _, predicted = torch.max(outputs, 1)
         return self.labels[predicted.item()]
 
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
     def save(self, save_file: str = None):
         if save_file is None:
             save_file = self.save_file
@@ -117,6 +138,7 @@ class BertClassificationPredictor:
             'optimizer_state_dict': self.optimizer.state_dict(),
         }, save_file)
 
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
     def train_bert_classifier(self, label: str, embeddings):
         self.bert_classifier.train()
         self.optimizer.zero_grad()
@@ -124,6 +146,15 @@ class BertClassificationPredictor:
         loss = self.criterion(outputs, torch.tensor([self.labels.index(label)], dtype=torch.long))
         loss.backward()
         self.optimizer.step()
+
+
+def load_from_save_file(bert_classifier: BertClassifier, optimizer: optim.Adam, save_file: str):
+    if os.path.exists(save_file):
+        checkpoint = torch.load(save_file)
+        bert_classifier.load_state_dict(checkpoint['bert_classifier_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        bert_classifier.eval()  # Set the model to evaluation mode
+    return bert_classifier, optimizer
 
 
 def new_activation_predictor(classifier_name: str):

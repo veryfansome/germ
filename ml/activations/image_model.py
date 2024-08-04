@@ -1,12 +1,13 @@
 from openai import OpenAI
 import json
-import time
+import logging
 
 from api.models import ChatRequest
 from bot.websocket import WebSocketEventHandler, WebSocketSender
-from chat.openai_handlers import ACTIVATION_PREDICTORS, BertClassificationPredictor, messages_to_transcript
+from chat.openai_handlers import messages_to_transcript
 from db.models import ImageModel, ImageModelChatRequestLink, SessionLocal
-from observability.logging import logging
+from ml.bert_classifier import new_activation_predictor
+from observability.annotations import measure_exec_seconds
 from settings.openai_settings import (DEFAULT_CHAT_MODEL,
                                       ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE)
 
@@ -14,8 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class ManagedImageModel:
-    def __init__(self, image_model_id: int, activation_predictor: BertClassificationPredictor):
-        self.activation_predictor = activation_predictor
+    def __init__(self, image_model_id: int):
         self.image_model_id = image_model_id
 
 
@@ -35,9 +35,9 @@ class ImageModelActivationTrainingDataEventHandler(WebSocketEventHandler):
                 session.commit()
                 results = session.query(ImageModel).all()
             for r in results:
-                self.managed_image_models[r.image_model_name] = ManagedImageModel(
-                    r.image_model_id, ACTIVATION_PREDICTORS[r.image_model_name])
+                self.managed_image_models[r.image_model_name] = ManagedImageModel(r.image_model_id)
 
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self,
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, response_sender: WebSocketSender):
@@ -128,10 +128,7 @@ class ImageModelActivationTrainingDataEventHandler(WebSocketEventHandler):
         logger.info("transcript: %s", transcript)
         for label in labels.keys():
             for image_model_name in labels[label]:
-                activator = self.managed_image_models[image_model_name].activation_predictor
-                before_embeddings_time = time.time()
+                activator = new_activation_predictor(image_model_name)  # Loads from disk on init
                 transcript_embeddings = activator.generate_embeddings(transcript)
-                logger.info(f"finished generating embeddings in {time.time() - before_embeddings_time}s")
-                before_training_time = time.time()
                 activator.train_bert_classifier(label, transcript_embeddings)
-                logger.info(f"finished training in {time.time() - before_training_time}s")
+                activator.save()

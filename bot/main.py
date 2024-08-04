@@ -27,7 +27,7 @@ from api.models import ChatMessage, ChatSessionSummary, SqlRequest
 from bot.websocket import (WebSocketConnectionManager,
                            get_chat_session_messages, get_chat_session_summaries,
                            update_chat_session_is_hidden)
-from chat.openai_handlers import CHAT_HANDLERS
+from chat.openai_handlers import ACTIVATION_PREDICTORS, CHAT_HANDLERS
 from db.models import (DATABASE_URL, SessionLocal,
                        ChatSession, ChatRequestReceived, ChatResponseSent,
                        engine)
@@ -92,16 +92,29 @@ for handler in ML_HANDLERS:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    Service startup/shutdown behavior.
+
+    :param app:
+    :return:
+    """
+    # DB stats
     async def db_stats_job():
         await run_in_threadpool(db_stats)
     await db_stats_job()  # Warms up DB connections on startup
-    scheduler.add_job(db_stats_job, 'interval', seconds=60)
+    scheduler.add_job(db_stats_job, 'interval', seconds=60, name='DB stats')
+
+    # Periodic model reloads
+    for name, activator in ACTIVATION_PREDICTORS.items():
+        scheduler.add_job(
+            activator.load_from_save_file_runnable, 'interval', seconds=60, name=f"{name} activator reload")
+
     scheduler.start()
     # Started
     yield
     # Stopping
-    # TODO: Debug why I'm not seeing sessions get saved on this kind of disconnect
     await websocket_manager.disconnect_all()
+
 
 bot = FastAPI(lifespan=lifespan)
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")

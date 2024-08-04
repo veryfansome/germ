@@ -8,6 +8,7 @@ import time
 from api.models import ChatRequest, ChatResponse
 from bot.websocket import WebSocketEventHandler, WebSocketSender
 from ml.bert_classifier import BertClassificationPredictor, new_activation_predictor
+from observability.annotations import measure_exec_seconds
 from settings.openai_settings import (DEFAULT_CHAT_MODEL,
                                       ENABLED_CHAT_MODELS, ENABLED_IMAGE_MODELS,
                                       ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE)
@@ -20,6 +21,7 @@ class ChatModelEventHandler(WebSocketEventHandler):
     def __init__(self, model: str):
         self.model = model
 
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self,
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, response_sender: WebSocketSender):
@@ -40,6 +42,7 @@ class ImageModelEventHandler(WebSocketEventHandler):
     def __init__(self, model: str):
         self.model = model
 
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self,
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, response_sender: WebSocketSender):
@@ -88,6 +91,7 @@ def messages_to_transcript(chat_request: ChatRequest):
     return "\n".join(transcript_lines)
 
 
+@measure_exec_seconds(use_logging=True, use_prometheus=True)
 def generate_image_model_inputs(chat_request: ChatRequest):
     with OpenAI() as client:
         completion = client.chat.completions.create(
