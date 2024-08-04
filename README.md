@@ -1,21 +1,21 @@
-<img src="./bot/static/logo.webp" alt="logo.webp" title="Germ" style="width:200px; height:200px;">
-
 # germ
 
 [![tests](https://github.com/veryfansome/germ/actions/workflows/tests.yml/badge.svg)](https://github.com/veryfansome/germ/actions/workflows/tests.yml)
 
-Germ is a chatbot project built using FastAPI and Gunicorn.
+Germ is a chatbot project that aims to create a chat-driven ML exploration system that is simple to run, maintain, and expand. The underlying chat completion capability is powered by OpenAI's GPT (3.5, 4, 4o, etc.). DALL-E can also be used to return image requests. Other OpenAI models can be integrated but have not been integrated yet (PRs plz!).
 
-## Project Premise
+The chat experience and interface is barebones compared to ChatGPT, but it does a good enough job. The pacing is slightly different because ChatGPT streams responses, which results in an immediate response that can take a long time to complete. Germ doesn't stream, it asks for the whole responses all at once, which means a slower initial response but a faster overall result on longer form responses, which is often the case when you're asking for generated code.
 
-The aim of this project is to create a chat-driven ML exploration system that is simple to run, maintain, and expand.
+### Core Features
+You might be thinking, "Meh, why not just use ChatGPT?". Well, you own all your data and have more control to customize your experience. Here are some features I find appealing.
 
-![9519CC62-34E7-468F-BEFA-90E8BE112C2F_1_105_c](https://github.com/user-attachments/assets/fdee35ea-c40b-4538-a0c3-df11765e54c2)
+- Persistent chat history stored in PostgreSQL can be mined for training data
+- Chat history enables "bookmarks" that allow saving and recalling entire conversations, therefore, making it possible to iteratively progress conversations on complex technical discussions, similar to how "quick save/load" can be used to incrementally progress challenging video game encounters.
+- Event-based design that allows adding new behavior without increasing overall wait times for users
+- "Handler" pattern enable rich multi-model responses and make it easy to explore new ideas
 
-### Core Features To-Date
-
-- Persistent chat history
-- Bookmarks that allow saving and recalling entire conversations, therefore, making it possible to iteratively progress conversations on complex technical discussions, similar to how "quick save/load" can be used to incrementally progress challenging video game encounters.
+### Design
+![Design diagram](https://github.com/user-attachments/assets/fdee35ea-c40b-4538-a0c3-df11765e54c2)
 
 ## Setup
 
@@ -42,3 +42,8 @@ docker-compose up --build
 ```bash
 docker-compose run test
 ```
+
+## Foo
+
+GPT is decently good at generating close-enough code.
+This project started with a ChatGPT prompt asking for a simple Gunicorn, FastAPI application setup with docker compose and with tests that run on Github Actions. Since then, every major component has been designed and implemented by GPT-4 and GPT-4o with human guidance.
