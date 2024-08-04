@@ -45,3 +45,20 @@ docker-compose run test
 
 ## Interface
 
+So basic, your grandma could use it!
+
+### Chat
+
+On the botton right, we can see previous sessions, which have been bookmarked automatically. Clicking on them will recall the conversation, allowing the discussion to continue in a new session. The chat interface is very barebones.
+
+![Chat with bookmarks](https://github.com/user-attachments/assets/4f6afee0-f740-470b-9010-588ffbac621e)
+
+The chatbox loves Markdown. Responses render Markdown and if you enter Markdown in the textarea, it will be rendered also. You can copy anything you send or get from the bot using the copy button, which you can see on the bottom left. If you wish to re-enter something you typed previously, you can up-arrow like on a terminal.
+
+![Markdown with copy button](https://github.com/user-attachments/assets/4daf76d0-6b91-49b2-8dec-fb651172a3a0)
+
+### PostgreSQL
+
+For convenience, you can directly query the DB, which is very helpful when debugging.
+
+![Postgres](https://github.com/user-attachments/assets/20f12445-6b9d-4285-a494-169079ff6b03)
