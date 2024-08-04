@@ -14,13 +14,13 @@ You might be thinking, "Meh, why not just use ChatGPT?". Well, you own all your 
 - Event-based design that allows adding new behavior without increasing overall wait times for users
 - "Handler" pattern enable rich multi-model responses and make it easy to explore new ideas
 
-### Design
-
-#### Why WebSocket?
-
-Initially, Germ's `/chat` endpoint was implemented with HTTP POST but this limited chats to single direction message/response interactions initiated by the user. With WebSocket, as long as the connection remains open, the bot could eventually have agency to reply with one or more clarifying questions before returning a more desirable answer. This makes it unnecessary for users to craft finely tuned prompts. WebSocket also makes it possible for the bot to initiate new messages on an idle connection, e.g. "Oh hey! I have an update on the thing you asked me to run earlier." Or, "Hey! My logs are filling up `/xyz`. You should clear that up."
+## Design
 
 ![Design diagram](https://github.com/user-attachments/assets/fdee35ea-c40b-4538-a0c3-df11765e54c2)
+
+### Why WebSocket?
+
+Initially, Germ's `/chat` endpoint was implemented with HTTP POST but this limited chats to single direction message/response interactions initiated by the user. With WebSocket, as long as the connection remains open, the bot could eventually have agency to reply with one or more clarifying questions before returning a more desirable answer. This makes it unnecessary for users to craft finely tuned prompts. WebSocket also makes it possible for the bot to initiate new messages on an idle connection, e.g. "Oh hey! I have an update on the thing you asked me to run earlier." Or, "Hey! My logs are filling up `/xyz`. You should clear that up."
 
 ## Setup
 
@@ -50,15 +50,15 @@ docker-compose run test
 
 ## Interface
 
-So basic, anyone could use it!
+So basic, anyone could use it! Just go to http://localhost:8001 and start typing.
 
 ### Chat
 
-On the botton right, we can see previous sessions, which have been bookmarked automatically. Clicking on them will recall the conversation, allowing the discussion to continue in a new session. The chat interface is very barebones.
+This is the chat page. If you start typing, what you type will populate in the textarea. Hit enter to send or use the "Send" button. On the bottom right area of the screenshot below, you can see a list of previous sessions, which have been bookmarked automatically. Clicking on them will recall the conversation, allowing the discussion to continue in the current session.
 
 ![Chat with bookmarks](https://github.com/user-attachments/assets/4f6afee0-f740-470b-9010-588ffbac621e)
 
-The chatbox loves Markdown. Responses render Markdown and if you enter Markdown in the textarea, it will be rendered also. You can copy anything you send or get from the bot using the copy button, which you can see on the bottom left. If you wish to re-enter something you typed previously, you can up-arrow like on a terminal.
+The chatbox loves Markdown. Responses render Markdown and if you enter Markdown in the textarea, it will be rendered also. You can also copy anything you send or get from the bot using the copy button, which you can see on the bottom left. If you wish to re-enter something you typed previously, you can up-arrow like on a terminal.
 
 ![Markdown with copy button](https://github.com/user-attachments/assets/4daf76d0-6b91-49b2-8dec-fb651172a3a0)
 
