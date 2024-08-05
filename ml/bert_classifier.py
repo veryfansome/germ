@@ -185,22 +185,25 @@ if __name__ == "__main__":
     setup_logging()
 
     go_no_go_labels = ["go", "don't go"]
+    predictor = BertClassificationPredictor('go-no-go', go_no_go_labels)
+
     tests = [
-        {"label": "go", "text": "You should go."},
-        {"label": "don't go", "text": "You should not go."},
+        {"label": "go",
+         "text": "You should go.",
+         "embeddings": predictor.generate_embeddings("You should go.")},
+        {"label": "don't go",
+         "text": "You should not go.",
+         "embeddings": predictor.generate_embeddings("You should not go.")},
     ]
     examples = tests * 10  # Ok to have dupes
-    predictor = BertClassificationPredictor('go-no-go', go_no_go_labels)
     for i in range(10):
         logger.info(f"round {i}")
         time_round_started = time.time()
         random.shuffle(examples)
         for exp in examples:
-            exp_embeddings = predictor.generate_embeddings(exp['text'])
-            predictor.train_bert_classifier(exp['label'], exp_embeddings)
+            predictor.train_bert_classifier(exp['label'], exp['embeddings'])
         logger.info(f"finished round {i} after {time.time() - time_round_started}s")
     tests = tests * 10
     random.shuffle(tests)
     for exp in tests:
-        exp_embeddings = predictor.generate_embeddings(exp['text'])
-        assert exp['label'] == predictor.predict_label(exp_embeddings)
+        assert exp['label'] == predictor.predict_label(exp['embeddings'])
