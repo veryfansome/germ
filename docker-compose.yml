@@ -19,7 +19,7 @@ services:
       dockerfile: Dockerfile
     image: "germ:latest"
     volumes:
-      - ./:/src
+      - ./:/src:rw
     environment: &local-dev
       DB_HOST: &db-host germ-db
       HF_HOME: /src/data/huggingface
