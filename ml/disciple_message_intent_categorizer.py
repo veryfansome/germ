@@ -1,3 +1,5 @@
+# Dead code. Left for reference.
+
 from transformers import BertTokenizer, BertModel
 import os
 import torch

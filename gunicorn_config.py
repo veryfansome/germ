@@ -19,4 +19,4 @@ backlog = 2048
 # keyfile = '/path/to/your/private.key'
 
 # Increase the number of threads for handling requests. Useful for I/O-bound tasks.
-# threads = 4
+threads = 12
