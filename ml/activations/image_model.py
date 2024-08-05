@@ -2,7 +2,6 @@ from openai import OpenAI
 from starlette.concurrency import run_in_threadpool
 import asyncio
 import json
-import logging
 
 from api.models import ChatRequest
 from bot.websocket import WebSocketEventHandler, WebSocketSender
@@ -10,6 +9,7 @@ from chat.openai_handlers import messages_to_transcript
 from db.models import ImageModel, ImageModelChatRequestLink, SessionLocal
 from ml.bert_classifier import new_activation_predictor
 from observability.annotations import measure_exec_seconds
+from observability.logging import logging, setup_logging
 from settings.openai_settings import (DEFAULT_CHAT_MODEL,
                                       ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE)
 

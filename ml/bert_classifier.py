@@ -1,5 +1,5 @@
 from starlette.concurrency import run_in_threadpool
-from transformers import BertModel, BertTokenizer
+from transformers import AutoModel, AutoTokenizer
 import os
 import torch
 import torch.nn as nn
@@ -34,18 +34,31 @@ class BertClassifier(nn.Module):
 
 class BertClassificationPredictor:
     def __init__(self, classifier_name: str, labels: list[str],
-                 bert_model_name: str = "bert-large-cased"):
+                 bert_model_name: str = "distilbert-base-cased",):
+        """
+        Trains BertClassifier with given model name and labels for making predictions.
+
+        :param classifier_name:
+        :param labels:
+        :param bert_model_name:
+            - `bert-large-cased` is the most memory-intensive with ~1.3 GB.
+            - `bert-base-cased` and `roberta-base` are significantly smaller but still require around ~420-480 MB.
+            - `distilbert-base-cased` is more compact, requiring ~250-450 MB.
+            - `albert-base-v2` is the most memory efficient, requiring ~45-100 MB but is uncased.
+        """
         model_dir = os.getenv("MODEL_DIR", "/src/data/germ")
         self.bert_classifier = None
         self.optimizer = None
         self.criterion = nn.CrossEntropyLoss()
         self.labels = labels
-        self.model = BertModel.from_pretrained(bert_model_name)
+
+        self.model = AutoModel.from_pretrained(bert_model_name)
         self.model_name = bert_model_name
+
         self.model_embedding_size = self.model.config.hidden_size
         self.name = classifier_name
         self.save_file = f"{model_dir}/{classifier_name}_{bert_model_name}.pth"
-        self.tokenizer = BertTokenizer.from_pretrained(self.model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         self.load_from_save_file()
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
