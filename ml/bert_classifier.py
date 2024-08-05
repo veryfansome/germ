@@ -7,6 +7,7 @@ import torch.optim as optim
 
 from observability.annotations import measure_exec_seconds
 from observability.logging import logging, setup_logging
+from settings import germ_settings
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,8 @@ class BertClassifier(nn.Module):
 
 class BertClassificationPredictor:
     def __init__(self, classifier_name: str, labels: list[str],
-                 bert_model_name: str = "distilbert-base-cased",):
+                 bert_model_name: str = germ_settings.DEFAULT_BERT_MODEL,
+                 model_dir: str = germ_settings.MODEL_DIR):
         """
         Trains BertClassifier with given model name and labels for making predictions.
 
@@ -46,7 +48,6 @@ class BertClassificationPredictor:
             - `distilbert-base-cased` is more compact, requiring ~250-450 MB.
             - `albert-base-v2` is the most memory efficient, requiring ~45-100 MB but is uncased.
         """
-        model_dir = os.getenv("MODEL_DIR", "/src/data/germ")
         self.bert_classifier = None
         self.optimizer = None
         self.criterion = nn.CrossEntropyLoss()
@@ -170,8 +171,11 @@ def load_from_save_file(bert_classifier: BertClassifier, optimizer: optim.Adam, 
     return bert_classifier, optimizer
 
 
-def new_activation_predictor(classifier_name: str):
-    return BertClassificationPredictor(classifier_name, ["off", "on"])
+def new_activation_predictor(classifier_name: str, model_dir: str = None):
+    labels = ["off", "on"]
+    if model_dir:
+        return BertClassificationPredictor(classifier_name, labels, model_dir=model_dir)
+    return BertClassificationPredictor(classifier_name, labels)
 
 
 if __name__ == "__main__":

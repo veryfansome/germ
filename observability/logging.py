@@ -1,6 +1,6 @@
 import logging
 import logging.config
-import traceback
+from settings import germ_settings
 
 LOGGING_CONFIG = {
     "version": 1,
@@ -18,16 +18,16 @@ LOGGING_CONFIG = {
     },
     "loggers": {
         "": {
-            "level": "INFO",
+            "level": germ_settings.LOG_LEVEL,
             "handlers": ["console"],
         },
         "uvicorn.error": {
-            "level": "INFO",
+            "level": germ_settings.LOG_LEVEL,
             "handlers": ["console"],
             "propagate": False,
         },
         "uvicorn.access": {
-            "level": "INFO",
+            "level": germ_settings.LOG_LEVEL,
             "handlers": ["console"],
             "propagate": False,
         },

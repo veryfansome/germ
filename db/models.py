@@ -2,14 +2,16 @@ from sqlalchemy import (create_engine, Boolean, Column, DateTime, ForeignKey,
                         Index, Integer, JSON, PrimaryKeyConstraint, String, UniqueConstraint)
 from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
-import os
+
+from settings import germ_settings
 
 # Database Configuration
 DATABASE_URL = "{name}:{password}@{host}/germ".format(
-    host=os.getenv("DB_HOST"),
-    name=os.getenv("POSTGRES_USER"),
-    password=os.getenv("POSTGRES_PASSWORD"),
+    host=germ_settings.DB_HOST,
+    name=germ_settings.POSTGRES_USER,
+    password=germ_settings.POSTGRES_PASSWORD,
 )
+print(DATABASE_URL)
 engine = create_engine(f"postgresql+psycopg2://{DATABASE_URL}")
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
