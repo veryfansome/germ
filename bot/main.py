@@ -22,6 +22,7 @@ import asyncio
 import hashlib
 import os
 import subprocess
+import traceback
 
 from api.models import ChatMessage, ChatSessionSummary, SqlRequest
 from bot.websocket import (WebSocketConnectionManager,
@@ -32,7 +33,8 @@ from db.models import (DATABASE_URL, SessionLocal,
                        ChatSession, ChatRequestReceived, ChatResponseSent,
                        engine)
 from ml.event_handlers import ML_HANDLERS
-from observability.logging import logging, setup_logging, traceback
+from observability.logging import logging, setup_logging
+from settings import germ_settings
 
 scheduler = AsyncIOScheduler()
 
@@ -46,15 +48,15 @@ logger = logging.getLogger(__name__)
 # Tracing
 
 resource = Resource.create({
-    "service.name": os.getenv("SERVICE_NAME", "germ-bot"),
+    "service.name": germ_settings.SERVICE_NAME,
 })
 multi_span_processor = SynchronousMultiSpanProcessor()
 multi_span_processor.add_span_processor(
     BatchSpanProcessor(
         OTLPSpanExporter(
             endpoint="http://{otlp_host}:{otlp_port}/v1/traces".format(
-                otlp_host=os.getenv("OTLP_HOST", "germ-otel-collector"),
-                otlp_port=os.getenv("OTLP_PORT", "4318")
+                otlp_host=germ_settings.OTLP_HOST,
+                otlp_port=germ_settings.OTLP_PORT,
             ),
         )
     )
