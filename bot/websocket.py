@@ -66,7 +66,7 @@ class WebSocketConnectionManager:
             if len(messages) > 2:  # A conversation should have at least a message and a reply
                 with OpenAI() as client:
                     completion = client.chat.completions.create(
-                        messages=([m.dict() for m in messages] + [{
+                        messages=([m.model_dump() for m in messages] + [{
                             "role": "user", "content": "Give this conversation a title using 10 or fewer words."
                         }]),
                         model=DEFAULT_CHAT_MODEL, n=1,
@@ -142,7 +142,7 @@ def new_chat_request_received(chat_session_id: int, chat_request: ChatRequest) -
     with SessionLocal() as session:
         stored_request = ChatRequestReceived(
             chat_session_id=chat_session_id,
-            chat_request=chat_request.dict(),
+            chat_request=chat_request.model_dump(),
         )
         session.add(stored_request)
         session.commit()
@@ -154,7 +154,7 @@ def new_chat_response_sent(chat_session_id: int, chat_request_received_id: int, 
         stored_response = ChatResponseSent(
             chat_session_id=chat_session_id,
             chat_request_received_id=chat_request_received_id,
-            chat_response=chat_response.dict(),
+            chat_response=chat_response.model_dump(),
         )
         session.add(stored_response)
         session.commit()

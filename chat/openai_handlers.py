@@ -31,7 +31,7 @@ class ChatModelEventHandler(WebSocketEventHandler):
     def do_chat_completion(self, chat_request: ChatRequest) -> ChatCompletion:
         with OpenAI() as client:
             return client.chat.completions.create(
-                messages=[message.dict() for message in chat_request.messages],
+                messages=[message.model_dump() for message in chat_request.messages],
                 model=self.model,
                 n=1,
                 temperature=chat_request.temperature,
@@ -98,7 +98,7 @@ def generate_image_model_inputs(chat_request: ChatRequest):
             messages=([{
                 "role": "system",
                 "content": "The user wants an image."
-            }] + [message.dict() for message in chat_request.messages]),
+            }] + [message.model_dump() for message in chat_request.messages]),
 
             model=DEFAULT_CHAT_MODEL, n=1, temperature=chat_request.temperature,
             tool_choice={

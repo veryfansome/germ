@@ -5,7 +5,7 @@ EXAMPLES = [
     ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[
         ChatMessage(role="user", content="Generate an image of a horse"),
     ]),
-    ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "on"}, messages=[
+    ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[
         ChatMessage(role="user", content="design a logo for a chat bot. the theme is germs. make it cute"),
     ]),
     ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "off"}, messages=[
@@ -23,7 +23,7 @@ EXAMPLES = [
             ))
         ),
     ]),
-    ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "on"}, messages=[
+    ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[
         ChatMessage(
             role="user",
             content=" ".join((
@@ -31,7 +31,7 @@ EXAMPLES = [
             ))
         ),
     ]),
-    ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "on"}, messages=[
+    ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[
         ChatMessage(
             role="user",
             content=" ".join((
@@ -39,7 +39,7 @@ EXAMPLES = [
             ))
         ),
     ]),
-    ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "on"}, messages=[
+    ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[
         ChatMessage(
             role="user",
             content=" ".join((
@@ -47,7 +47,7 @@ EXAMPLES = [
             ))
         ),
     ]),
-    ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "on"}, messages=[
+    ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[
         ChatMessage(
             role="user",
             content="""Make me a map that shows animal migration flows based on the following coordinates:

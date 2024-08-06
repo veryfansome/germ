@@ -98,7 +98,7 @@ class ImageModelActivationTrainingDataEventHandler(WebSocketEventHandler):
 def get_activation_labels(chat_request: ChatRequest) -> dict[str, bool]:
     with OpenAI() as client:
         completion = client.chat.completions.create(
-            messages=[message.dict() for message in chat_request.messages],
+            messages=[message.model_dump() for message in chat_request.messages],
             model=DEFAULT_CHAT_MODEL, n=1, temperature=chat_request.temperature,
             tool_choice={
                 "type": "function",
@@ -109,11 +109,14 @@ def get_activation_labels(chat_request: ChatRequest) -> dict[str, bool]:
                 "function": {
                     "name": "image_creation_activator",
                     "description": " ".join((
-                        "Activates one or more image creation models to respond to the user.\n\n"
+                        "Activates one or more parameter image creation models to respond to the user.\n\n"
                         "### Activation Criteria\n\n",
                         "1. Model has been specifically requested by the user in the conversation.\n",
                         "OR\n",
-                        "2. Model can handle the complexity of the desired subject matter.\n",
+                        # Need to use exceptionally tolerant language. When language is even a little more restrictive,
+                        # e.g. "Model can generate the image", GPT will flip-flop and the label becomes
+                        # non-deterministic.
+                        "2. Model can generate an image. Assume yes, if unsure.\n",
                     )),
                     "parameters": {
                         "type": "object",
