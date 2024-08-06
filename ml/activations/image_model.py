@@ -21,9 +21,8 @@ for model_name in ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE:
     OPENAI_FUNCTION_PARAMETERS_PROPERTIES[model_name] = {
         "type": "boolean",
         "description": " ".join((
-            "True, if the next assistant message should be an image",
-            f"and {model_name} is the best fit based on all specified criteria,",
-            "else False."
+            "True, if the user is asking for an image",
+            f"_**AND**_ `{model_name}` meets the **Activation Criteria**, else False."
         ))
     }
 
@@ -99,23 +98,7 @@ class ImageModelActivationTrainingDataEventHandler(WebSocketEventHandler):
 def get_activation_labels(chat_request: ChatRequest) -> dict[str, bool]:
     with OpenAI() as client:
         completion = client.chat.completions.create(
-            messages=([{
-                "role": "system",
-                "content": " ".join((
-                    "### Best-fit Image Model Criteria\n\n",
-                    "In descending order of priority, where `1.` is the most important and `4.` is the least.",
-                    "1. Model has been specifically requested by the user.\n",
-                    "2. Model can handle the complexity of the desired subject matter.\n",
-                    "3. Model will likely be the cheapest to use.\n\n",
-                    "4. Model will likely be the fastest to return an image.\n\n",
-                    " ".join((
-                        "When determining how complex and image should be,",
-                        "assume the lowest complexity should be used",
-                        "unless the user has specifically requested a more complex image.\n\n"
-                    )),
-                ))
-            }] + [message.dict() for message in chat_request.messages]),
-
+            messages=[message.dict() for message in chat_request.messages],
             model=DEFAULT_CHAT_MODEL, n=1, temperature=chat_request.temperature,
             tool_choice={
                 "type": "function",
@@ -126,8 +109,11 @@ def get_activation_labels(chat_request: ChatRequest) -> dict[str, bool]:
                 "function": {
                     "name": "image_creation_activator",
                     "description": " ".join((
-                        "Activates the best-fit image creation model",
-                        "if the next assistant message should be an image."
+                        "Activates one or more image creation models to respond to the user.\n\n"
+                        "### Activation Criteria\n\n",
+                        "1. Model has been specifically requested by the user in the conversation.\n",
+                        "OR\n",
+                        "2. Model can handle the complexity of the desired subject matter.\n",
                     )),
                     "parameters": {
                         "type": "object",

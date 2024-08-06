@@ -7,7 +7,7 @@ SERVICE_NAME = os.getenv("GERM_SERVICE_NAME", "germ-bot")
 # Model training
 
 DEFAULT_BERT_MODEL = os.getenv("GERM_DEFAULT_BERT_MODEL", "distilbert-base-cased")
-IMAGE_MODEL_STARTERKIT_TRAINING_ROUNDS = os.getenv("GERM_IMAGE_MODEL_STARTERKIT_TRAINING_ROUNDS", 10)
+IMAGE_MODEL_STARTERKIT_TRAINING_ROUNDS = os.getenv("GERM_IMAGE_MODEL_STARTERKIT_TRAINING_ROUNDS", 50)
 MODEL_DIR = os.getenv("GERM_MODEL_DIR", "/var/lib/germ/models")
 STARTERKIT_DIR = os.getenv("GERM_STARTERKIT_DIR", "/src/data/germ/starterkit")
 
