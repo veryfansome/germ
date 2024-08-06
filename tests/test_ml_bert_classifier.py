@@ -14,7 +14,7 @@ def test_bert_classifier():
         "embeddings": predictor.generate_embeddings(f"This {verb}s like a {label}.")
     } for verb, label in list(itertools.product(verbs, labels))]
     examples = tests * 3  # Ok to have dupes
-    for i in range(50):  # Had been 10 iterations with bert-large-cased
+    for i in range(75):  # Had been 10 iterations with bert-large-cased
         random.shuffle(examples)
         for exp in examples:
             predictor.train_bert_classifier(exp['label'], exp['embeddings'])
@@ -22,4 +22,4 @@ def test_bert_classifier():
     random.shuffle(tests)
     for exp in tests:
         predicted_label = predictor.predict_label(exp['embeddings'])
-        assert exp['label'] == predicted_label
+        assert exp['label'] == predicted_label, f"failed example: {exp}"
