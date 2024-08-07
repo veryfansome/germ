@@ -20,10 +20,7 @@ OPENAI_FUNCTION_PARAMETERS_PROPERTIES = {}
 for model_name in ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE:
     OPENAI_FUNCTION_PARAMETERS_PROPERTIES[model_name] = {
         "type": "boolean",
-        "description": " ".join((
-            "True, if the user is asking for an image",
-            f"_**AND**_ `{model_name}` meets the **Activation Criteria**, else False."
-        ))
+        "description": f"True, if {model_name} should be activated to add a new image to the conversation, else False.",
     }
 
 
@@ -98,25 +95,29 @@ class ImageModelActivationTrainingDataEventHandler(WebSocketEventHandler):
 def get_activation_labels(chat_request: ChatRequest) -> dict[str, bool]:
     with OpenAI() as client:
         completion = client.chat.completions.create(
-            messages=[message.model_dump() for message in chat_request.messages],
+            messages=([{
+                "role": "system",
+                "content": """
+As the moderator of the image_model_activator tool, you are responsible for reviewing conversations and analyzing each message to understand the user's intentions. Based on this analysis, you decide whether to set each model's parameter to True or False. If a model's parameter is set to True, that model will be used to generate an image.
+
+You must make these decisions judiciously. The user's experience is your top priority, and you should avoid sending irrelevant images, especially if the conversation does not warrant an image response at that moment.
+""".lstrip(),
+            }] + [message.model_dump() for message in chat_request.messages]),
             model=DEFAULT_CHAT_MODEL, n=1, temperature=chat_request.temperature,
             tool_choice={
                 "type": "function",
-                "function": {"name": "image_creation_activator"}
+                "function": {"name": "image_model_activator"}
             },
             tools=[{
                 "type": "function",
                 "function": {
-                    "name": "image_creation_activator",
+                    "name": "image_model_activator",
                     "description": " ".join((
-                        "Activates one or more parameter image creation models to respond to the user.\n\n"
-                        "### Activation Criteria\n\n",
-                        "1. Model has been specifically requested by the user in the conversation.\n",
-                        "OR\n",
-                        # Need to use exceptionally tolerant language. When language is even a little more restrictive,
-                        # e.g. "Model can generate the image", GPT will flip-flop and the label becomes
-                        # non-deterministic.
-                        "2. Model can generate an image. Assume yes, if unsure.\n",
+                        "Activates one or more generative models to add a new image to the conversation",
+                        "based on the following criteria.\n\n"
+                        "### Activation Criteria\n",
+                        "1. The user is currently asking for a generated image or visual.\n",
+                        "2. The user has not forbidden the model's use.\n",
                     )),
                     "parameters": {
                         "type": "object",
