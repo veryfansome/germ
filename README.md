@@ -67,3 +67,7 @@ The chatbox loves Markdown. Responses render Markdown and if you enter Markdown 
 For convenience, you can directly query the DB, which is very helpful when debugging.
 
 ![Postgres](https://github.com/user-attachments/assets/20f12445-6b9d-4285-a494-169079ff6b03)
+
+## Why the weird name?
+
+If the current state of AI exploration can be compared to the primordial soup from which life sprang forth, maybe this project can be thought of as one of these proto-organism floating in the ether, change frequently, picking up new bits, maybe eventually constituting something more interesting and substantial. The theme felt like a good fit for a project that is oriented towards exploring ML and exploring what LLMs means for how we work, live, and interact with machines.
