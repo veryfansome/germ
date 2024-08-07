@@ -5,8 +5,10 @@ from ml.activations.image_model import get_activation_labels
 from ml.starterkit.activations.image_model import EXAMPLES
 
 
-def test_examples():
-    for exp in EXAMPLES:
+for i in range(len(EXAMPLES)):
+    exp = EXAMPLES[i]
+
+    def test_function():
         fetched_labels = {
             k: "on" if v else "off" for k, v in get_activation_labels(ChatRequest(messages=exp.messages)).items()
         }
@@ -16,3 +18,5 @@ def test_examples():
                 mismatched_labels.append((image_model_name, fetched_labels, f"failed example {exp.__dict__}"))
         failed_cnt = len(mismatched_labels)
         assert failed_cnt == 0, f"found {failed_cnt} mismatches: {json.dumps(mismatched_labels, indent=4)}"
+    globals()[f"test_example_{i}"] = test_function
+
