@@ -11,7 +11,6 @@ DATABASE_URL = "{name}:{password}@{host}/germ".format(
     name=germ_settings.POSTGRES_USER,
     password=germ_settings.POSTGRES_PASSWORD,
 )
-print(DATABASE_URL)
 engine = create_engine(f"postgresql+psycopg2://{DATABASE_URL}")
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
