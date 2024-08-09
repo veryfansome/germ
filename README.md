@@ -1,6 +1,7 @@
 # germ
 
-[![tests](https://github.com/veryfansome/germ/actions/workflows/tests.yml/badge.svg)](https://github.com/veryfansome/germ/actions/workflows/tests.yml)
+[![tests status](https://github.com/veryfansome/germ/actions/workflows/tests.yml/badge.svg)](https://github.com/veryfansome/germ/actions/workflows/tests.yml)
+![release version](https://img.shields.io/github/v/release/veryfansome/germ?include_prereleases)
 
 Germ is a chatbot project that aims to create a chat-driven ML exploration system that is simple to run, maintain, and expand. The underlying chat completion capability is powered by OpenAI's GPT (3.5, 4, 4o, etc.). DALL-E can also be used to return image requests. Other OpenAI models can be integrated but have not been integrated yet (PRs plz!).
 
