@@ -8,7 +8,6 @@ opentelemetry-distro
 opentelemetry-exporter-otlp-proto-http
 opentelemetry-instrumentation-fastapi
 opentelemetry-instrumentation-sqlalchemy
-pandas
 prometheus_client
 psycopg2-binary
 pydantic~=2.7.3

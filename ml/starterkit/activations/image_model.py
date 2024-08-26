@@ -1,20 +1,20 @@
-import inflect
 import itertools
 import random
 
 from api.models import ChatMessage
 from ml.activations.image_model import ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE
-from ml.activations.training import ActivationTrainingExample
+from lang.inflect import INFLECT_ENGINE
+from ml.activations.training import (ActivationTrainingExample,
+                                     amount_word, new_create_imperative,
+                                     sentence_completion_candidates, singular_or_plural)
 
-word_helper = inflect.engine()
-
-_imperative_verbs = ["craft", "create", "come up with", "imagine", "generate", "make", "paint", "produce", "show me"]
-_image_words = ["an image", "a picture", "a portrait", "a rendering", "a visual"]
+_image_words = ["graphic", "image", "picture", "portrait", "rendering", "visual", "visualization"]
 _count_words = ["a", "one", "two", "three", "four", "five", "a bunch of", "a group of"]
+_greetings = ['hello', 'hey', 'hi', 'yo']
 
 _animals = [
-    "bear", "bird", "cat", "chicken", "cow", "dog", "deer", "duck", "fox", "goat", "horse",
-    "ox", "pig", "pony", "sheep", "wolf",
+    "bear", "bird", "cat", "chicken", "cow", "dog", "deer", "dragon", "duck", "elephant", "fox", "goat", "horse",
+    "lizard", "ox", "pig", "pony", "sheep", "warthog", "wolf", "zebra",
 ]
 _animal_adj = [
     "angry", "anxious", "brave", "bold", "confused", "crazed", "curious", "dead", "drowsy", "fierce", "frenzied",
@@ -26,47 +26,17 @@ _buildings = [
 ]
 _building_adj = [
     "eclectic", "modern", "minimalist", "new", "rustic", "shabby", "shoddy",
-]
-
-_place_adj = [
     "barren", "bustling", "busy", "calm", "desolate", "peaceful", "quiet",
 ]
 
 _people = [
-    "accountant",
-    "banker",
-    "boy",
-    "cashier",
-    "construction worker",
-    "doctor",
-    "dentist",
-    "engineer",
-    "girl",
-    "man",
-    "monk",
-    "person",
-    "public servant",
-    "student",
-    "teacher",
-    "woman",
-]
-_people_adj = [
-]
-_people_verbs = [
-    "dancing", "giggling", "practicing", "speaking",
+    "accountant", "banker", "boy", "cashier", "construction worker", "doctor", "dentist", "engineer", "girl", "man",
+    "monk", "person", "public servant", "student", "teacher", "woman",
 ]
 
 _universal_adj = [
     "big", "beautiful", "decrepit", "dirty", "old", "small", "smelly", "ugly", "worn out",
 ]
-
-
-def random_and_or():
-    return random.choice(['and', 'or'])
-
-
-def random_i():
-    return random_capitalization("i")
 
 
 def random_period():
@@ -77,19 +47,13 @@ def random_capitalization(w):
     return random.choice([w, w.capitalize()])
 
 
-def random_imperative_image_prompts(count_words: list[str], adjectives: list[str], topics: list[str],
-                                    labels: dict[str, str] = None,
-                                    sample_cnt: int = 15,
-                                    trailing_clauses: list[str] = None,
-                                    trailing_clause_chain_size: int = 1,
-                                    trailing_clause_max_chain_size: int = 1,
-                                    trailing_clause_starting_comma: bool = False,
-                                    trailing_clause_starting_conjunctions: list[str] = None,
-                                    trailing_clause_starting_period: bool = False,
-                                    trailing_clause_starting_space: bool = False,
-                                    ) -> list[ActivationTrainingExample]:
-    if trailing_clauses is None:
-        trailing_clauses = []
+def random_single_image_prompts(topic_amounts: list[int], adjectives: list[str], topics: list[str],
+                                labels: dict[str, str] = None,
+                                num_of_candidates: int = 5,
+                                num_of_seeds: int = 15,
+                                optional_components: list[str] = None,
+                                require_all_of: list[str] = None,
+                                require_one_of: list[str] = None) -> list[ActivationTrainingExample]:
     if not labels:
         # Implicitly, if this is an image prompt then all the image models should activate.
         labels = {name: 'on' for name in ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE}
@@ -98,161 +62,108 @@ def random_imperative_image_prompts(count_words: list[str], adjectives: list[str
     for ingredient_words in nullable_ingredients:
         if "" not in ingredient_words:
             ingredient_words.append("")
-    word_soup = list(itertools.product(
-        _imperative_verbs,
-        _image_words,
-        count_words,
-        adjectives,
-        topics,
-    ))
-    return [ActivationTrainingExample(labels=labels, messages=[random.choice([
-        ChatMessage(
-            role="user",
-            content="".join((
-                f"{random_capitalization(create_verb)} {image_word} of ",
-                # How many? `.a` returns the argument word as well, which we don't want
-                f"{count_word} " if count_word != 'a' else f"{word_helper.a(topic).split(' ')[0]} ",
-                # Adjectives
-                f'{adj} ' if adj != "" else '',
-                topic if (count_word == 'a' or count_word == 'one') else word_helper.plural(topic),
-                random_trailing_clause(
-                    trailing_clauses,
-                    chain_size=trailing_clause_chain_size,
-                    max_chain_size=trailing_clause_max_chain_size,
-                    starting_comma=trailing_clause_starting_comma,
-                    starting_conjunctions=trailing_clause_starting_conjunctions,
-                    starting_period=trailing_clause_starting_period,
-                    starting_space=trailing_clause_starting_space,
-                ) if trailing_clauses else "",
-                random_period()
-            ))
-        ),
-    ])]) for create_verb, image_word, count_word, adj, topic in random.sample(word_soup, sample_cnt)]
 
+    candidates = list(itertools.chain(*[sentence_completion_candidates(
+        seed, num_of_candidates,
+        optional_components=optional_components,
+        require_all_of=require_all_of,
+        require_one_of=require_one_of,
+    ) for seed in [
+        # Seeds
+        "".join((
+            # Examples:
+            # - hey bot,
+            random.choice([
+                "",
+                f"{random.choice(_greetings)}{random.choice(['', ' bot'])}{random.choice([',', '!', '.'])} ",
+            ]),
+            # - hey bot, generate an image of
+            f"{new_create_imperative(random.choice(_image_words), 1)} of ",
+            # Examples:
+            # - hey bot, generate an image of a
+            f"{amount_word(topic, amount)} ",
+            # Examples:
+            # - hey bot, generate an image of a sleepy
+            f'{adj} ' if adj != "" else '',
+            # Examples:
+            # - hey bot, generate an image of a sleepy bear
+            singular_or_plural(topic, amount),
+        )) for amount, adj, topic in random.sample(list(itertools.product(
+            topic_amounts,
+            adjectives,
+            topics,
+        )), num_of_seeds)
+    ]]))
 
-def random_prefix(starting_comma: bool = False,
-                  starting_conjunctions: list[str] = None,
-                  starting_period: bool = False,
-                  starting_space: bool = False):
-    starting_conjunction = f"{random.choice(starting_conjunctions)} " if starting_conjunctions else ""
-    prefix_w_comma = f", {starting_conjunction}"
-    prefix_w_period = f". {starting_conjunction}"
-    prefix_w_space = f" {starting_conjunction}"
-    if starting_comma and starting_period and starting_space:
-        prefix = random.choice([prefix_w_comma, prefix_w_period, prefix_w_space])
-    elif starting_comma and starting_period:
-        prefix = random.choice([prefix_w_comma, prefix_w_period])
-    elif starting_comma and starting_space:
-        prefix = random.choice([prefix_w_comma, prefix_w_space])
-    elif starting_comma:
-        prefix = prefix_w_comma
-    elif starting_period and starting_space:
-        prefix = random.choice([prefix_w_period, prefix_w_space])
-    elif starting_period:
-        prefix = prefix_w_period
-    elif starting_space:
-        prefix = prefix_w_space
-    else:
-        prefix = ""
-    return prefix
+    candidates += list(itertools.chain(*[sentence_completion_candidates(
+        seed, num_of_candidates,
+        optional_components=optional_components,
+        require_all_of=require_all_of,
+        require_one_of=require_one_of,
+    ) for seed in [
+        "".join((
+            random.choice([
+                f"{random_capitalization('imagine')}{random.choice(['', ',', ':'])}",
+                f"{random_capitalization('imaging')}{random.choice(['', ',', ':'])}",
+                f"{random_capitalization('imagine')} if",
+                f"{random_capitalization('what')} would it look like if",
+            ]) + " ",
+            # Examples:
+            # - a
+            f"{amount_word(topic, amount)} ",
+            # Examples:
+            # - a sleepy
+            f'{adj} ' if adj != "" else '',
+            # Examples:
+            # - a sleepy bear
+            singular_or_plural(topic, amount),
+        )) for amount, adj, topic in random.sample(list(itertools.product(
+            topic_amounts,
+            adjectives,
+            topics,
+        )), num_of_seeds)
+    ]]))
 
-
-def random_trailing_clause(candidates: list[str],
-                           chain_size: int = 1,
-                           max_chain_size: int = 1,
-                           starting_comma: bool = False,
-                           starting_conjunctions: list[str] = None,
-                           starting_period: bool = False,
-                           starting_space: bool = False,
-                           ) -> str:
-    prefix = random_prefix(starting_comma=starting_comma,
-                           starting_conjunctions=starting_conjunctions,
-                           starting_period=starting_period,
-                           starting_space=starting_space)
-    candidate = random.choice(candidates)
-    trailing_clause = f"{prefix}{random_capitalization(candidate) if prefix == '. ' else candidate}"
-    if chain_size is None or chain_size < 1:
-        chain_size = 1
-    elif chain_size > max_chain_size:
-        chain_size = max_chain_size
-    elif chain_size < max_chain_size:
-        chain_size = random.choice([i for i in range(chain_size, max_chain_size + 1)])
-
-    if chain_size > 1:
-        new_pool = [m for m in candidates if m != candidate]
-        trailing_clause = trailing_clause + random_trailing_clause(new_pool, chain_size=chain_size - 1)
-    return trailing_clause
-
-
-def random_imperative_image_prompts_w_model_preference(*generator_args, **generator_kwargs) -> list[ActivationTrainingExample]:
-    # Invoke once as given
-    new_list: list[ActivationTrainingExample] = random_imperative_image_prompts(*generator_args, **generator_kwargs)
-
-    # Invoke with model preferences
-    original_trailing_clauses = [""] if 'trailing_clauses' not in generator_kwargs else generator_kwargs['trailing_clauses']
-    for model_name in ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE:
-        alternatives = [m for m in ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE if m != model_name]
-        preference_trailing_clauses = [
-            f"{random_i()} don't like {word_helper.join(alternatives, conj=random_and_or())}",
-            f"don't use {word_helper.join(alternatives, conj=random_and_or())}",
-            f"only use {model_name}",
-            f"{random_i()} only like {model_name}",
-        ]
-        new_trailing_clauses = [
-            p2 if p1 == '' else f"{p1}{random.choice([f' and {p2}', f'. {random_capitalization(p2)}'])}" for p1, p2 in list(itertools.product(
-                original_trailing_clauses,
-                preference_trailing_clauses,
-            ))
-        ]
-        generator_kwargs['trailing_clauses'] = new_trailing_clauses
-        generator_kwargs['labels'] = {
-            m: "on" if model_name == m else "off" for m in ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE
-        }
-        new_list += random_imperative_image_prompts(*generator_args, **generator_kwargs)
-    return new_list
+    random.shuffle(candidates)
+    examples = [ActivationTrainingExample(
+        labels=labels, messages=[ChatMessage(role="user", content=candidate)]
+    ) for candidate in candidates]
+    return examples
 
 
 EXAMPLES = [
-    # Animals with explicit toggling of models
-    *random_imperative_image_prompts_w_model_preference(
-        _count_words, _animal_adj + _universal_adj, _animals,
-        trailing_clause_starting_comma=True,
-        trailing_clause_starting_conjunctions=["and", "but"],
-        trailing_clause_starting_space=True),
+    *random_single_image_prompts(
+        list(range(1, 10 + 1)),
+        _animal_adj,
+        _animals,
+        optional_components=["cackle", "crawl", "fight", "play", "race", "sleep"],
+        require_one_of=["use dall-e-2 only", "don't use dall-e-3"]
+    ),
 
-    # Happy place with toggling off of both models
-    *random_imperative_image_prompts_w_model_preference(
-        ['a'], ["calm", "quiet", "sunny"],
-        ["beach", "forest cabin", "lake", "rooftop", "rustic village"],
-        trailing_clause_starting_comma=True,
-        trailing_clause_starting_period=True,
-        trailing_clauses=[
-            f"{random.choice(['help me', 'let me'])} calm down",
-            f"{random.choice(['help me', 'let me', 'it will'])} clear my head",
-            f"{random.choice([f'{random_i()} want to', 'help me', 'let me'])} meditate",
-            f"{random.choice([f'{random_i()} want to', 'help me', 'let me'])} visualize {random.choice(['a', 'my'])} {random.choice(['safe', 'happy'])} {random.choice(['space', 'place'])}",
-            f"take me to {random.choice(['a', 'my'])} {random.choice(['safe', 'happy'])} {random.choice(['space', 'place'])}",
-        ]),
+    *random_single_image_prompts(
+        list(range(1, 10 + 1)),
+        _animal_adj,
+        _people,
+        optional_components=["argue", "clean", "dance", "enjoy", "laugh", "meditate", "practice", "sail", "speak"],
+        require_one_of=["use dall-e-3 only", "don't use dall-e-2"]
+    ),
+
+    #*random_imperative_image_prompts_w_model_preference(
+    #    ['a'], ["calm", "quiet", "sunny"],
+    #    ["beach", "forest cabin", "lake", "rooftop", "rustic village"],
+    #    trailing_clause_starting_comma=True,
+    #    trailing_clause_starting_period=True,
+    #    trailing_clauses=[
+    #        f"{random.choice(['help me', 'let me'])} calm down",
+    #        f"{random.choice(['help me', 'let me', 'it will'])} clear my head",
+    #        f"{random.choice([f'{random_i()} want to', 'help me', 'let me'])} meditate",
+    #        f"{random.choice([f'{random_i()} want to', 'help me', 'let me'])} visualize {random.choice(['a', 'my'])} {random.choice(['safe', 'happy'])} {random.choice(['space', 'place'])}",
+    #        f"take me to {random.choice(['a', 'my'])} {random.choice(['safe', 'happy'])} {random.choice(['space', 'place'])}",
+    #    ]),
 
     ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[
         ChatMessage(role="user", content="show me a rainy window, with the focus on the droplets on the glass"),
     ]),
-
-    *random_imperative_image_prompts(
-        _count_words, [], _people,
-        trailing_clause_starting_comma=True,
-        trailing_clauses=[
-            "arguing angrily",
-            "cleaning up garbage in the streets",
-            "dancing in unison",
-            "enjoying music",
-            "laughing amongst themselves",
-            "meditating calmly with eyes closed",
-            "practicing tai chi in the sun",
-            "sailing on a boat",
-            "speaking cordially with each other",
-        ]
-    ),
 
     ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[
         ChatMessage(role="user", content="design a logo for a chat bot. the theme is germs. make it cute"),
@@ -459,11 +370,13 @@ block_party_3 = ChatMessage(role="user", content=" ".join((
     "no, don't put location because i don't want random people having my address",
 )))
 EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[block_party_1]))
-EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[block_party_1, block_party_2, block_party_3]))
+EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"},
+                                          messages=[block_party_1, block_party_2, block_party_3]))
 
 # DnD night
 dnd_1 = ChatMessage(role="user", content="dnd is tonight")
-dnd_2 = ChatMessage(role="assistant", content="That sounds like a lot of fun! Are you playing as a Dungeon Master or a player? Do you need any last-minute tips or ideas for your game?")
+dnd_2 = ChatMessage(role="assistant",
+                    content="That sounds like a lot of fun! Are you playing as a Dungeon Master or a player? Do you need any last-minute tips or ideas for your game?")
 dnd_3 = ChatMessage(role="user", content="yes! i don't have encounter maps prepared for today")
 EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "off"}, messages=[dnd_1]))
 EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[dnd_1, dnd_2, dnd_3]))
@@ -497,7 +410,8 @@ dog_poo_3 = ChatMessage(role="user", content=" ".join((
     "make me a sign I can leave out to remind people to pick up after their pets",
 )))
 EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "off"}, messages=[dog_poo_1]))
-EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[dog_poo_1, dog_poo_2, dog_poo_3]))
+EXAMPLES.append(
+    ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[dog_poo_1, dog_poo_2, dog_poo_3]))
 
 # Gettysburg
 gettysburg_1 = ChatMessage(role="user", content="my class has been learning about the battle of gettysburg")
@@ -522,7 +436,8 @@ That's great! The Battle of Gettysburg is one of the most significant events in 
 
 If you have any specific questions or need more detailed information about any aspect of the Battle of Gettysburg, feel free to ask!
 """.lstrip())
-gettysburg_3 = ChatMessage(role="user", content="I learned that many soldiers joined as a group with their friends and neighbors. Can you imagine marching forward as everyone you've known falls around you?")
+gettysburg_3 = ChatMessage(role="user",
+                           content="I learned that many soldiers joined as a group with their friends and neighbors. Can you imagine marching forward as everyone you've known falls around you?")
 gettysburg_4 = ChatMessage(role="assistant", content="""
 It's truly difficult to imagine the emotional and psychological toll that must have taken on the soldiers. During the Civil War, it was common for men to enlist in regiments formed in their local communities, which meant they often fought alongside friends, neighbors, and even family members. This practice created a strong sense of camaraderie and mutual support, but it also meant that the losses could be devastatingly personal.
 
@@ -534,10 +449,14 @@ The Battle of Gettysburg, with its high casualty rates, would have been particul
 
 Understanding this aspect of the Civil War helps us appreciate the human cost of the conflict and the extraordinary bravery and sacrifice of those who fought. It also underscores the importance of remembering and honoring their experiences, as they played a crucial role in shaping the history and future of the United States.
 """.lstrip())
-gettysburg_5 = ChatMessage(role="user", content="can you make a panoramic view of the battle from one of pickett's division's perspective?")
+gettysburg_5 = ChatMessage(role="user",
+                           content="can you make a panoramic view of the battle from one of pickett's division's perspective?")
 EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "off"}, messages=[gettysburg_1]))
-EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "off"}, messages=[gettysburg_1, gettysburg_2, gettysburg_3]))
-EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[gettysburg_1, gettysburg_2, gettysburg_3, gettysburg_4, gettysburg_5]))
+EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "off"},
+                                          messages=[gettysburg_1, gettysburg_2, gettysburg_3]))
+EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"},
+                                          messages=[gettysburg_1, gettysburg_2, gettysburg_3, gettysburg_4,
+                                                    gettysburg_5]))
 
 # Happy place
 happy_place_1 = ChatMessage(role="user", content="help me visualize my happy place")
@@ -570,7 +489,8 @@ In your hand, you hold a book you've been eager to read. You take a deep breath,
 
 Feel free to adjust any details to make this visualization uniquely yours. Enjoy your journey to your happy place!
 """.lstrip())
-happy_place_3 = ChatMessage(role="user", content="no, my happy place is the field of battle, with my enemies falling before me")
+happy_place_3 = ChatMessage(role="user",
+                            content="no, my happy place is the field of battle, with my enemies falling before me")
 happy_place_4 = ChatMessage(role="assistant", content="""
 Got it! Let's create a vivid and empowering visualization of your happy place on the battlefield. Close your eyes and take a deep breath. Imagine yourself in the midst of an epic battle where you feel strong, invincible, and victorious. Here are some elements to consider:
 
@@ -606,8 +526,11 @@ Feel free to adjust any details to make this visualization uniquely yours. Embra
 """.lstrip())
 happy_place_5 = ChatMessage(role="user", content="let's go with ancient battle field - i want to feel primal!")
 EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[happy_place_1]))
-EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[happy_place_1, happy_place_2, happy_place_3]))
-EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[happy_place_1, happy_place_2, happy_place_3, happy_place_4, happy_place_4]))
+EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"},
+                                          messages=[happy_place_1, happy_place_2, happy_place_3]))
+EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"},
+                                          messages=[happy_place_1, happy_place_2, happy_place_3, happy_place_4,
+                                                    happy_place_4]))
 
 # Long drive
 long_drive_1 = ChatMessage(role="user", content="We're going on a long drive next week, what should have in the car?")
@@ -657,12 +580,15 @@ That sounds like a fun trip! Here are some essentials and useful items you shoul
 
 Make sure your car is in good condition before you leave: check the oil, tire pressure, coolant, and other fluids. Have a great trip!
 """.lstrip())
-long_drive_3 = ChatMessage(role="user", content="oh! make some coloring worksheets I can print out so my kids have something to do")
+long_drive_3 = ChatMessage(role="user",
+                           content="oh! make some coloring worksheets I can print out so my kids have something to do")
 EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "off"}, messages=[long_drive_1]))
-EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[long_drive_1, long_drive_2, long_drive_3]))
+EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"},
+                                          messages=[long_drive_1, long_drive_2, long_drive_3]))
 
 # Tricky grammar
-tricky_grammar_1 = ChatMessage(role="user", content="in the sentence, \"make an picture of a cute dog\", what part of speech is \"a cute dog\"?")
+tricky_grammar_1 = ChatMessage(role="user",
+                               content="in the sentence, \"make an picture of a cute dog\", what part of speech is \"a cute dog\"?")
 tricky_grammar_2 = ChatMessage(role="assistant", content="""
 In the sentence "make a picture of a cute dog," the phrase "a cute dog" functions as a noun phrase. Within this noun phrase:
 
@@ -674,7 +600,8 @@ So, "a cute dog" as a whole is a noun phrase acting as the object of the preposi
 """.lstrip())
 tricky_grammar_3 = ChatMessage(role="user", content="but \"picture\" is the subject?")
 EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "off"}, messages=[tricky_grammar_1]))
-EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "off"}, messages=[tricky_grammar_1, tricky_grammar_2, tricky_grammar_3]))
+EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "off"},
+                                          messages=[tricky_grammar_1, tricky_grammar_2, tricky_grammar_3]))
 
 # Wings of fire
 wings_of_fire_1 = ChatMessage(role="user", content="do you know about the wings of fire series?")
@@ -703,7 +630,8 @@ That's wonderful to hear! The "Wings of Fire" series has captivated many young r
 
 It's great that she has found a series she loves so much. Encouraging her passion for reading can have long-lasting positive effects on her imagination and literacy skills.
 """.lstrip())
-wings_of_fire_5 = ChatMessage(role="user", content="is there a father/daughter relationship in the story that's positive and prominant?")
+wings_of_fire_5 = ChatMessage(role="user",
+                              content="is there a father/daughter relationship in the story that's positive and prominant?")
 wings_of_fire_6 = ChatMessage(role="assistant", content="""
 In the "Wings of Fire" series, relationships between parents and their dragonets can be quite complex and varied, reflecting a range of dynamics. While many of the relationships in the series are fraught with tension or conflict, there are some positive father-daughter relationships, though they may not always be the central focus of the story.
 
@@ -713,11 +641,17 @@ Another example is the relationship between Tsunami and her father, King Gill. A
 
 While these relationships may not be the primary focus of the series, they do offer moments of positive interaction and growth. The series often explores themes of family, loyalty, and understanding, which can provide meaningful insights into various types of relationships, including those between fathers and daughters.
 """.lstrip())
-wings_of_fire_7 = ChatMessage(role="user", content="can you make a birthday card showing tsunami in a heroic pose, looking forward with king gill's spirit present in some warm way. and think of an inspiring message for a young girl")
+wings_of_fire_7 = ChatMessage(role="user",
+                              content="can you make a birthday card showing tsunami in a heroic pose, looking forward with king gill's spirit present in some warm way. and think of an inspiring message for a young girl")
 EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "off"}, messages=[wings_of_fire_1]))
-EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "off"}, messages=[wings_of_fire_1, wings_of_fire_2, wings_of_fire_3]))
-EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "off"}, messages=[wings_of_fire_1, wings_of_fire_2, wings_of_fire_3, wings_of_fire_4, wings_of_fire_5]))
-EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"}, messages=[wings_of_fire_1, wings_of_fire_2, wings_of_fire_3, wings_of_fire_4, wings_of_fire_5, wings_of_fire_6, wings_of_fire_7]))
+EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "off"},
+                                          messages=[wings_of_fire_1, wings_of_fire_2, wings_of_fire_3]))
+EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "off", "dall-e-3": "off"},
+                                          messages=[wings_of_fire_1, wings_of_fire_2, wings_of_fire_3, wings_of_fire_4,
+                                                    wings_of_fire_5]))
+EXAMPLES.append(ActivationTrainingExample(labels={"dall-e-2": "on", "dall-e-3": "on"},
+                                          messages=[wings_of_fire_1, wings_of_fire_2, wings_of_fire_3, wings_of_fire_4,
+                                                    wings_of_fire_5, wings_of_fire_6, wings_of_fire_7]))
 
 if __name__ == "__main__":
     import argparse
@@ -728,6 +662,7 @@ if __name__ == "__main__":
 
     if args.train is False:
         import json
+
         print(json.dumps([exp.transcript_text for exp in EXAMPLES], indent=2))
     else:
         from ml.activations.image_model import (ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE,

@@ -2,7 +2,7 @@
 FROM python:3.12-slim
 
 RUN apt-get update
-RUN apt-get install -y netcat-traditional postgresql-client
+RUN apt-get install -y less netcat-traditional postgresql-client
 RUN mkdir -p /src
 RUN mkdir -p /var/lib/germ/models
 

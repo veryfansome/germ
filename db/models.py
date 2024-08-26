@@ -1,4 +1,4 @@
-from sqlalchemy import (create_engine, Boolean, Column, DateTime, ForeignKey,
+from sqlalchemy import (create_engine, event, Boolean, Column, DateTime, ForeignKey,
                         Index, Integer, JSON, PrimaryKeyConstraint, String, UniqueConstraint)
 from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
@@ -15,6 +15,10 @@ engine = create_engine(f"postgresql+psycopg2://{DATABASE_URL}")
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
+
+
+def update_time_last_modified(mapper, connection, target):
+    target.time_last_modified = datetime.datetime.now(datetime.UTC)
 
 
 class ChatSession(Base):
