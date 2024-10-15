@@ -17,7 +17,7 @@ pytest-cov
 pytest-xdist
 python-dotenv
 sqlalchemy~=2.0.30
-starlette~=0.37.2
+starlette~=0.41.0
 tiktoken~=0.7.0
 torchtext
 torch~=2.3.1
