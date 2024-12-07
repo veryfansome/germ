@@ -220,6 +220,8 @@ rem for better responsiveness.
 }
 /* Pop-up menu settings */
 .popup-menu {
+    max-height: 90%;
+    overflow-y: auto;
     background: white;
     border-radius: 5px;
     border: 1px solid #ccc;
