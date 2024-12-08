@@ -179,16 +179,16 @@
     }
 
     let ws;
-    let isConnected = false;
-    let reconnectInterval = 5000; // 5 seconds
+    let wsIsConnected = false;
+    let wsReconnectInterval = 5000; // 5 seconds
     function wsConnect() {
         ws = new WebSocket(`ws://${host}:${port}/chat`);
         ws.onopen = () => {
-            isConnected = true;
+            wsIsConnected = true;
             console.log('WebSocket connected');
         };
         ws.onclose = (event) => {
-            isConnected = false;
+            wsIsConnected = false;
             console.log('WebSocket connection closed:', event);
         };
     }
@@ -217,17 +217,22 @@
                 handleError(error, 'Failed to handle message:');
             }
         }
-        ws.send(JSON.stringify({ messages: chatCompletionMessageList }));
+        const finalChatCompletionMessageList = [...chatCompletionMessageList]
+        const systemChatMessage = document.getElementById('system-chat-message-input').value;
+        if (!isBlankOrEmptyStr(systemChatMessage)) {
+            finalChatCompletionMessageList.push({ role: "system", content: systemChatMessage})
+        }
+        ws.send(JSON.stringify({ messages: finalChatCompletionMessageList }));
     }
     wsConnect();
     setInterval(() => {
-        if (!isConnected) {
+        if (!wsIsConnected) {
             console.log("Not connected, connecting...")
             wsConnect();
         } else {
             console.log("Connected")
         }
-    }, reconnectInterval)
+    }, wsReconnectInterval)
     </script>
 </body>
 </html>

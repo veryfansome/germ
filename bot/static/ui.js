@@ -41,8 +41,9 @@ function initSendButtonResize() {
 function initTextArea(submittedTextList, sendMessageFunc) {
     let submittedTextSelectionCursor = -1;
     let textSubmissionCandidate = '';
-    const textarea = document.getElementById('input');
-    textarea.addEventListener('input', function() {
+    const mainInputTextarea = document.getElementById('input');
+    const systemChatMessageInputTextarea = document.getElementById('system-chat-message-input');
+    mainInputTextarea.addEventListener('input', function() {
         this.style.height = 'auto';
         this.style.height = this.scrollHeight + 'px';
         if (this.style.height < this.style.maxHeight) {
@@ -51,25 +52,25 @@ function initTextArea(submittedTextList, sendMessageFunc) {
             this.style.overflow = 'auto';
         }
         // Update with each keystroke
-        textSubmissionCandidate = textarea.value;
+        textSubmissionCandidate = mainInputTextarea.value;
     });
-    textarea.addEventListener('keydown', function(event) {
-        if (event.key === 'ArrowUp' && textarea.selectionStart === 0) {
+    mainInputTextarea.addEventListener('keydown', function(event) {
+        if (event.key === 'ArrowUp' && mainInputTextarea.selectionStart === 0) {
             if (submittedTextList.length > 0 && (submittedTextList.length - 1) > submittedTextSelectionCursor) {
                 submittedTextSelectionCursor += 1;
                 let reversedSubmissions = submittedTextList.slice().reverse();
-                textarea.value = reversedSubmissions[submittedTextSelectionCursor];
+                mainInputTextarea.value = reversedSubmissions[submittedTextSelectionCursor];
             }
             event.preventDefault();
         }
-        if (event.key === 'ArrowDown' && textarea.selectionStart === textarea.value.length) {
+        if (event.key === 'ArrowDown' && mainInputTextarea.selectionStart === mainInputTextarea.value.length) {
             if (submittedTextList.length > 0 && submittedTextSelectionCursor > -1) {
                 submittedTextSelectionCursor -= 1;
                 if (submittedTextSelectionCursor === -1) {
-                    textarea.value = textSubmissionCandidate;
+                    mainInputTextarea.value = textSubmissionCandidate;
                 } else {
                     let reversedSubmissions = submittedTextList.slice().reverse();
-                    textarea.value = reversedSubmissions[submittedTextSelectionCursor];
+                    mainInputTextarea.value = reversedSubmissions[submittedTextSelectionCursor];
                 }
             }
             event.preventDefault();
@@ -86,8 +87,8 @@ function initTextArea(submittedTextList, sendMessageFunc) {
         if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
             return;  // Do nothing if keydown is a modifier key.
         }
-        if (document.activeElement !== textarea) {
-            textarea.focus()
+        if (document.activeElement !== mainInputTextarea && document.activeElement !== systemChatMessageInputTextarea) {
+            mainInputTextarea.focus()
         }
     })
 }
@@ -151,6 +152,10 @@ function getUserMessageBox(message, codeBlockType = "") {
 function handleError(error, message) {
     console.error(message, error);
     showErrorPopup(`${message} ${error.message}`);
+}
+
+function isBlankOrEmptyStr(str) {
+  return !str || str.trim() === '';
 }
 
 function scrollChatBoxToBottom() {
