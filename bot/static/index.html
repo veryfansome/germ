@@ -65,12 +65,18 @@
                         const li = document.createElement('li');
 
                         const remove_link = document.createElement('a');
-                        remove_link.innerHTML = '<i class="fa fa-x"></i>';
+                        remove_link.innerHTML = '<i class="fa fa-trash-can"></i>';
                         li.appendChild(remove_link);
+
+                        const dateStarted = new Date(item['time_started']);
+                        dateStarted.setHours(dateStarted.getHours() - 8)  // TODO: Configure via settings popup
+                        const timestamp = document.createElement('span');
+                        timestamp.innerHTML = `<i style="color: dimgray;">${dateStarted.toLocaleTimeString('en-US', localDateOptions)}</i></br>`
+                        li.appendChild(timestamp);
 
                         const load_link = document.createElement('a');
                         load_link.href = `/?chat_session_id=${item['chat_session_id']}`;
-                        load_link.innerText = item['summary'];
+                        load_link.innerHTML = `<div style="padding: 3px;">${item['summary']}</div>`;
                         li.appendChild(load_link);
 
                         remove_link.addEventListener('click', function(event) {

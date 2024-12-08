@@ -63,11 +63,15 @@ class WebSocketConnectionManager:
         async def runnable():
             update_chat_session_time_stopped(chat_session_id)
             messages = await run_in_threadpool(get_chat_session_messages, chat_session_id)
-            if len(messages) > 2:  # A conversation should have at least a message and a reply
+            if len(messages) > 1:  # A conversation should have at least a message and a reply
                 with OpenAI() as client:
                     completion = client.chat.completions.create(
                         messages=([m.model_dump() for m in messages] + [{
-                            "role": "user", "content": "Give this conversation a title using 10 or fewer words."
+                            "role": "user", "content": " ".join((
+                                "Summarize this conversation using no more than 20 words.",
+                                "What did the I want?",
+                                "What was your response?"
+                            ))
                         }]),
                         model=DEFAULT_CHAT_MODEL, n=1,
                         temperature=0.0,
@@ -143,6 +147,7 @@ def new_chat_request_received(chat_session_id: int, chat_request: ChatRequest) -
         stored_request = ChatRequestReceived(
             chat_session_id=chat_session_id,
             chat_request=chat_request.model_dump(),
+            time_received=datetime.datetime.now(datetime.timezone.utc),
         )
         session.add(stored_request)
         session.commit()
@@ -155,6 +160,7 @@ def new_chat_response_sent(chat_session_id: int, chat_request_received_id: int, 
             chat_session_id=chat_session_id,
             chat_request_received_id=chat_request_received_id,
             chat_response=chat_response.model_dump(),
+            time_sent=datetime.datetime.now(datetime.timezone.utc),
         )
         session.add(stored_response)
         session.commit()
@@ -163,7 +169,7 @@ def new_chat_response_sent(chat_session_id: int, chat_request_received_id: int, 
 
 def new_chat_session() -> int:
     with SessionLocal() as session:
-        cs = ChatSession()
+        cs = ChatSession(time_started=datetime.datetime.now(datetime.timezone.utc))
         session.add(cs)
         session.commit()
         return cs.chat_session_id

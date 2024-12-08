@@ -1,7 +1,6 @@
 from sqlalchemy import (create_engine, Boolean, Column, DateTime, ForeignKey,
                         Index, Integer, JSON, PrimaryKeyConstraint, String, UniqueConstraint)
 from sqlalchemy.orm import declarative_base, sessionmaker
-import datetime
 
 from settings import germ_settings
 
@@ -22,7 +21,7 @@ class ChatSession(Base):
     chat_session_id = Column(Integer, primary_key=True, autoincrement=True)
     is_hidden = Column(Boolean, default=False)
     summary = Column(String)
-    time_started = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
+    time_started = Column(DateTime)
     time_stopped = Column(DateTime)
 
 
@@ -31,7 +30,7 @@ class ChatRequestReceived(Base):
     chat_session_id = Column(Integer, ForeignKey("chat_session.chat_session_id"), nullable=False)
     chat_request_received_id = Column(Integer, primary_key=True, autoincrement=True)
     chat_request = Column(JSON)
-    time_received = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
+    time_received = Column(DateTime)
 
 
 class ChatResponseSent(Base):
@@ -40,7 +39,7 @@ class ChatResponseSent(Base):
     chat_request_received_id = Column(Integer, ForeignKey("chat_request_received.chat_request_received_id"), nullable=False)
     chat_response_sent_id = Column(Integer, primary_key=True, autoincrement=True)
     chat_response = Column(JSON)
-    time_sent = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
+    time_sent = Column(DateTime)
 
     __table_args__ = (
         # Since we look up responses by session for bookmarks.
