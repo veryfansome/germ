@@ -137,26 +137,36 @@ Ensure the opacity is low enough to not interfere with the text but still visibl
     display: flex;
     padding: 10px;
 }
+#system-chat-message-input {
+    box-sizing: border-box;
+    flex: 1;
+    margin-right: 10px;
+    padding: 10px;
+    width: 100%;
+}
 /**
 Popup and Send button settings
 Setting width: 100% for buttons might cause layout issues if not properly contained within their parent
 elements. Ensure the parent elements manage the layout appropriately.
 */
-#popup-button {
+#bookmarks-popup-button {
     cursor: pointer;
     padding: 3px 0px 2px 0px; /* Adjust padding if needed */
     width: 100%; /* Set equal width */
 }
 #send-button {
-    /*
-    */
     cursor: pointer;
 
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 5px 10px;
+    padding: 3px 0px 2px 0px; /* Adjust padding if needed */
     transition: width 0.3s;
+}
+#settings-popup-button {
+    cursor: pointer;
+    padding: 3px 0px 2px 0px; /* Adjust padding if needed */
+    width: 100%; /* Set equal width */
 }
 .assistant-message-box {
     background-color: #d1ecf1; /* Light blue */
@@ -219,7 +229,7 @@ rem for better responsiveness.
     cursor: pointer;
 }
 /* Pop-up menu settings */
-.popup-menu {
+.bookmarks-popup-menu {
     max-height: 90%;
     overflow-y: auto;
     background: white;
@@ -233,21 +243,39 @@ rem for better responsiveness.
     width: 50vh;
     z-index: 10;
 }
-.popup-menu ul {
+.bookmarks-popup-menu ul {
     list-style: none;
     margin: 0;
     padding: 10px;
     font-size: small;
 }
-.popup-menu li {
+.bookmarks-popup-menu li {
     cursor: pointer;
     padding: 5px 10px;
 }
-.popup-menu li:hover {
+.bookmarks-popup-menu li:hover {
     background-color: #f0f0f0;
 }
-.popup-menu i:hover {
+.bookmarks-popup-menu i:hover {
     color: #a60101ff;
+}
+.settings-popup-menu {
+    max-height: 90%;
+    overflow-y: auto;
+    background: white;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+    bottom: 50px; /* Position above the button */
+    padding: 10px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    display: none; /* Start as hidden */
+    position: absolute;
+    right: 10px; /* Adjust as necessary */
+    width: 50vh;
+    z-index: 10;
+}
+.settings-popup-menu-section-title {
+    padding-bottom: 9px;
 }
 .user-message-box {
     background-color: #d4edda; /* Light green */

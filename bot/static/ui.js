@@ -7,29 +7,29 @@ const localDateOptions = {
     minute: '2-digit'
 };
 
-function initErrorPopup() {
-    document.getElementById('close-error-popup').addEventListener('click', () => {
-        document.getElementById('error-popup').classList.add('hidden');
-    });
-}
-
-function initPopupMenu(onLoadCallback) {
-    const popupButton = document.getElementById('popup-button');
-    const popupMenu = document.getElementById('popup-menu');
+function initPopup(onLoadCallback, elementPrefix) {
+    const bookmarksPopupButton = document.getElementById(`${elementPrefix}-popup-button`);
+    const bookmarksPopupMenu = document.getElementById(`${elementPrefix}-popup-menu`);
     document.addEventListener('DOMContentLoaded', function () {
         onLoadCallback();
     });
-    popupButton.addEventListener('mouseenter', () => {
-        popupMenu.style.display = 'block';
+    bookmarksPopupButton.addEventListener('mouseenter', () => {
+        bookmarksPopupMenu.style.display = 'block';
     });
-    popupButton.addEventListener('mouseleave', () => {
-        popupMenu.style.display = 'none';
+    bookmarksPopupButton.addEventListener('mouseleave', () => {
+        bookmarksPopupMenu.style.display = 'none';
     });
-    popupMenu.addEventListener('mouseenter', () => {
-        popupMenu.style.display = 'block';
+    bookmarksPopupMenu.addEventListener('mouseenter', () => {
+        bookmarksPopupMenu.style.display = 'block';
     });
-    popupMenu.addEventListener('mouseleave', () => {
-        popupMenu.style.display = 'none';
+    bookmarksPopupMenu.addEventListener('mouseleave', () => {
+        bookmarksPopupMenu.style.display = 'none';
+    });
+}
+
+function initErrorPopup() {
+    document.getElementById('close-error-popup').addEventListener('click', () => {
+        document.getElementById('error-popup').classList.add('hidden');
     });
 }
 

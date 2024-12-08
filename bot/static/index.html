@@ -27,14 +27,20 @@
     </div>
     <div id="chatbox"></div>
     <div id="input-container">
-        <div id="popup-menu" class="popup-menu">
-            <ul id="popup-menu-ul"></ul>
+        <div id="bookmarks-popup-menu" class="bookmarks-popup-menu">
+            <ul id="bookmarks-popup-menu-ul"></ul>
+        </div>
+        <div id="settings-popup-menu" class="settings-popup-menu">
+            <div class="settings-popup-menu-section-title">System Message</div>
+            <label for="system-chat-message-input"></label>
+            <textarea id="system-chat-message-input"></textarea>
         </div>
         <form action="javascript:sendMessage().catch(error => console.log(error))">
             <label for="input"></label>
             <textarea id="input" placeholder="Type a message..."></textarea>
             <div class="button-container">
-                <button type="button" id="popup-button"><i class="fas fa-bookmark"></i></button>
+                <button type="button" id="bookmarks-popup-button"><i class="fas fa-bookmark"></i></button>
+                <button type="button" id="settings-popup-button"><i class="fas fa-gear"></i></button>
                 <button type="submit" id="send-button">Send</button>
             </div>
         </form>
@@ -52,15 +58,15 @@
     initSendButtonResize();
 
     // Popup menu
-    const popupMenuList = document.getElementById('popup-menu-ul');
+    const bookmarkList = document.getElementById('bookmarks-popup-menu-ul');
     const refreshBookmarks = () => {
-        popupMenuList.innerHTML = `<span style="color: gray;"><em>Have you had any conversations yet? Try sending a message!</em></span>`;
+        bookmarkList.innerHTML = `<span style="color: gray;"><em>Have you had any conversations yet? Try sending a message!</em></span>`;
         fetch('/chat/sessions')
                 .then(response => throwOrJson(response))
                 .then(data => {
                     data.forEach(function (item, idx) {
                         if (idx === 0) {
-                            popupMenuList.innerHTML = '';
+                            bookmarkList.innerHTML = '';
                         }
                         const li = document.createElement('li');
 
@@ -71,7 +77,7 @@
                         const dateStarted = new Date(item['time_started']);
                         dateStarted.setHours(dateStarted.getHours() - 8)  // TODO: Configure via settings popup
                         const timestamp = document.createElement('span');
-                        timestamp.innerHTML = `<i style="color: dimgray;">${dateStarted.toLocaleTimeString('en-US', localDateOptions)}</i></br>`
+                        timestamp.innerHTML = `<i style="color: dimgray;">${dateStarted.toLocaleTimeString('en-US', localDateOptions)}</i><br/>`
                         li.appendChild(timestamp);
 
                         const load_link = document.createElement('a');
@@ -91,12 +97,18 @@
                             })
                         });
 
-                        popupMenuList.appendChild(li);
+                        bookmarkList.appendChild(li);
                     })
                 })
                 .catch(error => handleError(error, 'Failed to session history:'));
     };
-    initPopupMenu(refreshBookmarks);
+    initPopup(refreshBookmarks, "bookmarks");
+
+    const systemChatMessageInput = document.getElementById('system-chat-message-input');
+    const refreshSettingsPopup = () => {
+        systemChatMessageInput.placeholder = `Type a system message...`;
+    };
+    initPopup(refreshSettingsPopup, "settings")
 
     // Text input area
     let submittedText = [];
@@ -166,7 +178,20 @@
         scrollChatBoxToBottom();
     }
 
-    const ws = new WebSocket(`ws://${host}:${port}/chat`)
+    let ws;
+    let isConnected = false;
+    let reconnectInterval = 5000; // 5 seconds
+    function wsConnect() {
+        ws = new WebSocket(`ws://${host}:${port}/chat`);
+        ws.onopen = () => {
+            isConnected = true;
+            console.log('WebSocket connected');
+        };
+        ws.onclose = (event) => {
+            isConnected = false;
+            console.log('WebSocket connection closed:', event);
+        };
+    }
     async function sendMessage() {
         const message = document.getElementById('input').value;
         submittedText.push(message);
@@ -194,6 +219,15 @@
         }
         ws.send(JSON.stringify({ messages: chatCompletionMessageList }));
     }
+    wsConnect();
+    setInterval(() => {
+        if (!isConnected) {
+            console.log("Not connected, connecting...")
+            wsConnect();
+        } else {
+            console.log("Connected")
+        }
+    }, reconnectInterval)
     </script>
 </body>
 </html>
