@@ -180,15 +180,19 @@
 
     let ws;
     let wsIsConnected = false;
+    let wsConnectionAttemptInProgress = false;
     let wsReconnectInterval = 5000; // 5 seconds
     function wsConnect() {
         ws = new WebSocket(`ws://${host}:${port}/chat`);
+        wsConnectionAttemptInProgress = true
         ws.onopen = () => {
             wsIsConnected = true;
+            wsConnectionAttemptInProgress = false
             console.log('WebSocket connected');
         };
         ws.onclose = (event) => {
             wsIsConnected = false;
+            wsConnectionAttemptInProgress = false
             console.log('WebSocket connection closed:', event);
         };
     }
@@ -226,7 +230,7 @@
     }
     wsConnect();
     setInterval(() => {
-        if (!wsIsConnected) {
+        if (!wsIsConnected && !wsConnectionAttemptInProgress) {
             console.log("Not connected, connecting...")
             wsConnect();
         } else {

@@ -1,11 +1,12 @@
 DEFAULT_CHAT_MODEL = 'gpt-4o'
+DEFAULT_IMAGE_MODEL = 'dall-e-3'
+DEFAULT_ROUTING_MODEL = "gpt-4o-mini"
 ENABLED_CHAT_MODELS = (
-    #"gpt-4o-mini",
-    "gpt-4o",
+    DEFAULT_CHAT_MODEL,
 )
 ENABLED_IMAGE_MODELS = (
+    DEFAULT_IMAGE_MODEL,
 )
 ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE = (
-    "dall-e-2",
     "dall-e-3",
 )

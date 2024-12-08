@@ -28,11 +28,11 @@ from api.models import ChatMessage, ChatSessionSummary, SqlRequest
 from bot.websocket import (WebSocketConnectionManager,
                            get_chat_session_messages, get_chat_session_summaries,
                            update_chat_session_is_hidden)
-from chat.openai_handlers import ACTIVATION_PREDICTORS, CHAT_HANDLERS
+from chat.openai_handlers import ACTIVATION_PREDICTORS, ChatRoutingEventHandler
 from db.models import (DATABASE_URL, SessionLocal,
                        ChatSession, ChatRequestReceived, ChatResponseSent,
                        engine)
-from ml.event_handlers import ML_HANDLERS
+#from ml.event_handlers import ML_HANDLERS
 from observability.logging import logging, setup_logging
 from settings import germ_settings
 
@@ -84,12 +84,11 @@ METRIC_CHAT_RESPONSE_SENT_ROW_COUNT = Gauge(
 # App
 
 websocket_manager = WebSocketConnectionManager()
-for model_name, chat_handler in CHAT_HANDLERS.items():
-    websocket_manager.add_event_handler(chat_handler)
-    logger.info(f"added %s %s", model_name, chat_handler)
-for handler in ML_HANDLERS:
-    websocket_manager.add_event_handler(handler)
-    logger.info(f"added %s", handler)
+router = ChatRoutingEventHandler()
+#for handler in ML_HANDLERS:
+#    websocket_manager.add_event_handler(handler)
+#    logger.info(f"added %s", handler)
+websocket_manager.add_event_handler(router)
 
 
 @asynccontextmanager
@@ -107,9 +106,9 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(db_stats_job, 'interval', seconds=60, name='DB stats')
 
     # Periodic model reloads
-    for name, activator in ACTIVATION_PREDICTORS.items():
-        scheduler.add_job(
-            activator.load_from_save_file_runnable, 'interval', seconds=60, name=f"{name} activator reload")
+    #for name, activator in ACTIVATION_PREDICTORS.items():
+    #    scheduler.add_job(
+    #        activator.load_from_save_file_runnable, 'interval', seconds=60, name=f"{name} activator reload")
 
     scheduler.start()
     # Started
