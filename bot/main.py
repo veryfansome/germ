@@ -28,11 +28,10 @@ from api.models import ChatMessage, ChatSessionSummary, SqlRequest
 from bot.websocket import (WebSocketConnectionManager,
                            get_chat_session_messages, get_chat_session_summaries,
                            update_chat_session_is_hidden)
-from chat.openai_handlers import ACTIVATION_PREDICTORS, ChatRoutingEventHandler
+from chat.openai_handlers import ChatRoutingEventHandler
 from db.models import (DATABASE_URL, SessionLocal,
                        ChatSession, ChatRequestReceived, ChatResponseSent,
                        engine)
-#from ml.event_handlers import ML_HANDLERS
 from observability.logging import logging, setup_logging
 from settings import germ_settings
 

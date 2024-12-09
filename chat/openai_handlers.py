@@ -10,11 +10,9 @@ import time
 
 from api.models import ChatRequest, ChatResponse
 from bot.websocket import WebSocketEventHandler, WebSocketSender
-from ml.bert_classifier import BertClassificationPredictor, new_activation_predictor
 from observability.annotations import measure_exec_seconds
 from settings.openai_settings import (DEFAULT_CHAT_MODEL, DEFAULT_ROUTING_MODEL,
-                                      ENABLED_CHAT_MODELS, ENABLED_IMAGE_MODELS,
-                                      ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE)
+                                      ENABLED_CHAT_MODELS, ENABLED_IMAGE_MODELS)
 
 logger = logging.getLogger(__name__)
 
@@ -186,13 +184,10 @@ def generate_image_model_inputs(chat_request: ChatRequest):
         return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
 
 
-ACTIVATION_PREDICTORS: dict[str, BertClassificationPredictor] = {}
 CHAT_HANDLERS: dict[str, ChatEventHandler] = {}
 
 for m in ENABLED_CHAT_MODELS:
     CHAT_HANDLERS[m] = ChatModelEventHandler(m)
-for m in ENABLED_IMAGE_MODELS_FOR_TRAINING_DATA_CAPTURE:
-    ACTIVATION_PREDICTORS[m] = new_activation_predictor(m)
 for m in ENABLED_IMAGE_MODELS:
     CHAT_HANDLERS[m] = ImageModelEventHandler(m)
 
