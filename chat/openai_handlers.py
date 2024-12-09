@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from openai import OpenAI
-from openai.types.chat.chat_completion import ChatCompletion , Choice
+from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from starlette.concurrency import run_in_threadpool
 import asyncio
@@ -10,6 +10,7 @@ import time
 
 from api.models import ChatRequest, ChatResponse
 from bot.websocket import WebSocketEventHandler, WebSocketSender
+from db.models import ChatSession
 from observability.annotations import measure_exec_seconds
 from settings.openai_settings import (DEFAULT_CHAT_MODEL, DEFAULT_ROUTING_MODEL,
                                       ENABLED_CHAT_MODELS, ENABLED_IMAGE_MODELS)
@@ -17,7 +18,7 @@ from settings.openai_settings import (DEFAULT_CHAT_MODEL, DEFAULT_ROUTING_MODEL,
 logger = logging.getLogger(__name__)
 
 
-class ChatEventHandler(WebSocketEventHandler, ABC):
+class RoutableChatEventHandler(WebSocketEventHandler, ABC):
 
     @abstractmethod
     def get_function_name(self):
@@ -28,7 +29,7 @@ class ChatEventHandler(WebSocketEventHandler, ABC):
         pass
 
 
-class ChatModelEventHandler(ChatEventHandler):
+class ChatModelEventHandler(RoutableChatEventHandler):
     def __init__(self, model: str = DEFAULT_CHAT_MODEL):
         self.function_name = f"reply_using_{model}"
         self.function_settings = {
@@ -49,8 +50,7 @@ class ChatModelEventHandler(ChatEventHandler):
             return client.chat.completions.create(
                 messages=[message.model_dump() for message in chat_request.messages],
                 model=self.model,
-                n=1,
-                temperature=chat_request.temperature,
+                n=1, temperature=chat_request.temperature,
             )
 
     def get_function_name(self):
@@ -67,7 +67,7 @@ class ChatModelEventHandler(ChatEventHandler):
         await response_sender.send_chat_response(ChatResponse(response=completion))
 
 
-class ImageModelEventHandler(ChatEventHandler):
+class ImageModelEventHandler(RoutableChatEventHandler):
     def __init__(self, model: str):
         self.function_name = f"reply_using_{model}"
         self.function_settings = {
@@ -184,7 +184,7 @@ def generate_image_model_inputs(chat_request: ChatRequest):
         return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
 
 
-CHAT_HANDLERS: dict[str, ChatEventHandler] = {}
+CHAT_HANDLERS: dict[str, RoutableChatEventHandler] = {}
 
 for m in ENABLED_CHAT_MODELS:
     CHAT_HANDLERS[m] = ChatModelEventHandler(m)
@@ -214,6 +214,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                     async def tool_call_runnable():
                         await self.tools[tool_call.function.name].on_receive(
                             chat_session_id, chat_request_received_id, chat_request, response_sender)
+
                     await asyncio.create_task(tool_call_runnable())
                     return
             else:
@@ -227,7 +228,72 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
             return client.chat.completions.create(
                 messages=[message.model_dump() for message in chat_request.messages],
                 model=self.model,
-                n=1,
-                temperature=chat_request.temperature,
+                n=1, temperature=chat_request.temperature,
                 tools=tools
             )
+
+
+class UserProfilingHandler(WebSocketEventHandler):
+    def __init__(self, model: str = DEFAULT_CHAT_MODEL):
+        self.model = model
+
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
+    async def on_receive(self, chat_session_id: int, chat_request_received_id: id,
+                         chat_request: ChatRequest, response_sender: WebSocketSender):
+        with OpenAI() as client:
+            completion = client.chat.completions.create(
+                messages=[message.model_dump() for message in chat_request.messages],
+                model=self.model,
+                n=1, temperature=0,
+                tool_choice={
+                    "type": "function",
+                    "function": {"name": "update_user_profile"}
+                },
+                tools=[{
+                    "type": "function",
+                    "function": {
+                        "name": "update_user_profile",
+                        "description": " ".join((
+                            "Update the user's profile with data extracted from the conversation.",
+                        )),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "conversation_topics": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "Topics from the conversation.",
+                                },
+                                "user_intention": {
+                                    "type": "string",
+                                    "description": "Intention of the user from the conversation.",
+                                },
+                                "user_opinions": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "Opinions from the conversation.",
+                                },
+                                "user_tone": {
+                                    "type": "string",  # Might make more sense as a number.
+                                    "description": "Tone of the user from the conversation.",
+                                },
+                                "user_first_name": {
+                                    "type": "string",
+                                    "description": "First name of the user from the conversation, if supplied.",
+                                },
+                                "user_middle_name_or_initials": {
+                                    "type": "string",
+                                    "description": "Middle name of the user from the conversation, if supplied.",
+                                },
+                                "user_last_name": {
+                                    "type": "string",
+                                    "description": "Last name of the user from the conversation, if supplied.",
+                                },
+                            },
+                            "required": ["user_intention", "user_tone"],
+                            "additionalProperties": False,
+                        },
+                    },
+                }]
+            )
+            logger.info(completion)

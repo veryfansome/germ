@@ -193,6 +193,8 @@
         ws.onclose = (event) => {
             wsIsConnected = false;
             wsConnectionAttemptInProgress = false
+            const loadingIndicator = getLoadingIndicator();
+            loadingIndicator.remove(); // Stop showing loading indicator if error
             console.log('WebSocket connection closed:', event);
         };
     }

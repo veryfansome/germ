@@ -1,6 +1,6 @@
 from sqlalchemy import (create_engine, Boolean, Column, DateTime, ForeignKey,
-                        Index, Integer, JSON, PrimaryKeyConstraint, String, UniqueConstraint)
-from sqlalchemy.orm import declarative_base, sessionmaker
+                        Index, Integer, JSON, String)
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 from settings import germ_settings
 
@@ -23,6 +23,9 @@ class ChatSession(Base):
     summary = Column(String)
     time_started = Column(DateTime)
     time_stopped = Column(DateTime)
+
+    # Relationship to ChatUser through the association table
+    users = relationship("ChatUser", secondary="chat_session_user", back_populates="sessions")
 
 
 class ChatRequestReceived(Base):
@@ -47,30 +50,19 @@ class ChatResponseSent(Base):
     )
 
 
-class ImageModel(Base):
-    __tablename__ = "image_model"
-    image_model_id = Column(Integer, primary_key=True, autoincrement=True)
-    image_model_name = Column(String, unique=True, index=True)
+class ChatUser(Base):
+    __tablename__ = "chat_user"
+    chat_user_id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_user_name = Column(String)
 
-    __table_args__ = (
-        # Since we do these "does it exist?" checks based on the model name.
-        Index("idx_image_model_image_model_name", "image_model_name"),
-    )
+    # Relationship to ChatSession through the association table
+    sessions = relationship("ChatSession", secondary="chat_session_user", back_populates="users")
 
 
-class ImageModelChatRequestLink(Base):
-    __tablename__ = "image_model_chat_request_link"
-    chat_request_received_id = Column(Integer, ForeignKey("chat_request_received.chat_request_received_id"), nullable=False)
-    image_model_id = Column(Integer, ForeignKey("image_model.image_model_id"), nullable=False)
-
-    __table_args__ = (
-        # Since each request / label relationship is unique.
-        PrimaryKeyConstraint('chat_request_received_id', 'image_model_id', name='pk_image_model_chat_request_link'),
-        # We'll mostly do this to look up labels for requests.
-        Index("idx_image_model_chat_request_link_chat_request_received_id", "chat_request_received_id"),
-        # We might want this to look up all the requests that match a certain label.
-        Index("idx_image_model_chat_request_link_image_model_id", "image_model_id"),
-    )
+class ChatSessionUser(Base):
+    __tablename__ = "chat_session_user"
+    chat_session_id = Column(Integer, ForeignKey('chat_session.chat_session_id'), primary_key=True)
+    chat_user_id = Column(Integer, ForeignKey('chat_user.chat_user_id'), primary_key=True)
 
 
 # Create the tables in the database

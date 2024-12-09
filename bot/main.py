@@ -28,7 +28,7 @@ from api.models import ChatMessage, ChatSessionSummary, SqlRequest
 from bot.websocket import (WebSocketConnectionManager,
                            get_chat_session_messages, get_chat_session_summaries,
                            update_chat_session_is_hidden)
-from chat.openai_handlers import ChatRoutingEventHandler
+from chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
 from db.models import (DATABASE_URL, SessionLocal,
                        ChatSession, ChatRequestReceived, ChatResponseSent,
                        engine)
@@ -83,8 +83,12 @@ METRIC_CHAT_RESPONSE_SENT_ROW_COUNT = Gauge(
 # App
 
 websocket_manager = WebSocketConnectionManager()
+
 router = ChatRoutingEventHandler()
+user_profiler = UserProfilingHandler()
+
 websocket_manager.add_event_handler(router)
+websocket_manager.add_event_handler(user_profiler)
 
 
 @asynccontextmanager
