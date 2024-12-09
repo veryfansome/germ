@@ -3,13 +3,11 @@ fastapi~=0.111.0
 gunicorn
 httpx
 inflect
-#openai~=1.31.0
 openai
 opentelemetry-distro
 opentelemetry-exporter-otlp-proto-http
 opentelemetry-instrumentation-fastapi
 opentelemetry-instrumentation-sqlalchemy
-pandas
 prometheus_client
 psycopg2-binary
 pydantic~=2.7.3
@@ -20,7 +18,4 @@ python-dotenv
 sqlalchemy~=2.0.30
 starlette~=0.37.2
 tiktoken~=0.7.0
-torchtext
-torch~=2.3.1
-transformers~=4.41.2
 uvicorn
