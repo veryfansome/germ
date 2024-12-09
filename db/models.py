@@ -24,8 +24,12 @@ class ChatSession(Base):
     time_started = Column(DateTime)
     time_stopped = Column(DateTime)
 
-    # Relationship to ChatUser through the association table
-    users = relationship("ChatUser", secondary="chat_session_user", back_populates="sessions")
+    # Relationship to ChatUser through the link table
+    chat_users = relationship("ChatUser",
+                              secondary="chat_session_chat_user_link", back_populates="chat_sessions")
+    # Relationship to ChatUserProfile through the link table
+    chat_user_profiles = relationship("ChatUserProfile",
+                                      secondary="chat_session_chat_user_profile_link", back_populates="chat_sessions")
 
 
 class ChatRequestReceived(Base):
@@ -55,14 +59,33 @@ class ChatUser(Base):
     chat_user_id = Column(Integer, primary_key=True, autoincrement=True)
     chat_user_name = Column(String)
 
-    # Relationship to ChatSession through the association table
-    sessions = relationship("ChatSession", secondary="chat_session_user", back_populates="users")
+    # Relationship to ChatSession through the link table
+    chat_sessions = relationship("ChatSession",
+                                 secondary="chat_session_chat_user_link",
+                                 back_populates="chat_users")
 
 
-class ChatSessionUser(Base):
-    __tablename__ = "chat_session_user"
+class ChatSessionChatUserLink(Base):
+    __tablename__ = "chat_session_chat_user_link"
     chat_session_id = Column(Integer, ForeignKey('chat_session.chat_session_id'), primary_key=True)
     chat_user_id = Column(Integer, ForeignKey('chat_user.chat_user_id'), primary_key=True)
+
+
+class ChatUserProfile(Base):
+    __tablename__ = "chat_user_profile"
+    chat_user_profile_id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_user_profile = Column(JSON)
+
+    # Relationship to ChatSession through the link table
+    chat_sessions = relationship("ChatSession",
+                                 secondary="chat_session_chat_user_profile_link",
+                                 back_populates="chat_user_profiles")
+
+
+class ChatSessionChatUserProfileLink(Base):
+    __tablename__ = "chat_session_chat_user_profile_link"
+    chat_session_id = Column(Integer, ForeignKey('chat_session.chat_session_id'), primary_key=True)
+    chat_user_profile_id = Column(Integer, ForeignKey('chat_user_profile.chat_user_profile_id'), primary_key=True)
 
 
 # Create the tables in the database

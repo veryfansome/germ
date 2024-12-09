@@ -9,7 +9,7 @@ import datetime
 import logging
 
 from api.models import ChatMessage, ChatRequest, ChatResponse, ChatSessionSummary
-from settings.openai_settings import DEFAULT_CHAT_MODEL
+from settings.openai_settings import DEFAULT_MINI_MODEL
 from db.models import ChatSession, ChatRequestReceived, ChatResponseSent, SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -60,9 +60,10 @@ class WebSocketConnectionManager:
         return chat_session_id
 
     async def disconnect(self, chat_session_id: int):
-        async def runnable():
-            update_chat_session_time_stopped(chat_session_id)
-            messages = await run_in_threadpool(get_chat_session_messages, chat_session_id)
+        await run_in_threadpool(update_chat_session_time_stopped, chat_session_id)
+
+        def runnable():
+            messages = get_chat_session_messages(chat_session_id)
             if len(messages) > 1:  # A conversation should have at least a message and a reply
                 with OpenAI() as client:
                     completion = client.chat.completions.create(
@@ -73,32 +74,29 @@ class WebSocketConnectionManager:
                                 "What was your response?"
                             ))
                         }]),
-                        model=DEFAULT_CHAT_MODEL, n=1,
+                        model=DEFAULT_MINI_MODEL, n=1,
                         temperature=0.0,
                     )
                     update_chat_session_summary(chat_session_id, completion.choices[0].message.content)
             else:
                 logger.info("skipped adding chat session summary")
-        await asyncio.create_task(runnable())
+        await asyncio.create_task(run_in_threadpool(runnable))
         self.active_connections.pop(chat_session_id, None)
         METRIC_CHAT_SESSIONS_IN_PROGRESS.dec()
 
     async def disconnect_all(self):
         for chat_session_id in self.active_connections:
-            async def runnable():
-                await self.disconnect(chat_session_id)
-            await asyncio.create_task(runnable())
+            await asyncio.create_task(self.disconnect(chat_session_id))
 
     async def receive(self, chat_session_id: int):
         connection: WebSocket = self.active_connections[chat_session_id]
         chat_request = ChatRequest.parse_obj(await connection.receive_json())
-        chat_request_received_id = await run_in_threadpool(new_chat_request_received,
-                                                           chat_session_id, chat_request)
+        chat_request_received_id = await run_in_threadpool(
+            new_chat_request_received, chat_session_id, chat_request)
         response_sender = WebSocketSender(chat_session_id, chat_request_received_id, connection)
         for handler in self.event_handlers:
-            async def runnable():
-                await handler.on_receive(chat_session_id, chat_request_received_id, chat_request, response_sender)
-            await asyncio.create_task(runnable())
+            await asyncio.create_task(
+                handler.on_receive(chat_session_id, chat_request_received_id, chat_request, response_sender))
 
 
 def get_chat_session_messages(chat_session_id: int) -> list[ChatMessage]:
