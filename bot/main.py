@@ -84,9 +84,6 @@ METRIC_CHAT_RESPONSE_SENT_ROW_COUNT = Gauge(
 
 websocket_manager = WebSocketConnectionManager()
 router = ChatRoutingEventHandler()
-#for handler in ML_HANDLERS:
-#    websocket_manager.add_event_handler(handler)
-#    logger.info(f"added %s", handler)
 websocket_manager.add_event_handler(router)
 
 
@@ -103,12 +100,6 @@ async def lifespan(app: FastAPI):
         await run_in_threadpool(db_stats)
     await db_stats_job()  # Warms up DB connections on startup
     scheduler.add_job(db_stats_job, 'interval', seconds=60, name='DB stats')
-
-    # Periodic model reloads
-    #for name, activator in ACTIVATION_PREDICTORS.items():
-    #    scheduler.add_job(
-    #        activator.load_from_save_file_runnable, 'interval', seconds=60, name=f"{name} activator reload")
-
     scheduler.start()
     # Started
     yield
