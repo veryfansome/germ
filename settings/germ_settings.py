@@ -3,6 +3,7 @@ import os
 # Service
 
 SERVICE_NAME = os.getenv("GERM_SERVICE_NAME", "germ-bot")
+WEBSOCKET_CONNECTION_IDLE_TIMEOUT = 3600
 
 # Model training
 

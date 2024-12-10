@@ -230,7 +230,11 @@ async def websocket_chat(ws: WebSocket):
         chat_session_id = await websocket_manager.connect(ws)
         try:
             while True:
-                await websocket_manager.receive(chat_session_id)
+                await asyncio.wait_for(websocket_manager.receive(chat_session_id),
+                                       timeout=germ_settings.WEBSOCKET_CONNECTION_IDLE_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.info(f"WebSocket for chat_session {chat_session_id} timed out")
+            await websocket_manager.disconnect(chat_session_id)
         except WebSocketDisconnect:
             logger.info(f"WebSocket for chat_session {chat_session_id} disconnected")
             await websocket_manager.disconnect(chat_session_id)

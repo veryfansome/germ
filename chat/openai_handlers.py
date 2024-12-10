@@ -2,7 +2,9 @@ from abc import ABC, abstractmethod
 from openai import OpenAI
 from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
+from sqlalchemy import func as sql_func
 from starlette.concurrency import run_in_threadpool
+
 from typing import Iterable, Awaitable
 import asyncio
 import json
@@ -257,58 +259,56 @@ class UserIdentifyingHandler(WebSocketEventHandler):
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self, chat_session_id: int, chat_request_received_id: id,
                          chat_request: ChatRequest, response_sender: WebSocketSender):
-        linked_users = await run_in_threadpool(self.get_linked_users, chat_session_id)
-        if not linked_users and "user_first_name" not in self.user_profile['profile']:
-            completion = await run_in_threadpool(self.generate_name_identification_prompt, chat_request)
-            if completion.choices[0].message.content != "wait":
-                await asyncio.create_task(response_sender.send_chat_response(ChatResponse(response=completion)))
-                return
-        pass
-
-    def generate_name_identification_prompt(self, chat_request: ChatRequest):
-        pass
-        # TODO: Prompt not reliable. Let's try tools with properties with enum.
-        #with OpenAI() as client:
-        #    return client.chat.completions.create(
-        #        messages=[message.model_dump() for message in chat_request.messages if message.role != "system"] + [{
-        #            "role": "user",
-        #            "content": " ".join((
-        #                "If appropriate based on the state of conversation,",
-        #                "generate only a single question to get me to say my name.",
-        #                "For example, \"What's your name?\", or \"Who is this?\"."
-        #                "If not appropriate, generate only a single word, \"wait\"."
-        #            ))
-        #        }, {
-        #            "role": "system",
-        #            "content": " ".join((
-        #                "Avoid annoying the user. Be respectful. Be patient.",
-        #            ))
-        #        }],
-        #        model=self.model,
-        #        n=1, temperature=1)
-
-    def generate_first_identification_prompt(self, chat_request: ChatRequest):
-        with OpenAI() as client:
-            return client.chat.completions.create(
-                messages=[message.model_dump() for message in chat_request.messages if message.role != "system"] + [{
-                    "role": "system",
-                    "content": " ".join((
-                        "If appropriate based on the interaction, instead of the normal response,",
-                        "generate a single context appropriate question to get the user to identify themselves,",
-                        "else return a single string, \"wait\"."
-                    ))
-                }],
-                model=self.model,
-                n=1, temperature=1)
+        session_users = await run_in_threadpool(self.get_session_users, chat_session_id)
+        if session_users:
+            pass  # TODO: after long delays, check if user is the same
+        else:
+            top_users = await run_in_threadpool(self.get_top_users)
+            if top_users:
+                pass  # TODO: guess if top users
+            #elif "user_first_name" not in self.user_profile['profile'] and "user_last_name" not in self.user_profile['profile']:
+            #    pass  # TODO: ask for identification
+            #else:
+            #    pass  # TODO: does partial name match any known users? Create new user unless matched.
 
     @classmethod
-    def get_linked_users(cls, chat_session_id: int):
+    def get_top_users(cls, limit: int = 2):
+        top_users = []
+        with SessionLocal() as session:
+            chat_users_records = (
+                session.query(ChatUser)
+                .join(ChatSessionChatUserLink)
+                .join(ChatSession)
+                .group_by(ChatUser.chat_user_id)
+                .order_by(sql_func.count(ChatSession.chat_session_id).desc())
+                .limit(limit)
+                .all()
+            )
+            for idx, user_record in enumerate(chat_users_records):
+                top_users[idx] = {
+                    "user_id": user_record.chat_user_id,
+                    "user_first_name": user_record.chat_user_first_name,
+                    "user_middle_name_or_initials": user_record.chat_user_middle_name_or_initials,
+                    "user_last_name": user_record.chat_user_last_name,
+                }
+            return top_users
+
+    @classmethod
+    def get_session_users(cls, chat_session_id: int):
+        session_users = []
         with SessionLocal() as session:
             chat_session = session.query(ChatSession).filter_by(chat_session_id=chat_session_id).first()
             if not chat_session:
                 logger.error(f"chat_session_id {chat_session_id} not found")
-                return []
-            return chat_session.chat_users
+                return session_users
+            for idx, user_record in enumerate(chat_session.chat_users):
+                session_users[idx] = {
+                    "user_id": user_record.chat_user_id,
+                    "user_first_name": user_record.chat_user_first_name,
+                    "user_middle_name_or_initials": user_record.chat_user_middle_name_or_initials,
+                    "user_last_name": user_record.chat_user_last_name,
+                }
+            return session_users
 
 
 class UserProfilingHandler(BackgroundChatEventHandler):

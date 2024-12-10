@@ -57,7 +57,9 @@ class ChatResponseSent(Base):
 class ChatUser(Base):
     __tablename__ = "chat_user"
     chat_user_id = Column(Integer, primary_key=True, autoincrement=True)
-    chat_user_name = Column(String)
+    chat_user_first_name = Column(String)
+    chat_user_last_name = Column(String)
+    chat_user_middle_name_or_initials = Column(String)
 
     # Relationship to ChatSession through the link table
     chat_sessions = relationship("ChatSession",
