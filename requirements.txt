@@ -1,5 +1,5 @@
 apscheduler
-fastapi~=0.111.0
+fastapi
 gunicorn
 httpx
 inflect
@@ -10,12 +10,12 @@ opentelemetry-instrumentation-fastapi
 opentelemetry-instrumentation-sqlalchemy
 prometheus_client
 psycopg2-binary
-pydantic~=2.7.3
+pydantic
 pytest
 pytest-cov
 pytest-xdist
 python-dotenv
-sqlalchemy~=2.0.30
-starlette~=0.37.2
-tiktoken~=0.7.0
-uvicorn
+sqlalchemy
+starlette
+tiktoken
+uvicorn[standard]
