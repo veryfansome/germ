@@ -3,6 +3,7 @@ from openai import OpenAI
 from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from starlette.concurrency import run_in_threadpool
+from typing import Iterable, Awaitable
 import asyncio
 import json
 import logging
@@ -17,6 +18,13 @@ from settings.openai_settings import (DEFAULT_CHAT_MODEL, DEFAULT_MINI_MODEL, DE
                                       ENABLED_CHAT_MODELS, ENABLED_IMAGE_MODELS)
 
 logger = logging.getLogger(__name__)
+
+
+class BackgroundChatEventHandler(WebSocketEventHandler, ABC):
+
+    @classmethod
+    async def run_in_background(cls, tasks: Iterable[Awaitable]):
+        await asyncio.gather(*tasks)
 
 
 class RoutableChatEventHandler(WebSocketEventHandler, ABC):
@@ -187,20 +195,24 @@ def generate_image_model_inputs(chat_request: ChatRequest):
         return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
 
 
-CHAT_HANDLERS: dict[str, RoutableChatEventHandler] = {}
-
+USER_FACING_CHAT_HANDLERS: dict[str, RoutableChatEventHandler] = {}
 for m in ENABLED_CHAT_MODELS:
-    CHAT_HANDLERS[m] = ChatModelEventHandler(m)
+    USER_FACING_CHAT_HANDLERS[m] = ChatModelEventHandler(m)
 for m in ENABLED_IMAGE_MODELS:
-    CHAT_HANDLERS[m] = ImageModelEventHandler(m)
+    USER_FACING_CHAT_HANDLERS[m] = ImageModelEventHandler(m)
 
 
 class ChatRoutingEventHandler(ChatModelEventHandler):
+    """
+    This class is a user facing router. It returns simple completions and delegates to other handlers
+    if the situation calls for other tools.
+    """
+
     def __init__(self, model: str = DEFAULT_ROUTING_MODEL):
         super().__init__(model)
         self.model: str = model
         self.tools: dict[str, RoutableChatEventHandler] = {}
-        for chat_handler in CHAT_HANDLERS.values():
+        for chat_handler in USER_FACING_CHAT_HANDLERS.values():
             self.add_tool(chat_handler.get_function_name(), chat_handler)
             logger.info(f"added {chat_handler.get_function_name()} => {chat_handler}")
 
@@ -237,12 +249,31 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
             )
 
 
-class UserProfilingHandler(WebSocketEventHandler):
+class UserIdentifyingHandler(WebSocketEventHandler):
+    def __init__(self, user_profile, model: str = DEFAULT_MINI_MODEL):
+        self.model = model
+        self.user_profile = user_profile
 
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
+    async def on_receive(self, chat_session_id: int, chat_request_received_id: id,
+                         chat_request: ChatRequest, response_sender: WebSocketSender):
+        # TODO: query DB first
+        if "user_first_name" not in self.user_profile['profile']:  # Or in DB results
+            pass
+
+
+class UserProfilingHandler(BackgroundChatEventHandler):
+    """
+    This class is an off-stage router. It analyzes conversations to construct shifting profiles of users, which
+    are persisted and linked with sessions. As more complete profiles of users are constructed, additional handlers
+    can be used to if the situation calls for it.
+    """
+
+    tool_func_name = "update_user_profile"
     tool = {
         "type": "function",
         "function": {
-            "name": "update_user_profile",
+            "name": tool_func_name,
             "description": " ".join((
                 "Update the user's profile with data extracted from the conversation.",
             )),
@@ -286,6 +317,10 @@ class UserProfilingHandler(WebSocketEventHandler):
                         "type": "string",
                         "description": "User tone from the conversation.",
                     },
+                    "user_honorific": {
+                        "type": "string",
+                        "description": "User's title or honorific.",
+                    },
                     "user_first_name": {
                         "type": "string",
                         "description": "User's first name.",
@@ -308,6 +343,13 @@ class UserProfilingHandler(WebSocketEventHandler):
     def __init__(self, model: str = DEFAULT_CHAT_MODEL):
         self.model = model
 
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
+    async def on_receive(self, chat_session_id: int, chat_request_received_id: id,
+                         chat_request: ChatRequest, response_sender: WebSocketSender):
+        await asyncio.create_task(
+            run_in_threadpool(self.process_chat_request,
+                              chat_session_id, chat_request_received_id, chat_request, response_sender))
+
     def process_chat_request(self, chat_session_id: int, chat_request_received_id: id,
                              chat_request: ChatRequest, response_sender: WebSocketSender):
         with OpenAI() as client:
@@ -317,7 +359,7 @@ class UserProfilingHandler(WebSocketEventHandler):
                 n=1, temperature=0,
                 tool_choice={
                     "type": "function",
-                    "function": {"name": "update_user_profile"}
+                    "function": {"name": UserProfilingHandler.tool_func_name}
                 },
                 tools=[UserProfilingHandler.tool]
             )
@@ -330,10 +372,11 @@ class UserProfilingHandler(WebSocketEventHandler):
                 user_profile_record = ChatUserProfile(chat_user_profile=user_profile)
                 session.add(user_profile_record)
                 session.commit()
-
-    @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, chat_session_id: int, chat_request_received_id: id,
-                         chat_request: ChatRequest, response_sender: WebSocketSender):
-        await asyncio.create_task(
-            run_in_threadpool(self.process_chat_request,
-                              chat_session_id, chat_request_received_id, chat_request, response_sender))
+                user_profile_to_session_link = ChatSessionChatUserProfileLink(
+                    chat_session_id=chat_session_id, chat_user_profile_id=user_profile_record.chat_user_profile_id)
+                session.add(user_profile_to_session_link)
+                session.commit()
+            asyncio.run(self.run_in_background([
+                UserIdentifyingHandler(user_profile).on_receive(
+                    chat_session_id, chat_request_received_id, chat_request, response_sender),
+            ]))
