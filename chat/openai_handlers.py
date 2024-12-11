@@ -73,9 +73,14 @@ class ChatModelEventHandler(RoutableChatEventHandler):
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self,
                          chat_session_id: int, chat_request_received_id: int,
-                         chat_request: ChatRequest, response_sender: WebSocketSender):
+                         chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await run_in_threadpool(self.do_chat_completion, chat_request)
-        await asyncio.create_task(response_sender.send_chat_response(ChatResponse(response=completion)))
+        await asyncio.create_task(ws_sender.return_chat_response(
+            chat_request_received_id, ChatResponse(
+                content=completion.choices[0].message.content,
+                model=completion.model,
+                response=completion
+            )))
 
 
 class ImageModelEventHandler(RoutableChatEventHandler):
@@ -115,23 +120,28 @@ class ImageModelEventHandler(RoutableChatEventHandler):
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self,
                          chat_session_id: int, chat_request_received_id: int,
-                         chat_request: ChatRequest, response_sender: WebSocketSender):
+                         chat_request: ChatRequest, ws_sender: WebSocketSender):
         markdown_image = await run_in_threadpool(self.generate_markdown_image, chat_request)
         await asyncio.create_task(
-            response_sender.send_chat_response(ChatResponse(response=ChatCompletion(
-                id='none',
-                choices=[Choice(
-                    finish_reason='stop',
-                    index=0,
-                    message=ChatCompletionMessage(
-                        content=markdown_image,
-                        role='assistant'
-                    ),
-                )],
-                created=int(time.time()),
-                object="chat.completion",
-                model=self.model,
-            ))))
+            ws_sender.return_chat_response(
+                chat_request_received_id,
+                ChatResponse(
+                    content=markdown_image,
+                    model=self.model,
+                    response=ChatCompletion(
+                        id='none',
+                        choices=[Choice(
+                            finish_reason='stop',
+                            index=0,
+                            message=ChatCompletionMessage(
+                                content=markdown_image,
+                                role='assistant'
+                            ),
+                        )],
+                        created=int(time.time()),
+                        object="chat.completion",
+                        model=self.model,
+                    ))))
 
 
 def messages_to_transcript(chat_request: ChatRequest):
@@ -224,21 +234,26 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self,
                          chat_session_id: int, chat_request_received_id: int,
-                         chat_request: ChatRequest, response_sender: WebSocketSender):
+                         chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await run_in_threadpool(self.do_chat_completion, chat_request)
         if completion.choices[0].message.content is None:
             if completion.choices[0].message.tool_calls is not None:
                 for tool_call in completion.choices[0].message.tool_calls:
                     await asyncio.create_task(
                         self.tools[tool_call.function.name].on_receive(
-                            chat_session_id, chat_request_received_id, chat_request, response_sender
+                            chat_session_id, chat_request_received_id, chat_request, ws_sender
                         )
                     )
                 return
             else:
                 logger.error("completion content and tool_calls are both missing", completion)
                 completion.choices[0].message.content = "Strange... I don't have a response"
-        await asyncio.create_task(response_sender.send_chat_response(ChatResponse(response=completion)))
+        await asyncio.create_task(ws_sender.return_chat_response(
+            chat_request_received_id,
+            ChatResponse(
+                content=completion.choices[0].message.content,
+                model=completion.model,
+                response=completion)))
 
     def do_chat_completion(self, chat_request: ChatRequest) -> ChatCompletion:
         tools = [t.get_function_settings() for t in self.tools.values()]
@@ -258,7 +273,7 @@ class UserIdentifyingHandler(WebSocketEventHandler):
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self, chat_session_id: int, chat_request_received_id: id,
-                         chat_request: ChatRequest, response_sender: WebSocketSender):
+                         chat_request: ChatRequest, ws_sender: WebSocketSender):
         session_users = await run_in_threadpool(self.get_session_users, chat_session_id)
         if session_users:
             pass  # TODO: after long delays, check if user is the same
@@ -394,13 +409,13 @@ class UserProfilingHandler(BackgroundChatEventHandler):
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self, chat_session_id: int, chat_request_received_id: id,
-                         chat_request: ChatRequest, response_sender: WebSocketSender):
+                         chat_request: ChatRequest, ws_sender: WebSocketSender):
         await asyncio.create_task(
             run_in_threadpool(self.process_chat_request,
-                              chat_session_id, chat_request_received_id, chat_request, response_sender))
+                              chat_session_id, chat_request_received_id, chat_request, ws_sender))
 
     def process_chat_request(self, chat_session_id: int, chat_request_received_id: id,
-                             chat_request: ChatRequest, response_sender: WebSocketSender):
+                             chat_request: ChatRequest, ws_sender: WebSocketSender):
         with OpenAI() as client:
             completion = client.chat.completions.create(
                 messages=[message.model_dump() for message in chat_request.messages if message.role != "system"],
@@ -427,5 +442,5 @@ class UserProfilingHandler(BackgroundChatEventHandler):
                 session.commit()
             asyncio.run(self.run_in_background([
                 UserIdentifyingHandler(user_profile).on_receive(
-                    chat_session_id, chat_request_received_id, chat_request, response_sender),
+                    chat_session_id, chat_request_received_id, chat_request, ws_sender),
             ]))

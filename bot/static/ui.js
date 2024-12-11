@@ -93,14 +93,12 @@ function initTextArea(submittedTextList, sendMessageFunc) {
     })
 }
 
-function getAssistantMessageBox(name, content, stopReason = null, iconClass = "fa fa-virus") {
+function getAssistantMessageBox(name, content, iconClass = "fa fa-virus") {
     const assistantMessageBox = document.createElement('div');
     assistantMessageBox.className = 'assistant-message-box';
     assistantMessageBox.innerHTML = `<i class="chat-metadata ${iconClass}"></i><b class="chat-metadata">${name}:</b>`;
     assistantMessageBox.innerHTML += `${marked.parse(content)}</br>`;
-    if (stopReason !== null && stopReason !== '') {
-        assistantMessageBox.innerHTML += `<i class="chat-metadata">${new Date().toLocaleTimeString()} - ${stopReason}</i> | `;
-    }
+    assistantMessageBox.innerHTML += `<i class="chat-metadata">${new Date().toLocaleTimeString()}</i> | `;
     return assistantMessageBox;
 }
 

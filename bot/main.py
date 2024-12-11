@@ -17,8 +17,6 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
-from starlette.websockets import WebSocketDisconnect
-import asyncio
 import hashlib
 import os
 import subprocess
@@ -105,10 +103,14 @@ async def lifespan(app: FastAPI):
     await db_stats_job()  # Warms up DB connections on startup
     scheduler.add_job(db_stats_job, 'interval', seconds=60, name='DB stats')
     scheduler.start()
+    websocket_manager.background_thread.start()
     # Started
     yield
     # Stopping
     await websocket_manager.disconnect_all()
+    websocket_manager.background_loop.stop()
+    websocket_manager.background_thread.join()
+    scheduler.shutdown()
 
 
 bot = FastAPI(lifespan=lifespan)
@@ -225,20 +227,10 @@ async def post_postgres_query(payload: SqlRequest,
 
 @bot.websocket("/chat")
 async def websocket_chat(ws: WebSocket):
-    async def conduct_chat_session():
-        logger.info("WebSocket connecting")
-        chat_session_id = await websocket_manager.connect(ws)
-        try:
-            while True:
-                await asyncio.wait_for(websocket_manager.receive(chat_session_id),
-                                       timeout=germ_settings.WEBSOCKET_CONNECTION_IDLE_TIMEOUT)
-        except asyncio.TimeoutError:
-            logger.info(f"WebSocket for chat_session {chat_session_id} timed out")
-            await websocket_manager.disconnect(chat_session_id)
-        except WebSocketDisconnect:
-            logger.info(f"WebSocket for chat_session {chat_session_id} disconnected")
-            await websocket_manager.disconnect(chat_session_id)
-    await asyncio.create_task(conduct_chat_session())
+    chat_session_id = await websocket_manager.connect(ws)
+    logger.info(f"starting session {chat_session_id}")
+    await websocket_manager.monitor_chat_session(chat_session_id, ws)
+    await websocket_manager.conduct_chat_session(chat_session_id)  # Blocks to hold the connection
 
 
 ##

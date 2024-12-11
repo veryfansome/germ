@@ -158,17 +158,13 @@
     }
 
     function handleMessageReceived(data) {
-        const responseData = data['response'];
-
-        const responseModel = responseData['model'];
-        const responseChoice = responseData['choices'][0];
-        const responseReason = responseChoice['finish_reason'];
-        const responseRole = responseChoice['message']['role'];
-        const responseContent = responseChoice['message']['content'];
+        const responseModel = data['model'];
+        const responseRole = data['role'];
+        const responseContent = data['content'];
         chatCompletionMessageList.push({ role: responseRole, content: responseContent });
 
         // Setup assistant message box
-        const assistantMessageBox = getAssistantMessageBox(`${responseRole}(${responseModel})`, responseContent, responseReason);
+        const assistantMessageBox = getAssistantMessageBox(`${responseRole}(${responseModel})`, responseContent);
         const copyLink = getCopyTextLink(responseContent);
         assistantMessageBox.appendChild(copyLink);
 

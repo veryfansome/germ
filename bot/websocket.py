@@ -4,11 +4,14 @@ from openai import OpenAI
 from prometheus_client import Gauge
 from sqlalchemy.sql import desc
 from starlette.concurrency import run_in_threadpool
+from starlette.websockets import WebSocketDisconnect
 import asyncio
 import datetime
 import logging
+import threading
 
 from api.models import ChatMessage, ChatRequest, ChatResponse, ChatSessionSummary
+from settings.germ_settings import WEBSOCKET_CONNECTION_IDLE_TIMEOUT
 from settings.openai_settings import DEFAULT_MINI_MODEL
 from db.models import ChatSession, ChatRequestReceived, ChatResponseSent, SessionLocal
 
@@ -22,35 +25,53 @@ METRIC_CHAT_SESSIONS_IN_PROGRESS = Gauge(
 
 
 class WebSocketSender:
-    def __init__(self, chat_session_id: int, chat_request_received_id: int, connection: WebSocket):
+    def __init__(self, chat_session_id: int, connection: WebSocket):
         self.chat_session_id = chat_session_id
-        self.chat_request_received_id = chat_request_received_id
         self.connection = connection
 
     async def send_chat_response(self, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
-        new_chat_response_sent(self.chat_session_id, self.chat_request_received_id, chat_response)
+        # TODO: Update DB
+
+    async def return_chat_response(self, chat_request_received_id: int, chat_response: ChatResponse):
+        await self.connection.send_text(chat_response.model_dump_json())
+        await asyncio.create_task(run_in_threadpool(
+            new_chat_response_sent, self.chat_session_id, chat_request_received_id, chat_response))
 
 
 class WebSocketEventHandler(ABC):
     @abstractmethod
     async def on_receive(self,
                          chat_session_id: int, chat_request_received_id: id,
-                         chat_request: ChatRequest, response_sender: WebSocketSender):
+                         chat_request: ChatRequest, ws_sender: WebSocketSender):
         pass
 
 
 class WebSocketConnectionManager:
     def __init__(self):
         self.active_connections: dict[int, WebSocket] = {}
+        self.background_loop = asyncio.new_event_loop()
         self.event_handlers: list[WebSocketEventHandler] = []
+
+        def run_event_loop(loop):
+            asyncio.set_event_loop(loop)
+            loop.run_forever()
+        self.background_thread = threading.Thread(target=run_event_loop, args=(self.background_loop,))
 
     def add_event_handler(self, handler: WebSocketEventHandler):
         self.event_handlers.append(handler)
 
-    async def broadcast(self, message: str):
-        for connection in self.active_connections.values():
-            await connection.send_text(message)
+    async def conduct_chat_session(self, chat_session_id: int):
+        try:
+            while True:
+                await asyncio.wait_for(self.receive(chat_session_id),
+                                       timeout=WEBSOCKET_CONNECTION_IDLE_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.info(f"chat session {chat_session_id} timed out")
+            await self.disconnect(chat_session_id)
+        except WebSocketDisconnect:
+            logger.info(f"chat session {chat_session_id} disconnected")
+            await self.disconnect(chat_session_id)
 
     async def connect(self, websocket: WebSocket) -> int:
         chat_session_id = await run_in_threadpool(new_chat_session)
@@ -62,7 +83,7 @@ class WebSocketConnectionManager:
     async def disconnect(self, chat_session_id: int):
         await run_in_threadpool(update_chat_session_time_stopped, chat_session_id)
 
-        def runnable():
+        def _disconnect():
             messages = get_chat_session_messages(chat_session_id)
             if len(messages) > 1:  # A conversation should have at least a message and a reply
                 with OpenAI() as client:
@@ -80,7 +101,7 @@ class WebSocketConnectionManager:
                     update_chat_session_summary(chat_session_id, completion.choices[0].message.content)
             else:
                 logger.info("skipped adding chat session summary")
-        await asyncio.create_task(run_in_threadpool(runnable))
+        await asyncio.create_task(run_in_threadpool(_disconnect))
         self.active_connections.pop(chat_session_id, None)
         METRIC_CHAT_SESSIONS_IN_PROGRESS.dec()
 
@@ -88,15 +109,30 @@ class WebSocketConnectionManager:
         for chat_session_id in self.active_connections:
             await asyncio.create_task(self.disconnect(chat_session_id))
 
+    async def monitor_chat_session(self, chat_session_id: int, ws: WebSocket):
+        async def _monitor_chat_session():
+            ws_sender = WebSocketSender(chat_session_id, ws)
+            while chat_session_id in self.active_connections:
+                try:
+                    logger.info(f"chat session {chat_session_id} is active")
+                    #await ws_sender.send_chat_response(
+                    #    ChatResponse(
+                    #        content=f"testing session {chat_session_id}"
+                    #    ))
+                    await asyncio.sleep(15)
+                except Exception as e:
+                    logger.error(e)
+        asyncio.run_coroutine_threadsafe(_monitor_chat_session(), self.background_loop)
+
     async def receive(self, chat_session_id: int):
         connection: WebSocket = self.active_connections[chat_session_id]
         chat_request = ChatRequest.parse_obj(await connection.receive_json())
         chat_request_received_id = await run_in_threadpool(
             new_chat_request_received, chat_session_id, chat_request)
-        response_sender = WebSocketSender(chat_session_id, chat_request_received_id, connection)
+        ws_sender = WebSocketSender(chat_session_id, connection)
         for handler in self.event_handlers:
             await asyncio.create_task(
-                handler.on_receive(chat_session_id, chat_request_received_id, chat_request, response_sender))
+                handler.on_receive(chat_session_id, chat_request_received_id, chat_request, ws_sender))
 
 
 def get_chat_session_messages(chat_session_id: int) -> list[ChatMessage]:
@@ -116,9 +152,7 @@ def get_chat_session_messages(chat_session_id: int) -> list[ChatMessage]:
                 for m in ChatRequest.parse_obj(request_received.chat_request).messages:
                     messages.append(m)
             messages.append(
-                ChatMessage(
-                    role="assistant",
-                    content=ChatResponse.parse_obj(response_sent.chat_response).response.choices[0].message.content))
+                ChatResponse.parse_obj(response_sent.chat_response))
     return messages
 
 
