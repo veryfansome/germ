@@ -1,15 +1,14 @@
 from abc import ABC, abstractmethod
 from openai import OpenAI
-from openai.types.chat.chat_completion import ChatCompletion, Choice
-from openai.types.chat.chat_completion_message import ChatCompletionMessage
+from openai.types.chat.chat_completion import ChatCompletion
 from sqlalchemy import func as sql_func
 from starlette.concurrency import run_in_threadpool
+from typing import Optional
 
 from typing import Iterable, Awaitable
 import asyncio
 import json
 import logging
-import time
 
 from api.models import ChatRequest, ChatResponse
 from bot.websocket import WebSocketEventHandler, WebSocketSender
@@ -17,7 +16,7 @@ from db.models import (ChatSession, ChatSessionChatUserLink, ChatSessionChatUser
                        ChatUser, ChatUserProfile, SessionLocal)
 from observability.annotations import measure_exec_seconds
 from settings.openai_settings import (DEFAULT_CHAT_MODEL, DEFAULT_MINI_MODEL, DEFAULT_ROUTING_MODEL,
-                                      ENABLED_CHAT_MODELS, ENABLED_IMAGE_MODELS)
+                                      ENABLED_CHAT_MODELS, ENABLED_IMAGE_MODELS, HTTPX_TIMEOUT)
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +61,7 @@ class ChatModelEventHandler(RoutableChatEventHandler):
                 messages=[message.model_dump() for message in chat_request.messages],
                 model=self.model,
                 n=1, temperature=chat_request.temperature,
-            )
+                timeout=HTTPX_TIMEOUT)
 
     def get_function_name(self):
         return self.function_name
@@ -78,9 +77,7 @@ class ChatModelEventHandler(RoutableChatEventHandler):
         await asyncio.create_task(ws_sender.return_chat_response(
             chat_request_received_id, ChatResponse(
                 content=completion.choices[0].message.content,
-                model=completion.model,
-                response=completion
-            )))
+                model=completion.model)))
 
 
 class ImageModelEventHandler(RoutableChatEventHandler):
@@ -104,8 +101,8 @@ class ImageModelEventHandler(RoutableChatEventHandler):
             with OpenAI() as client:
                 submission = client.images.generate(
                     prompt=image_model_inputs['prompt'], model=self.model, n=1,
-                    size=image_model_inputs['size'], style=image_model_inputs['style']
-                )
+                    size=image_model_inputs['size'], style=image_model_inputs['style'],
+                    timeout=HTTPX_TIMEOUT)
                 return f"[![{image_model_inputs['prompt']}]({submission.data[0].url})]({submission.data[0].url})"
         except Exception as e:
             logger.error(e)
@@ -125,23 +122,7 @@ class ImageModelEventHandler(RoutableChatEventHandler):
         await asyncio.create_task(
             ws_sender.return_chat_response(
                 chat_request_received_id,
-                ChatResponse(
-                    content=markdown_image,
-                    model=self.model,
-                    response=ChatCompletion(
-                        id='none',
-                        choices=[Choice(
-                            finish_reason='stop',
-                            index=0,
-                            message=ChatCompletionMessage(
-                                content=markdown_image,
-                                role='assistant'
-                            ),
-                        )],
-                        created=int(time.time()),
-                        object="chat.completion",
-                        model=self.model,
-                    ))))
+                ChatResponse(content=markdown_image, model=self.model)))
 
 
 def messages_to_transcript(chat_request: ChatRequest):
@@ -203,7 +184,7 @@ def generate_image_model_inputs(chat_request: ChatRequest):
                     },
                 }
             }],
-        )
+            timeout=HTTPX_TIMEOUT)
         return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
 
 
@@ -236,7 +217,12 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await run_in_threadpool(self.do_chat_completion, chat_request)
-        if completion.choices[0].message.content is None:
+        if completion is None:
+            await asyncio.create_task(ws_sender.return_chat_response(
+                chat_request_received_id,
+                ChatResponse(content="Sorry, I'm unable to access my language model.")))
+            return
+        elif completion.choices[0].message.content is None:
             if completion.choices[0].message.tool_calls is not None:
                 for tool_call in completion.choices[0].message.tool_calls:
                     await asyncio.create_task(
@@ -252,18 +238,21 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
             chat_request_received_id,
             ChatResponse(
                 content=completion.choices[0].message.content,
-                model=completion.model,
-                response=completion)))
+                model=completion.model)))
 
-    def do_chat_completion(self, chat_request: ChatRequest) -> ChatCompletion:
+    def do_chat_completion(self, chat_request: ChatRequest) -> Optional[ChatCompletion]:
         tools = [t.get_function_settings() for t in self.tools.values()]
-        with OpenAI() as client:
-            return client.chat.completions.create(
-                messages=[message.model_dump() for message in chat_request.messages],
-                model=self.model,
-                n=1, temperature=chat_request.temperature,
-                tools=tools
-            )
+        try:
+            with OpenAI() as client:
+                return client.chat.completions.create(
+                    messages=[message.model_dump() for message in chat_request.messages],
+                    model=self.model,
+                    n=1, temperature=chat_request.temperature,
+                    tools=tools,
+                    timeout=HTTPX_TIMEOUT)
+        except Exception as e:
+            logger.error(e)
+        return None
 
 
 class UserIdentifyingHandler(WebSocketEventHandler):
@@ -425,8 +414,8 @@ class UserProfilingHandler(BackgroundChatEventHandler):
                     "type": "function",
                     "function": {"name": UserProfilingHandler.tool_func_name}
                 },
-                tools=[UserProfilingHandler.tool]
-            )
+                tools=[UserProfilingHandler.tool],
+                timeout=HTTPX_TIMEOUT)
             user_profile = {
                 "profile": completion.choices[0].message.tool_calls[0].function.arguments,
                 "system_messages": [message.model_dump() for message in chat_request.messages if message.role == "system"]

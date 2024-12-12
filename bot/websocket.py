@@ -12,7 +12,7 @@ import threading
 
 from api.models import ChatMessage, ChatRequest, ChatResponse, ChatSessionSummary
 from settings.germ_settings import WEBSOCKET_CONNECTION_IDLE_TIMEOUT
-from settings.openai_settings import DEFAULT_MINI_MODEL
+from settings.openai_settings import DEFAULT_MINI_MODEL, HTTPX_TIMEOUT
 from db.models import ChatSession, ChatRequestReceived, ChatResponseSent, SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ class WebSocketConnectionManager:
                         }]),
                         model=DEFAULT_MINI_MODEL, n=1,
                         temperature=0.0,
-                    )
+                        timeout=HTTPX_TIMEOUT)
                     update_chat_session_summary(chat_session_id, completion.choices[0].message.content)
             else:
                 logger.info("skipped adding chat session summary")
