@@ -16,12 +16,11 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
-class ChatMessageIdea(Base):
-    __tablename__ = "chat_message_idea"
-    chat_message_idea_id = Column(Integer, primary_key=True, autoincrement=True)
-
-
 class ChatSession(Base):
+    """
+    A session is created each time a websocket connection is established. Messages received and sent on that connection
+    are associated with the session.
+    """
     __tablename__ = "chat_session"
     chat_session_id = Column(Integer, primary_key=True, autoincrement=True)
     is_hidden = Column(Boolean, default=False)
@@ -30,11 +29,47 @@ class ChatSession(Base):
     time_stopped = Column(DateTime)
 
     # Relationship to ChatUser through the link table
-    chat_users = relationship("ChatUser",
-                              secondary="chat_session_chat_user_link", back_populates="chat_sessions")
+    chat_users = relationship(
+        "ChatUser",
+        secondary="chat_session_chat_user_link", back_populates="chat_sessions")
     # Relationship to ChatUserProfile through the link table
-    chat_user_profiles = relationship("ChatUserProfile",
-                                      secondary="chat_session_chat_user_profile_link", back_populates="chat_sessions")
+    chat_user_profiles = relationship(
+        "ChatUserProfile",
+        secondary="chat_session_chat_user_profile_link", back_populates="chat_sessions")
+
+
+class ChatMessageIdea(Base):
+    """
+    Message ideas are options for proactively interacting with users. They are generated over the course of chat
+    sessions and prioritized for experimentation.
+    """
+    __tablename__ = "chat_message_idea"
+    chat_message_idea_id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_session_id = Column(Integer, ForeignKey("chat_session.chat_session_id"), nullable=False)
+    context = Column(String)
+    idea = Column(String, nullable=False)
+    time_created = Column(DateTime)
+
+    # Relationship to progenitors ideas through the link table
+    progenitors = relationship(
+        "ChatMessageIdea",
+        secondary="chat_message_idea_chat_message_idea_link",
+        primaryjoin="ChatMessageIdea.chat_message_idea_id == ChatMessageIdeaChatMessageIdeaLink.derivative_idea_id",
+        foreign_keys="[ChatMessageIdeaChatMessageIdeaLink.derivative_idea_id]",
+        back_populates="derivatives")
+    # Relationship to derivatives ideas through the link table
+    derivatives = relationship(
+        "ChatMessageIdea",
+        secondary="chat_message_idea_chat_message_idea_link",
+        primaryjoin="ChatMessageIdea.chat_message_idea_id == ChatMessageIdeaChatMessageIdeaLink.progenitor_idea_id",
+        foreign_keys="[ChatMessageIdeaChatMessageIdeaLink.progenitor_idea_id]",
+        back_populates="progenitors")
+
+
+class ChatMessageIdeaChatMessageIdeaLink(Base):
+    __tablename__ = "chat_message_idea_chat_message_idea_link"
+    progenitor_idea_id = Column(Integer, ForeignKey('chat_message_idea.chat_message_idea_id'), primary_key=True)
+    derivative_idea_id = Column(Integer, ForeignKey('chat_message_idea.chat_message_idea_id'), primary_key=True)
 
 
 class ChatRequestReceived(Base):
@@ -68,9 +103,10 @@ class ChatUser(Base):
     chat_user_middle_name_or_initials = Column(String)
 
     # Relationship to ChatSession through the link table
-    chat_sessions = relationship("ChatSession",
-                                 secondary="chat_session_chat_user_link",
-                                 back_populates="chat_users")
+    chat_sessions = relationship(
+        "ChatSession",
+        secondary="chat_session_chat_user_link",
+        back_populates="chat_users")
 
 
 class ChatSessionChatUserLink(Base):
@@ -85,9 +121,10 @@ class ChatUserProfile(Base):
     chat_user_profile = Column(JSON)
 
     # Relationship to ChatSession through the link table
-    chat_sessions = relationship("ChatSession",
-                                 secondary="chat_session_chat_user_profile_link",
-                                 back_populates="chat_user_profiles")
+    chat_sessions = relationship(
+        "ChatSession",
+        secondary="chat_session_chat_user_profile_link",
+        back_populates="chat_user_profiles")
 
 
 class ChatSessionChatUserProfileLink(Base):
