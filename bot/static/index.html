@@ -58,6 +58,7 @@
     initSendButtonResize();
 
     // Popup menu
+    const bookmarkRefreshInterval = 15000; // 15 seconds
     const bookmarkList = document.getElementById('bookmarks-popup-menu-ul');
     const refreshBookmarks = () => {
         bookmarkList.innerHTML = `<span style="color: gray;"><em>Have you had any conversations yet? Try sending a message!</em></span>`;
@@ -103,6 +104,9 @@
                 .catch(error => handleError(error, 'Failed to session history:'));
     };
     initPopup(refreshBookmarks, "bookmarks");
+    setInterval(() => {
+        refreshBookmarks();
+    }, bookmarkRefreshInterval);
 
     const systemChatMessageInput = document.getElementById('system-chat-message-input');
     const refreshSettingsPopup = () => {
@@ -177,7 +181,7 @@
     let ws;
     let wsIsConnected = false;
     let wsConnectionAttemptInProgress = false;
-    let wsReconnectInterval = 5000; // 5 seconds
+    const wsReconnectInterval = 5000; // 5 seconds
     function wsConnect() {
         ws = new WebSocket(`ws://${host}:${port}/chat`);
         wsConnectionAttemptInProgress = true
@@ -218,11 +222,11 @@
             } catch (error) {
                 handleError(error, 'Failed to handle message:');
             }
-        }
-        const finalChatCompletionMessageList = [...chatCompletionMessageList]
+        };
+        const finalChatCompletionMessageList = [...chatCompletionMessageList];
         const systemChatMessage = document.getElementById('system-chat-message-input').value;
         if (!isBlankOrEmptyStr(systemChatMessage)) {
-            finalChatCompletionMessageList.push({ role: "system", content: systemChatMessage})
+            finalChatCompletionMessageList.push({ role: "system", content: systemChatMessage});
         }
         ws.send(JSON.stringify({ messages: finalChatCompletionMessageList }));
     }
@@ -234,7 +238,7 @@
         } else {
             console.log("Connected")
         }
-    }, wsReconnectInterval)
+    }, wsReconnectInterval);
     </script>
 </body>
 </html>

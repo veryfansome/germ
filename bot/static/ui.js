@@ -8,22 +8,22 @@ const localDateOptions = {
 };
 
 function initPopup(onLoadCallback, elementPrefix) {
-    const bookmarksPopupButton = document.getElementById(`${elementPrefix}-popup-button`);
-    const bookmarksPopupMenu = document.getElementById(`${elementPrefix}-popup-menu`);
+    const popupMenuButton = document.getElementById(`${elementPrefix}-popup-button`);
+    const popupMenuMenu = document.getElementById(`${elementPrefix}-popup-menu`);
     document.addEventListener('DOMContentLoaded', function () {
         onLoadCallback();
     });
-    bookmarksPopupButton.addEventListener('mouseenter', () => {
-        bookmarksPopupMenu.style.display = 'block';
+    popupMenuButton.addEventListener('mouseenter', () => {
+        popupMenuMenu.style.display = 'block';
     });
-    bookmarksPopupButton.addEventListener('mouseleave', () => {
-        bookmarksPopupMenu.style.display = 'none';
+    popupMenuButton.addEventListener('mouseleave', () => {
+        popupMenuMenu.style.display = 'none';
     });
-    bookmarksPopupMenu.addEventListener('mouseenter', () => {
-        bookmarksPopupMenu.style.display = 'block';
+    popupMenuMenu.addEventListener('mouseenter', () => {
+        popupMenuMenu.style.display = 'block';
     });
-    bookmarksPopupMenu.addEventListener('mouseleave', () => {
-        bookmarksPopupMenu.style.display = 'none';
+    popupMenuMenu.addEventListener('mouseleave', () => {
+        popupMenuMenu.style.display = 'none';
     });
 }
 

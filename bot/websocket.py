@@ -31,12 +31,15 @@ class WebSocketSender:
 
     async def send_chat_response(self, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
-        # TODO: Update DB
+        await asyncio.create_task(run_in_threadpool(
+            new_chat_response_sent, self.chat_session_id, chat_response,
+            chat_request_received_id=None))
 
     async def return_chat_response(self, chat_request_received_id: int, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
         await asyncio.create_task(run_in_threadpool(
-            new_chat_response_sent, self.chat_session_id, chat_request_received_id, chat_response))
+            new_chat_response_sent, self.chat_session_id, chat_response,
+            chat_request_received_id=chat_request_received_id))
 
 
 class WebSocketEventHandler(ABC):
@@ -144,13 +147,14 @@ def get_chat_session_messages(chat_session_id: int) -> list[ChatMessage]:
             desc(ChatResponseSent.chat_response_sent_id)
         ).first()
         if response_sent:
-            request_received = session.query(ChatRequestReceived).join(ChatResponseSent).filter(
-                ChatRequestReceived.chat_request_received_id == ChatResponseSent.chat_request_received_id,
-                ChatResponseSent.chat_response_sent_id == response_sent.chat_response_sent_id
-            ).one_or_none()
-            if request_received:
-                for m in ChatRequest.parse_obj(request_received.chat_request).messages:
-                    messages.append(m)
+            if response_sent.chat_request_received_id is not None:
+                request_received = session.query(ChatRequestReceived).join(ChatResponseSent).filter(
+                    ChatRequestReceived.chat_request_received_id == ChatResponseSent.chat_request_received_id,
+                    ChatResponseSent.chat_response_sent_id == response_sent.chat_response_sent_id
+                ).one_or_none()
+                if request_received:
+                    for m in ChatRequest.parse_obj(request_received.chat_request).messages:
+                        messages.append(m)
             messages.append(
                 ChatResponse.parse_obj(response_sent.chat_response))
     return messages
@@ -186,9 +190,14 @@ def new_chat_request_received(chat_session_id: int, chat_request: ChatRequest) -
         return stored_request.chat_request_received_id
 
 
-def new_chat_response_sent(chat_session_id: int, chat_request_received_id: int, chat_response: ChatResponse) -> int:
+def new_chat_response_sent(chat_session_id: int, chat_response: ChatResponse,
+                           chat_request_received_id: int = None) -> int:
     with SessionLocal() as session:
         stored_response = ChatResponseSent(
+            chat_session_id=chat_session_id,
+            chat_response=chat_response.model_dump(),
+            time_sent=datetime.datetime.now(datetime.timezone.utc),
+        ) if chat_request_received_id is None else ChatResponseSent(
             chat_session_id=chat_session_id,
             chat_request_received_id=chat_request_received_id,
             chat_response=chat_response.model_dump(),

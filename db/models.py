@@ -16,6 +16,11 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+class ChatMessageIdea(Base):
+    __tablename__ = "chat_message_idea"
+    chat_message_idea_id = Column(Integer, primary_key=True, autoincrement=True)
+
+
 class ChatSession(Base):
     __tablename__ = "chat_session"
     chat_session_id = Column(Integer, primary_key=True, autoincrement=True)
@@ -43,7 +48,8 @@ class ChatRequestReceived(Base):
 class ChatResponseSent(Base):
     __tablename__ = "chat_response_sent"
     chat_session_id = Column(Integer, ForeignKey("chat_session.chat_session_id"), nullable=False)
-    chat_request_received_id = Column(Integer, ForeignKey("chat_request_received.chat_request_received_id"), nullable=False)
+    chat_request_received_id = Column(Integer, ForeignKey("chat_request_received.chat_request_received_id"),
+                                      nullable=True)
     chat_response_sent_id = Column(Integer, primary_key=True, autoincrement=True)
     chat_response = Column(JSON)
     time_sent = Column(DateTime)
