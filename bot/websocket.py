@@ -4,7 +4,7 @@ from openai import OpenAI
 from prometheus_client import Gauge
 from sqlalchemy.sql import desc
 from starlette.concurrency import run_in_threadpool
-from starlette.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 import asyncio
 import datetime
 import logging
@@ -76,41 +76,24 @@ class WebSocketConnectionManager:
             logger.info(f"chat session {chat_session_id} disconnected")
             await self.disconnect(chat_session_id)
 
-    async def connect(self, websocket: WebSocket) -> int:
+    async def connect(self, ws: WebSocket) -> int:
         chat_session_id = await run_in_threadpool(new_chat_session)
-        await websocket.accept()
-        self.active_connections[chat_session_id] = websocket
+        await ws.accept()
+        self.active_connections[chat_session_id] = ws
         METRIC_CHAT_SESSIONS_IN_PROGRESS.inc()
         return chat_session_id
 
     async def disconnect(self, chat_session_id: int):
-        await run_in_threadpool(update_chat_session_time_stopped, chat_session_id)
-
-        def _disconnect():
-            messages = get_chat_session_messages(chat_session_id)
-            if len(messages) > 1:  # A conversation should have at least a message and a reply
-                with OpenAI() as client:
-                    completion = client.chat.completions.create(
-                        messages=([m.model_dump() for m in messages] + [{
-                            "role": "user", "content": " ".join((
-                                "Summarize this conversation using no more than 20 words.",
-                                "What did the I want?",
-                                "What was your response?"
-                            ))
-                        }]),
-                        model=DEFAULT_MINI_MODEL, n=1,
-                        temperature=0.0,
-                        timeout=HTTPX_TIMEOUT)
-                    update_chat_session_summary(chat_session_id, completion.choices[0].message.content)
-            else:
-                logger.info("skipped adding chat session summary")
-        await asyncio.create_task(run_in_threadpool(_disconnect))
-        self.active_connections.pop(chat_session_id, None)
+        ws = self.active_connections.pop(chat_session_id, None)
+        logger.info(f"disconnecting session {chat_session_id}, current state: {ws.state}")
+        if ws.state == WebSocketState.CONNECTED or ws.state == WebSocketState.CONNECTING:
+            await ws.close()
         METRIC_CHAT_SESSIONS_IN_PROGRESS.dec()
+        await run_in_threadpool(update_chat_session_time_stopped, chat_session_id)
+        await run_in_threadpool(update_chat_session_summary, chat_session_id)
 
     async def disconnect_all(self):
-        for chat_session_id in self.active_connections:
-            await asyncio.create_task(self.disconnect(chat_session_id))
+        await asyncio.gather(*[self.disconnect(chat_session_id) for chat_session_id in self.active_connections])
 
     async def monitor_chat_session(self, chat_session_id: int, ws: WebSocket):
         async def _monitor_chat_session():
@@ -226,14 +209,30 @@ def update_chat_session_is_hidden(chat_session_id: int):
             logger.error(f"ChatSession.chat_session_id == {chat_session_id} not found")
 
 
-def update_chat_session_summary(chat_session_id: int, summary: str):
-    with SessionLocal() as session:
-        cs = session.query(ChatSession).filter_by(chat_session_id=chat_session_id).first()
-        if cs:
-            cs.summary = summary
-            session.commit()
-        else:
-            logger.error(f"ChatSession.chat_session_id == {chat_session_id} not found")
+def update_chat_session_summary(chat_session_id: int):
+    messages = get_chat_session_messages(chat_session_id)
+    if len(messages) > 1:  # A conversation should have at least a message and a reply
+        with OpenAI() as client:
+            completion = client.chat.completions.create(
+                messages=([m.model_dump() for m in messages] + [{
+                    "role": "user", "content": " ".join((
+                        "Summarize this conversation using no more than 20 words.",
+                        "What did the I want?",
+                        "What was your response?"
+                    ))
+                }]),
+                model=DEFAULT_MINI_MODEL, n=1,
+                temperature=0.0,
+                timeout=HTTPX_TIMEOUT)
+            with SessionLocal() as session:
+                cs = session.query(ChatSession).filter_by(chat_session_id=chat_session_id).first()
+                if cs:
+                    cs.summary = completion.choices[0].message.content
+                    session.commit()
+                else:
+                    logger.error(f"ChatSession.chat_session_id == {chat_session_id} not found")
+    else:
+        logger.info("skipped adding chat session summary")
 
 
 def update_chat_session_time_stopped(chat_session_id: int):
