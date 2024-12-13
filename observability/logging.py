@@ -3,7 +3,7 @@ import logging.config
 from settings import germ_settings
 
 
-def setup_logging():
+def setup_logging(global_level: str = germ_settings.LOG_LEVEL):
     logging.config.dictConfig(
         {
             "version": 1,
@@ -21,7 +21,7 @@ def setup_logging():
             },
             "loggers": {
                 "": {
-                    "level": germ_settings.LOG_LEVEL,
+                    "level": global_level,
                     "handlers": ["console"],
                 },
                 "httpx": {
@@ -34,7 +34,7 @@ def setup_logging():
                     "propagate": False,
                 },
                 "uvicorn.access": {
-                    "level": germ_settings.LOG_LEVEL,
+                    "level": "INFO",
                     "handlers": ["console"],
                     "propagate": False,
                 },

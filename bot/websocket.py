@@ -31,13 +31,13 @@ class WebSocketSender:
 
     async def send_chat_response(self, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
-        asyncio.create_task(run_in_threadpool(
+        task = asyncio.create_task(run_in_threadpool(
             new_chat_response_sent, self.chat_session_id, chat_response,
             chat_request_received_id=None))
 
     async def return_chat_response(self, chat_request_received_id: int, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
-        asyncio.create_task(run_in_threadpool(
+        task = asyncio.create_task(run_in_threadpool(
             new_chat_response_sent, self.chat_session_id, chat_response,
             chat_request_received_id=chat_request_received_id))
 
@@ -112,7 +112,7 @@ class WebSocketConnectionManager:
                 await asyncio.sleep(15)
                 logger.info(f"chat session {chat_session_id} is active")
                 for monitor in self.session_monitors:
-                    asyncio.create_task(monitor.on_tick(chat_session_id, ws_sender))
+                    task = asyncio.create_task(monitor.on_tick(chat_session_id, ws_sender))
         asyncio.run_coroutine_threadsafe(_monitor_chat_session(), self.background_loop)
 
     async def receive(self, chat_session_id: int):
@@ -122,7 +122,7 @@ class WebSocketConnectionManager:
             new_chat_request_received, chat_session_id, chat_request)
         ws_sender = WebSocketSender(chat_session_id, connection)
         for handler in self.ws_event_handlers:
-            asyncio.create_task(
+            task = asyncio.create_task(
                 handler.on_receive(chat_session_id, chat_request_received_id, chat_request, ws_sender))
 
 
