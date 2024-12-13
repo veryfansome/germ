@@ -31,13 +31,13 @@ class WebSocketSender:
 
     async def send_chat_response(self, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
-        await asyncio.create_task(run_in_threadpool(
+        asyncio.create_task(run_in_threadpool(
             new_chat_response_sent, self.chat_session_id, chat_response,
             chat_request_received_id=None))
 
     async def return_chat_response(self, chat_request_received_id: int, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
-        await asyncio.create_task(run_in_threadpool(
+        asyncio.create_task(run_in_threadpool(
             new_chat_response_sent, self.chat_session_id, chat_response,
             chat_request_received_id=chat_request_received_id))
 
@@ -73,7 +73,6 @@ class WebSocketConnectionManager:
             logger.info(f"chat session {chat_session_id} timed out")
             await self.disconnect(chat_session_id)
         except WebSocketDisconnect:
-            logger.info(f"chat session {chat_session_id} disconnected")
             await self.disconnect(chat_session_id)
 
     async def connect(self, ws: WebSocket) -> int:
@@ -85,8 +84,9 @@ class WebSocketConnectionManager:
 
     async def disconnect(self, chat_session_id: int):
         ws = self.active_connections.pop(chat_session_id, None)
-        logger.info(f"disconnecting session {chat_session_id}, current state: {ws.state}")
         if ws.state == WebSocketState.CONNECTED or ws.state == WebSocketState.CONNECTING:
+            logger.info(f"disconnecting session {chat_session_id}, socket state: connected=%s connecting=%s",
+                        ws.state == WebSocketState.CONNECTED, ws.state == WebSocketState.CONNECTING)
             await ws.close()
         METRIC_CHAT_SESSIONS_IN_PROGRESS.dec()
         await run_in_threadpool(update_chat_session_time_stopped, chat_session_id)
@@ -117,7 +117,7 @@ class WebSocketConnectionManager:
             new_chat_request_received, chat_session_id, chat_request)
         ws_sender = WebSocketSender(chat_session_id, connection)
         for handler in self.event_handlers:
-            await asyncio.create_task(
+            asyncio.create_task(
                 handler.on_receive(chat_session_id, chat_request_received_id, chat_request, ws_sender))
 
 

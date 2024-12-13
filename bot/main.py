@@ -230,7 +230,7 @@ async def websocket_chat(ws: WebSocket):
     chat_session_id = await websocket_manager.connect(ws)
     logger.info(f"starting session {chat_session_id}")
     await websocket_manager.monitor_chat_session(chat_session_id, ws)
-    await websocket_manager.conduct_chat_session(chat_session_id)  # Blocks to hold the connection
+    await websocket_manager.conduct_chat_session(chat_session_id)
 
 
 ##
