@@ -11,7 +11,7 @@ import json
 import logging
 
 from api.models import ChatRequest, ChatResponse
-from bot.websocket import WebSocketEventHandler, WebSocketSender
+from bot.websocket import SessionMonitor, WebSocketEventHandler, WebSocketSender
 from db.models import (ChatSession, ChatSessionChatUserLink, ChatSessionChatUserProfileLink,
                        ChatUser, ChatUserProfile, SessionLocal)
 from observability.annotations import measure_exec_seconds
@@ -25,7 +25,8 @@ class BackgroundChatEventHandler(WebSocketEventHandler, ABC):
 
     @classmethod
     async def run_in_background(cls, tasks: Iterable[Awaitable]):
-        await asyncio.gather(*tasks)
+        for task in tasks:
+            asyncio.create_task(task)
 
 
 class RoutableChatEventHandler(WebSocketEventHandler, ABC):
@@ -255,6 +256,15 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
         return None
 
 
+class SessionMonitoringHandler(SessionMonitor):
+    def __init__(self):
+        pass
+
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
+    async def on_tick(self, chat_session_id: int, ws_sender: WebSocketSender):
+        pass
+
+
 class UserIdentifyingHandler(WebSocketEventHandler):
     def __init__(self, user_profile, model: str = DEFAULT_MINI_MODEL):
         self.model = model
@@ -264,6 +274,7 @@ class UserIdentifyingHandler(WebSocketEventHandler):
     async def on_receive(self, chat_session_id: int, chat_request_received_id: id,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         session_users = await run_in_threadpool(self.get_session_users, chat_session_id)
+        # TODO: Update chat_message_idea table
         if session_users:
             pass  # TODO: after long delays, check if user is the same
         else:

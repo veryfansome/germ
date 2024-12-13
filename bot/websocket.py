@@ -42,6 +42,12 @@ class WebSocketSender:
             chat_request_received_id=chat_request_received_id))
 
 
+class SessionMonitor(ABC):
+    @abstractmethod
+    async def on_tick(self, chat_session_id: int, ws_sender: WebSocketSender):
+        pass
+
+
 class WebSocketEventHandler(ABC):
     @abstractmethod
     async def on_receive(self,
@@ -54,15 +60,19 @@ class WebSocketConnectionManager:
     def __init__(self):
         self.active_connections: dict[int, WebSocket] = {}
         self.background_loop = asyncio.new_event_loop()
-        self.event_handlers: list[WebSocketEventHandler] = []
+        self.session_monitors: list[SessionMonitor] = []
+        self.ws_event_handlers: list[WebSocketEventHandler] = []
 
         def run_event_loop(loop):
             asyncio.set_event_loop(loop)
             loop.run_forever()
         self.background_thread = threading.Thread(target=run_event_loop, args=(self.background_loop,))
 
-    def add_event_handler(self, handler: WebSocketEventHandler):
-        self.event_handlers.append(handler)
+    def add_session_monitor(self, handler: SessionMonitor):
+        self.session_monitors.append(handler)
+
+    def add_ws_event_handler(self, handler: WebSocketEventHandler):
+        self.ws_event_handlers.append(handler)
 
     async def conduct_chat_session(self, chat_session_id: int):
         try:
@@ -99,15 +109,10 @@ class WebSocketConnectionManager:
         async def _monitor_chat_session():
             ws_sender = WebSocketSender(chat_session_id, ws)
             while chat_session_id in self.active_connections:
-                try:
-                    logger.info(f"chat session {chat_session_id} is active")
-                    #await ws_sender.send_chat_response(
-                    #    ChatResponse(
-                    #        content=f"testing session {chat_session_id}"
-                    #    ))
-                    await asyncio.sleep(15)
-                except Exception as e:
-                    logger.error(e)
+                await asyncio.sleep(15)
+                logger.info(f"chat session {chat_session_id} is active")
+                for monitor in self.session_monitors:
+                    asyncio.create_task(monitor.on_tick(chat_session_id, ws_sender))
         asyncio.run_coroutine_threadsafe(_monitor_chat_session(), self.background_loop)
 
     async def receive(self, chat_session_id: int):
@@ -116,7 +121,7 @@ class WebSocketConnectionManager:
         chat_request_received_id = await run_in_threadpool(
             new_chat_request_received, chat_session_id, chat_request)
         ws_sender = WebSocketSender(chat_session_id, connection)
-        for handler in self.event_handlers:
+        for handler in self.ws_event_handlers:
             asyncio.create_task(
                 handler.on_receive(chat_session_id, chat_request_received_id, chat_request, ws_sender))
 

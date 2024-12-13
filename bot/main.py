@@ -85,8 +85,8 @@ websocket_manager = WebSocketConnectionManager()
 router = ChatRoutingEventHandler()
 user_profiler = UserProfilingHandler()
 
-websocket_manager.add_event_handler(router)
-websocket_manager.add_event_handler(user_profiler)
+websocket_manager.add_ws_event_handler(router)
+websocket_manager.add_ws_event_handler(user_profiler)
 
 
 @asynccontextmanager
