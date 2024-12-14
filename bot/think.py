@@ -1,4 +1,7 @@
 import asyncio
+import copy
+import itertools
+import json
 import random
 from abc import ABC, abstractmethod
 from typing import Optional
@@ -46,17 +49,6 @@ class PairedThinker(DelegatingThinker):
         self.history: list[ChatMessage] = []
         self.model = model
         self.system_message = system_message
-
-    def combined_summary(self) -> str:
-        return f"""
-{'-' * 100}
-## {self._name}
-{self.summarize()}
-{'-' * 100}
-## {self._pair.name()}
-{self._pair.summarize()}
-{'-' * 100}
-"""
 
     async def delegate(self, message: str,
                        initial_call: bool = False,
@@ -165,126 +157,121 @@ class PairedThinker(DelegatingThinker):
                     *self.history,
                     {
                         "role": "user",
-                        "content": f"Last word on \"{self.history[0].content}\"?",
+                        "content": f"Update your initial take on \"{self.history[0].content}\"",
                     },
                 ],
                 model=self.model,
-                n=1, temperature=0,
+                n=1, temperature=1,
                 timeout=HTTPX_TIMEOUT)
             return completion.choices[0].message.content
 
 
+DEVILS_ADVOCATE = "devils_advocate"
+SELF_INTEREST = "self_interest"
+UTILITARIAN = "utilitarian"
+THINKERS = {
+    DEVILS_ADVOCATE: PairedThinker(name=DEVILS_ADVOCATE,
+                                   system_message="Be challenging. Play devil's advocate."),
+    SELF_INTEREST: PairedThinker(name=SELF_INTEREST,
+                                 system_message="Be greedy. Champion self interest."),
+    UTILITARIAN: PairedThinker(name=UTILITARIAN,
+                               system_message="Be utilitarian. Champion the greatest good."),
+}
+
+
+async def cross_ruminate(idea: str, limiter: asyncio.Semaphore = asyncio.Semaphore(1)):
+    summaries = {k: [] for k in THINKERS.keys()}  # Allows grouping by thinker type
+    lead_thinkers: [PairedThinker] = []
+    # Do all unique combos
+    for p1, p2 in list(itertools.combinations(THINKERS.values(), 2)):
+        # Copy or histories will be jumbled
+        p1_copy = copy.deepcopy(p1)
+        p2_copy = copy.deepcopy(p2)
+        p1_copy.set_pair(p2_copy)
+        p2_copy.set_pair(p1_copy)
+        lead_thinkers.append(p1_copy)
+
+    async def _throttled_rumination(lead: PairedThinker):
+        # Throttle how many we do at once
+        async with limiter:
+            logger.info(f"Starting {lead.name()} vs {lead.pair_name()}")
+            return await lead.ruminate_randomly(idea)
+
+    blobs = []
+    tasks = []
+    for thinker in lead_thinkers:
+        tasks.append(_throttled_rumination(thinker))
+    lead_thinkers = await asyncio.gather(*tasks)
+    for thinker in lead_thinkers:
+        summaries[thinker.name()].append(thinker.summarize())
+        summaries[thinker.pair_name()].append(thinker.pair_summarize())
+    # Organized by thinker types
+    for thinker_name in summaries.keys():
+        blobs.append(f"## {thinker_name}\n" + (''.join([f'- {s}\n' for s in summaries[thinker_name]])))
+    with OpenAI() as client:
+        completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Retain each distinct thought while dropping duplicative text",
+                },
+                {
+                    "role": "user",
+                    "content": "# Distill these thoughts\n---\n" + ("\n".join(blobs)),
+                },
+            ],
+            model="gpt-4o-mini",
+            n=1, temperature=1,
+            timeout=HTTPX_TIMEOUT,
+            tool_choice={
+                "type": "function",
+                "function": {"name": "format_thoughts"}
+            },
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "format_thoughts",
+                    "description": "Format thoughts for user presentation",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "thoughts": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "required": ["thoughts"],
+                        "additionalProperties": False,
+                    },
+                }
+            }]
+        )
+        return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
+
+
+async def quick_take(idea: str):
+    thinkers = [copy.deepcopy(t) for t in random.sample(list(THINKERS.values()), 2)]
+    thinkers[0].set_pair(thinkers[1])
+    thinkers[1].set_pair(thinkers[0])
+    thinker = await thinkers[0].ruminate_randomly(idea)
+    return {"thoughts": [thinker.summarize(), thinker.pair_summarize()]}
+
+
 if __name__ == '__main__':
     import argparse
-    import copy
-    import itertools
 
     setup_logging(global_level="INFO")
-
-    # -f, --flavor command args
-    ALTRUIST = "altruist"
-    CYNIC = "cynic"
-    DEVILS_ADVOCATE = "devils_advocate"
-    OPEN_MIND = "open_mind"
-    PRAGMATIST = "pragmatist"
-    SELF_INTEREST = "self_interest"
-    UTILITARIAN = "utilitarian"
-
-    FLAVOR_CHOICES = [DEVILS_ADVOCATE, ALTRUIST, OPEN_MIND, SELF_INTEREST]
-    THINKER_NAMES = {  # Formated names
-        ALTRUIST: "Altruist",
-        CYNIC: "Cynic",
-        DEVILS_ADVOCATE: "Devil's Advocate",
-        OPEN_MIND: "Open mind",
-        PRAGMATIST: "Pragmatist",
-        SELF_INTEREST: "Self interest",
-        UTILITARIAN: "Utilitarian",
-    }
-
     parser = argparse.ArgumentParser(description='Think about an idea.')
     parser.add_argument("-i", "--idea", help='Any idea, simple or complex.',
                         default="People are good.")
-    parser.add_argument("-f", "--flavor",
-                        choices=FLAVOR_CHOICES, nargs="+", help='Thinker flavors. Pick two. Basic mode ONLY.',
-                        default=list(random.sample(FLAVOR_CHOICES, 2)))
-    parser.add_argument("--wash", action="store_true", help='Hive mode',
+    parser.add_argument("--cross", action="store_true", help='Cross-ruminate.',
                         default=False)
     args = parser.parse_args()
 
-    thinker_menu = {
-        ALTRUIST: PairedThinker(name=THINKER_NAMES[ALTRUIST],
-                                system_message="Be altruistic. Champion the needs of others."),
-        CYNIC: PairedThinker(name=THINKER_NAMES[CYNIC],
-                             system_message="Be cynical. Question motives and ideals."),
-        DEVILS_ADVOCATE: PairedThinker(name=THINKER_NAMES[DEVILS_ADVOCATE],
-                                       system_message="Be challenging. Play devil's advocate."),
-        OPEN_MIND: PairedThinker(name=THINKER_NAMES[OPEN_MIND],
-                                 system_message="Be open minded. Run with every idea."),
-        PRAGMATIST: PairedThinker(name=THINKER_NAMES[PRAGMATIST],
-                                  system_message="Be pragmatic. Focus on what's practical."),
-        SELF_INTEREST: PairedThinker(name=THINKER_NAMES[SELF_INTEREST],
-                                     system_message="Be greedy. Champion self interest."),
-        UTILITARIAN: PairedThinker(name=THINKER_NAMES[UTILITARIAN],
-                                   system_message="Be utilitarian. Champion the greatest good."),
-    }
-
-    async def basic():
-        summaries = []
-        thinkers = []
-
-        if DEVILS_ADVOCATE in args.flavor:
-            thinkers.append(thinker_menu[DEVILS_ADVOCATE])
-        if ALTRUIST in args.flavor:
-            thinkers.append(thinker_menu[ALTRUIST])
-        if OPEN_MIND in args.flavor:
-            thinkers.append(thinker_menu[OPEN_MIND])
-        if SELF_INTEREST in args.flavor:
-            thinkers.append(thinker_menu[SELF_INTEREST])
-
-        # Two max
-        thinker_len = len(thinkers)
-        if thinker_len == 1:
-            thinkers += list(random.sample({n: t for n, t in thinker_menu.items() if n != args.thinker[0]}, 1))
-        elif thinker_len > 2:
-            thinkers = list(random.sample(thinkers, 2))
-
-        thinkers[0].set_pair(thinkers[1])
-        thinkers[1].set_pair(thinkers[0])
-        thinker = await thinkers[0].ruminate_randomly(args.idea)
-        summaries.append(thinker.combined_summary())
-        print(f"\n# Idea: {args.idea}")
-        print(*summaries)
-
-    async def wash(limiter: asyncio.Semaphore):
-        summaries = {k: [] for k in THINKER_NAMES.values()}
-        lead_thinkers: [PairedThinker] = []
-        # Do all unique combos
-        for p1, p2 in list(itertools.combinations(thinker_menu.values(), 2)):
-            p1_copy = copy.deepcopy(p1)
-            p2_copy = copy.deepcopy(p2)
-            p1_copy.set_pair(p2_copy)
-            p2_copy.set_pair(p1_copy)
-            lead_thinkers.append(p1_copy)
-
-        async def _limited_task(lead: PairedThinker):
-            # Throttle how many we do at once
-            async with limiter:
-                logger.info(f"Starting {lead.name()} vs {lead.pair_name()}")
-                return await lead.ruminate_randomly(args.idea)
-
-        wash_tasks = []
-        for thinker in lead_thinkers:
-            wash_tasks.append(_limited_task(thinker))
-        lead_thinkers = await asyncio.gather(*wash_tasks)
-        for thinker in lead_thinkers:
-            summaries[thinker.name()].append(thinker.summarize())
-            summaries[thinker.pair_name()].append(thinker.pair_summarize())
-        for thinker_name in summaries.keys():
-            print(f"## {thinker_name}\n")
-            print(''.join([f'- {s}\n' for s in summaries[thinker_name]]))
-
-    if args.wash:
+    if args.cross:
         semaphore = asyncio.Semaphore(2)
-        asyncio.run(wash(semaphore))
+        print(json.dumps(asyncio.run(cross_ruminate(args.idea, limiter=semaphore)), indent=4))
     else:
-        asyncio.run(basic())
+        print(json.dumps(asyncio.run(quick_take(args.idea)), indent=4))
