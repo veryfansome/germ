@@ -42,11 +42,12 @@ class DelegatingThinker(ABC):
 
 class PairedThinker(DelegatingThinker):
     def __init__(self, model="gpt-4o-mini", name: str = "", pair: DelegatingThinker = None,
+                 history: list[ChatMessage] = None,
                  system_message: str = "Be thoughtful."):
         self._name = name
         self._pair: Optional[DelegatingThinker] = pair
         self._stop = False
-        self.history: list[ChatMessage] = []
+        self.history: list[ChatMessage] = history if history is not None else []
         self.model = model
         self.system_message = system_message
 
@@ -109,6 +110,13 @@ class PairedThinker(DelegatingThinker):
 
     async def ruminate(self, idea: str,
                        num_ticks: int = 3):  # Odds end on Self, evens end on Pair
+        """
+        Conduct a dialogue between two PairedThinkers.
+
+        :param idea:
+        :param num_ticks:
+        :return:
+        """
         # ticks   1       2       3
         # idea -> Self -> Pair -> Self
         # idea -> Pair
@@ -180,10 +188,17 @@ THINKERS = {
 
 
 async def cross_ruminate(idea: str, limiter: asyncio.Semaphore = asyncio.Semaphore(1)):
+    """
+    Execute all possible ruminate combinations, with each pair having distinct histories, then distill
+    the arguments from the discussions.
+
+    :param idea:
+    :param limiter:
+    :return:
+    """
     summaries = {k: [] for k in THINKERS.keys()}  # Allows grouping by thinker type
     lead_thinkers: [PairedThinker] = []
-    # Do all unique combos
-    for p1, p2 in list(itertools.combinations(THINKERS.values(), 2)):
+    for p1, p2 in list(itertools.combinations(THINKERS.values(), 2)):  # All combos
         # Copy or histories will be jumbled
         p1_copy = copy.deepcopy(p1)
         p2_copy = copy.deepcopy(p2)
@@ -252,6 +267,12 @@ async def cross_ruminate(idea: str, limiter: asyncio.Semaphore = asyncio.Semapho
 
 
 async def quick_take(idea: str):
+    """
+    Ruminate once using a randomized thinker pair.
+
+    :param idea:
+    :return:
+    """
     thinkers = [copy.deepcopy(t) for t in random.sample(list(THINKERS.values()), 2)]
     thinkers[0].set_pair(thinkers[1])
     thinkers[1].set_pair(thinkers[0])
