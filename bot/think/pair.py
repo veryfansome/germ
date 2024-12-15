@@ -11,12 +11,13 @@ from starlette.concurrency import run_in_threadpool
 
 from api.models import ChatMessage
 from bot.think.flavors import THINKER_FLAVORS
+from chat.chatter import SingleSentenceChatter
 from observability.logging import logging, setup_logging
 
 logger = logging.getLogger(__name__)
 
 
-class DelegatingThinker(ABC):
+class DelegatingThinker(SingleSentenceChatter, ABC):
     @abstractmethod
     async def delegate(self, message: str,
                        initial_call: bool = False,  # Is initial delegate call.
@@ -24,48 +25,35 @@ class DelegatingThinker(ABC):
         pass
 
     @abstractmethod
-    def name(self) -> str:
-        pass
-
-    @abstractmethod
-    def reset(self, history: list[ChatMessage] = None):
-        pass
-
-    @abstractmethod
     def stop(self):
-        pass
-
-    @abstractmethod
-    def summarize(self) -> str:
         pass
 
 
 class PairedThinker(DelegatingThinker):
     def __init__(self, name: str = "", pair: DelegatingThinker = None,
                  history: list[ChatMessage] = None, system_message: str = "Be thoughtful."):
-        self._name = name
-        self._pair: Optional[DelegatingThinker] = pair
+        super().__init__(history=history if history is not None else [],
+                         name=name,
+                         system_message=system_message)
         self._stop = False
-        self.history: list[ChatMessage] = history if history is not None else []
-        self.completion_model = "gpt-4o-mini"
-        self.summarization_model = "gpt-4o"
-        self.system_message = system_message
+        self.pair: Optional[DelegatingThinker] = pair
+        self.summarization_model = "gpt-4o-mini"
 
     async def delegate(self, message: str,
                        initial_call: bool = False,
                        delegate_ok: bool = True):
         if self._stop:
             return
-        elif self._pair is None:
+        elif self.pair is None:
             logger.warning("PairedThinker.delegate() invoked with a `None` pair")
 
-        logger.info(f"{self._name}[hist:{len(self.history)}] received: {message}")
+        logger.info(f"{self.name}[hist:{len(self.history)}] received: {message}")
 
         initial_call_task = None
-        if initial_call and not self._stop and self._pair is not None:
+        if initial_call and not self._stop and self.pair is not None:
             # Let pair have a go too so both see the initial message.
             # Don't delegate because we'll delegate later, and it would create two loops.
-            initial_call_task = asyncio.create_task(self._pair.delegate(message, delegate_ok=False))
+            initial_call_task = asyncio.create_task(self.pair.delegate(message, delegate_ok=False))
 
         self.history.append(ChatMessage(role="user", content=message))
         if not self._stop:
@@ -73,36 +61,8 @@ class PairedThinker(DelegatingThinker):
             if delegate_ok:
                 if initial_call_task is not None:
                     await initial_call_task
-                if not self._stop and self._pair is not None:  # Check stop in case we waited
-                    delegate_task = asyncio.create_task(self._pair.delegate(next_message))
-
-    def do_completion(self):
-        with OpenAI() as client:
-            completion = client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": f"""
-- Be efficient. Use a single concise sentence.
-- {self.system_message}
-""",
-                    },
-                    *self.history,
-                ],
-                model=self.completion_model,
-                n=1, temperature=1,
-                timeout=30)
-            self.history.append(ChatMessage(role="assistant", content=completion.choices[0].message.content))
-            return completion.choices[0].message.content
-
-    def name(self) -> str:
-        return self._name
-
-    def pair_name(self) -> str:
-        return self._pair.name()
-
-    def pair_summarize(self) -> str:
-        return self._pair.summarize()
+                if not self._stop and self.pair is not None:  # Check stop in case we waited
+                    delegate_task = asyncio.create_task(self.pair.delegate(next_message))
 
     async def ruminate(self, idea: str,
                        num_ticks: int = 3):  # Odds end on Self, evens end on Pair
@@ -132,42 +92,19 @@ class PairedThinker(DelegatingThinker):
         while len(self.history) < stop_len:
             await asyncio.sleep(1)
         self.stop()
-        self._pair.stop()
+        self.pair.stop()
 
     async def ruminate_randomly(self, idea: str,
                                 num_ticks: int = 3):  # Odds end on Self, evens end on Pair
-        thinker = random.choice([self, self._pair])
+        thinker = random.choice([self, self.pair])
         await thinker.ruminate(idea, num_ticks)
         return thinker
 
     def set_pair(self, pair: DelegatingThinker):
-        self._pair = pair
+        self.pair = pair
 
     def stop(self):
         self._stop = True
-
-    def summarize(self) -> str:
-        logger.info(f"{self._name}[hist:{len(self.history)}] generating summary")
-        with OpenAI() as client:
-            completion = client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": f"""
-- Be efficient. Use a single concise sentence.
-- {self.system_message}
-""",
-                    },
-                    *self.history,
-                    {
-                        "role": "user",
-                        "content": f"Update your initial take on \"{self.history[0].content}\"",
-                    },
-                ],
-                model=self.summarization_model,
-                n=1, temperature=1,
-                timeout=60)
-            return completion.choices[0].message.content
 
 
 async def cross_ruminate(idea: str,
@@ -198,7 +135,7 @@ async def cross_ruminate(idea: str,
     async def _throttled_rumination(lead: PairedThinker):
         # Throttle how many we do at once
         async with limiter:
-            logger.info(f"Starting {lead.name()} vs {lead.pair_name()}")
+            logger.info(f"Starting {lead.name} vs {lead.pair.name}")
             return await lead.ruminate_randomly(idea)
 
     blobs = []
@@ -207,8 +144,8 @@ async def cross_ruminate(idea: str,
         tasks.append(_throttled_rumination(thinker))
     lead_thinkers = await asyncio.gather(*tasks)
     for thinker in lead_thinkers:
-        summaries[thinker.name()].append(thinker.summarize())
-        summaries[thinker.pair_name()].append(thinker.pair_summarize())
+        summaries[thinker.name].append(thinker.summarize())
+        summaries[thinker.pair.name].append(thinker.pair.summarize())
     # Organized by thinker types
     for thinker_name in summaries.keys():
         blobs.append(f"## Thinker: {thinker_name}\n" + (''.join([f'- {s}\n' for s in summaries[thinker_name]])))
@@ -224,7 +161,7 @@ async def cross_ruminate(idea: str,
                     "content": "# Distill these thoughts\n---\n" + ("\n".join(blobs)),
                 },
             ],
-            model="gpt-4o",
+            model="gpt-4o-mini",
             n=1, temperature=1,
             timeout=120,
             tool_choice={
@@ -280,16 +217,16 @@ async def ruminate_randomly(idea: str, thinkers: list[PairedThinker] = None):
     if thinkers is None:
         thinkers = [PairedThinker(name=flv, system_message=THINKER_FLAVORS[flv])
                     for flv in random.sample(sorted(THINKER_FLAVORS.keys()), 2)]
-        thinkers[0].set_pair(thinkers[1])
-        thinkers[1].set_pair(thinkers[0])
+    thinkers[0].set_pair(thinkers[1])
+    thinkers[1].set_pair(thinkers[0])
     thinker = await thinkers[0].ruminate_randomly(idea)
     return {
         "thoughts": [{
             "thought": thinker.summarize(),
-            "thinkers": [thinker.name()],
+            "thinkers": [thinker.name],
         }, {
-            "thought": thinker.pair_summarize(),
-            "thinkers": [thinker.pair_name()],
+            "thought": thinker.pair.summarize(),
+            "thinkers": [thinker.pair.name],
         }]}
 
 
@@ -300,12 +237,18 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Think about an idea.')
     parser.add_argument("--cross", action="store_true", help='Cross-ruminate.',
                         default=False)
+    parser.add_argument("-f", "--flavor", help='Thinker flavors.',
+                        nargs="+", default=[])
     parser.add_argument("-i", "--idea", help='Any idea, simple or complex.',
                         default="People are good.")
     args = parser.parse_args()
 
     if args.cross:
+        args_thinkers = {flv: PairedThinker(name=flv, system_message=THINKER_FLAVORS[flv]) for flv in args.flavor}
         semaphore = asyncio.Semaphore(2)
-        print(json.dumps(asyncio.run(cross_ruminate(args.idea, limiter=semaphore)), indent=4))
+        print(json.dumps(asyncio.run(cross_ruminate(
+            args.idea, limiter=semaphore, thinkers=None if len(args_thinkers) == 0 else args_thinkers)), indent=4))
     else:
-        print(json.dumps(asyncio.run(ruminate_randomly(args.idea)), indent=4))
+        args_thinkers = [PairedThinker(name=flv, system_message=THINKER_FLAVORS[flv]) for flv in args.flavor]
+        print(json.dumps(asyncio.run(ruminate_randomly(
+            args.idea, thinkers=None if len(args_thinkers) == 0 else args_thinkers)), indent=4))
