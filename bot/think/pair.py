@@ -10,6 +10,7 @@ from openai import OpenAI
 from starlette.concurrency import run_in_threadpool
 
 from api.models import ChatMessage
+from bot.think.flavors import THINKER_FLAVORS
 from observability.logging import logging, setup_logging
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 class DelegatingThinker(ABC):
     @abstractmethod
     async def delegate(self, message: str,
-                       initial_call: bool = False,  # Is initial delegate call for an idea or statement.
+                       initial_call: bool = False,  # Is initial delegate call.
                        delegate_ok: bool = True):  # Skip delegation if False.
         pass
 
@@ -103,12 +104,6 @@ class PairedThinker(DelegatingThinker):
     def pair_summarize(self) -> str:
         return self._pair.summarize()
 
-    def pair_reset(self, history: list[ChatMessage] = None) -> str:
-        return self._pair.reset(history)
-
-    def reset(self, history: list[ChatMessage] = None):
-        self.history = history if history is not None else []
-
     async def ruminate(self, idea: str,
                        num_ticks: int = 3):  # Odds end on Self, evens end on Pair
         """
@@ -175,25 +170,6 @@ class PairedThinker(DelegatingThinker):
             return completion.choices[0].message.content
 
 
-DEVILS_ADVOCATE = "Devil's advocate"
-HEDONIST = "Hedonist"
-OPTIMIST = "Optimist"
-SELF_INTEREST = "Self interest"
-UTILITARIAN = "Greatest good"
-THINKERS = {
-    DEVILS_ADVOCATE: PairedThinker(name=DEVILS_ADVOCATE,
-                                   system_message="Be challenging. Play devil's advocate."),
-    HEDONIST: PairedThinker(name=HEDONIST,
-                            system_message="Be a hedonist. Seek pleasure."),
-    OPTIMIST: PairedThinker(name=OPTIMIST,
-                            system_message="Be optimistic. Go all in."),
-    SELF_INTEREST: PairedThinker(name=SELF_INTEREST,
-                                 system_message="Be greedy. Champion self interest."),
-    UTILITARIAN: PairedThinker(name=UTILITARIAN,
-                               system_message="Be utilitarian. Champion the greatest good."),
-}
-
-
 async def cross_ruminate(idea: str,
                          thinkers: dict[str, PairedThinker] = None,
                          limiter: asyncio.Semaphore = asyncio.Semaphore(1)):
@@ -206,9 +182,12 @@ async def cross_ruminate(idea: str,
     :param limiter:
     :return:
     """
-    summaries = {k: [] for k in (THINKERS if thinkers is None else thinkers).keys()}  # Allows grouping by thinker type
+    thinkers = thinkers if thinkers is not None else {
+        n: PairedThinker(name=n, system_message=s) for n, s in THINKER_FLAVORS.items()}
+
+    summaries = {k: [] for k in thinkers.keys()}  # Allows grouping by thinker type
     lead_thinkers: [PairedThinker] = []
-    for p1, p2 in list(itertools.combinations(THINKERS.values(), 2)):  # All combos
+    for p1, p2 in list(itertools.combinations(thinkers.values(), 2)):  # All combos
         # Copy or histories will be jumbled
         p1_copy = copy.deepcopy(p1)
         p2_copy = copy.deepcopy(p2)
@@ -290,14 +269,7 @@ async def cross_ruminate(idea: str,
         return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
 
 
-async def forum(idea: str, thinkers: dict[str, PairedThinker] = None,):
-    history: list[ChatMessage] = []
-    thinkers = [copy.deepcopy(t) for t in (THINKERS if thinkers is None else thinkers).values()]
-    for thinker in thinkers:
-        thinker.reset(history=history)
-
-
-async def ruminate_randomly(idea: str, thinkers: dict[str, PairedThinker] = None):
+async def ruminate_randomly(idea: str, thinkers: list[PairedThinker] = None):
     """
     Ruminate once using a randomized thinker pair.
 
@@ -305,9 +277,11 @@ async def ruminate_randomly(idea: str, thinkers: dict[str, PairedThinker] = None
     :param idea:
     :return:
     """
-    thinkers = [copy.deepcopy(t) for t in random.sample(list((THINKERS if thinkers is None else thinkers).values()), 2)]
-    thinkers[0].set_pair(thinkers[1])
-    thinkers[1].set_pair(thinkers[0])
+    if thinkers is None:
+        thinkers = [PairedThinker(name=flv, system_message=THINKER_FLAVORS[flv])
+                    for flv in random.sample(sorted(THINKER_FLAVORS.keys()), 2)]
+        thinkers[0].set_pair(thinkers[1])
+        thinkers[1].set_pair(thinkers[0])
     thinker = await thinkers[0].ruminate_randomly(idea)
     return {
         "thoughts": [{
@@ -326,8 +300,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Think about an idea.')
     parser.add_argument("--cross", action="store_true", help='Cross-ruminate.',
                         default=False)
-    parser.add_argument("--forum", action="store_true", help='Conduct a forum.',
-                        default=False)
     parser.add_argument("-i", "--idea", help='Any idea, simple or complex.',
                         default="People are good.")
     args = parser.parse_args()
@@ -335,7 +307,5 @@ if __name__ == '__main__':
     if args.cross:
         semaphore = asyncio.Semaphore(2)
         print(json.dumps(asyncio.run(cross_ruminate(args.idea, limiter=semaphore)), indent=4))
-    elif args.forum:
-        print(asyncio.run(forum(args.idea)))
     else:
         print(json.dumps(asyncio.run(ruminate_randomly(args.idea)), indent=4))
