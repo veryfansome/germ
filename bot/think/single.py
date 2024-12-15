@@ -27,19 +27,24 @@ class SingleThreadedMultiFlavorThinker:
         for node in self.nodes:
             node.history.append(ChatMessage(role="user", content=text))
 
-    def cycle(self):
+    def round_table(self):
         """
         Conduct a simulated inner voice "round-table". Unlike PairedThinkers that have back and forth discussions
-        between two participants, with SingleThreadedMultiFlavorThinker, an initial message is sent to all and each
-        participant subsequently comment in turns.
+        between two participants, with a SingleThreadedMultiFlavorThinker, an initial message is sent to all nodes
+        and each participant node subsequently comment in turns. This is a more efficient way of incorporating a
+        broad range of perspectives, where PairedThinkers might be better at exploding a single idea.
 
         :return:
         """
+
+        # Order matters tremendously. Shuffling is needed. The first few nodes that comment have more influence
+        # over the direction of the discussion. A static order applies the same biases every time.
+        random.shuffle(self.nodes)
+
         # text        -> Flavor 1    Flavor 2    Flavor 3
         # response 1     Flavor 1 ->
         # response 2              <- Flavor 2 ->
         # response 3                          <- Flavor 3
-        random.shuffle(self.nodes)
         for idx, node in enumerate(self.nodes):
             reply = node.do_completion()
             logger.info(f"{node.name}: {reply}")
@@ -70,6 +75,6 @@ if __name__ == "__main__":
     thinker = SingleThreadedMultiFlavorThinker()
     thinker.add_first_message(args.idea)
     for i in range(3):
-        thinker.cycle()
+        thinker.round_table()
     print(json.dumps({"thoughts": thinker.summarize()}, indent=4))
     # print(json.dumps([m.model_dump() for m in random.choice(thinker.nodes).history], indent=4))
