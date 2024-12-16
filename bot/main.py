@@ -26,7 +26,7 @@ from api.models import ChatMessage, ChatSessionSummary, SqlRequest
 from bot.websocket import (WebSocketConnectionManager,
                            get_chat_session_messages, get_chat_session_summaries,
                            update_chat_session_is_hidden)
-from chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
+from bot.chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
 from db.models import (DATABASE_URL, SessionLocal,
                        ChatSession, ChatRequestReceived, ChatResponseSent,
                        engine)

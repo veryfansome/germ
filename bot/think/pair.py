@@ -11,7 +11,7 @@ from starlette.concurrency import run_in_threadpool
 
 from api.models import ChatMessage
 from bot.think.flavors import THINKER_FLAVORS
-from chat.chatter import SingleSentenceChatter
+from bot.chat.auto import SingleSentenceChatter
 from observability.logging import logging, setup_logging
 
 logger = logging.getLogger(__name__)

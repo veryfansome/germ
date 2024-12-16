@@ -78,7 +78,7 @@ class ChatModelEventHandler(RoutableChatEventHandler):
         task = asyncio.create_task(ws_sender.return_chat_response(
             chat_request_received_id, ChatResponse(
                 content=completion.choices[0].message.content,
-                model=completion.completion_model)))
+                model=completion.model)))
 
 
 class ImageModelEventHandler(RoutableChatEventHandler):
@@ -239,7 +239,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
             chat_request_received_id,
             ChatResponse(
                 content=completion.choices[0].message.content,
-                model=completion.completion_model)))
+                model=completion.model)))
 
     def do_chat_completion(self, chat_request: ChatRequest) -> Optional[ChatCompletion]:
         tools = [t.get_function_settings() for t in self.tools.values()]

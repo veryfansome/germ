@@ -2,7 +2,7 @@ import random
 
 from api.models import ChatMessage
 from bot.think.flavors import THINKER_FLAVORS
-from chat.chatter import SingleSentenceChatter
+from bot.chat.auto import SingleSentenceChatter
 from observability.logging import logging, setup_logging
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ class ThinkNode(SingleSentenceChatter):
             system_message=" ".join([
                 THINKER_FLAVORS[flavor],
                 "Voice as inner dialogue.",  # Required because more than two voices in a two participant format
-                "Don't use affirmatives."  # People don't tell themselves, "I agree, ...", they just think it
+                "Don't use affirmatives.",  # People don't tell themselves, "I agree, ...", they just think it
             ]))
 
 
@@ -76,5 +76,6 @@ if __name__ == "__main__":
     thinker.add_first_message(args.idea)
     for i in range(3):
         thinker.round_table()
+    # TODO: instead of summarizing all, may we should summarise one or two that had the most contextually relevant?
     print(json.dumps({"thoughts": thinker.summarize()}, indent=4))
     # print(json.dumps([m.model_dump() for m in random.choice(thinker.nodes).history], indent=4))
