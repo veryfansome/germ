@@ -10,6 +10,8 @@ services:
         condition: service_completed_successfully
       jaeger-init:
         condition: service_completed_successfully
+      neo4j-init:
+        condition: service_completed_successfully
       otel-collector-init:
         condition: service_completed_successfully
       test:
@@ -25,6 +27,7 @@ services:
       HF_HOME: ${HF_HOME:-/src/data/huggingface}
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
       POSTGRES_PASSWORD: &db-password ${POSTGRES_PASSWORD:-bacteria4life}
+      NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
       POSTGRES_USER: &db-user ${POSTGRES_USER:-germ}
       SKIP_TESTS: ${SKIP_TESTS:-true}
     working_dir: /src
@@ -118,6 +121,55 @@ services:
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
 
+  neo4j:
+    networks: [ bots ]
+    container_name: &neo4j-host germ-neo4j
+    image: neo4j:latest
+    volumes:
+      - neo4j-data:/data  # Persist data
+    environment:
+      NEO4J_AUTH: *neo4j-auth
+    ports:
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
+
+  neo4j-init:
+    networks: [ bots ]
+    container_name: germ-neo4j-init
+    image: "germ:latest"
+    volumes:
+      - ./:/src
+    environment:
+      WAIT_FOR_HOST: *neo4j-host
+      WAIT_FOR_PORT: 7474
+    working_dir: /src
+    command: [ "scripts/wait-for-port-up.sh" ]
+
+  # Has a loose dependency on jaeger - exports data to jaeger but not until bot is up.
+  # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
+  otel-collector:
+    networks: [bots]
+    container_name: &otel-collector-host germ-otel-collector
+    image: otel/opentelemetry-collector-contrib:0.102.0
+    volumes:
+      - ./observability/otel-collector-config-connector.yml:/etc/otelcol/otel-collector-config.yml
+    ports:
+      - "4318:4318" # OTLP over HTTP
+    command:
+      - --config=/etc/otelcol/otel-collector-config.yml
+
+  otel-collector-init:
+    networks: [ bots ]
+    container_name: germ-otel-collector-init
+    image: "germ:latest"
+    volumes:
+      - ./:/src
+    environment:
+      WAIT_FOR_HOST: *otel-collector-host
+      WAIT_FOR_PORT: 4318
+    working_dir: /src
+    command: [ "scripts/wait-for-port-up.sh" ]
+
   # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
   prometheus:
     networks: [bots]
@@ -147,31 +199,6 @@ services:
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
 
-  # Has a loose dependency on jaeger - exports data to jaeger but not until bot is up.
-  # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
-  otel-collector:
-    networks: [bots]
-    container_name: &otel-collector-host germ-otel-collector
-    image: otel/opentelemetry-collector-contrib:0.102.0
-    volumes:
-      - ./observability/otel-collector-config-connector.yml:/etc/otelcol/otel-collector-config.yml
-    ports:
-      - "4318:4318" # OTLP over HTTP
-    command:
-      - --config=/etc/otelcol/otel-collector-config.yml
-
-  otel-collector-init:
-    networks: [ bots ]
-    container_name: germ-otel-collector-init
-    image: "germ:latest"
-    volumes:
-      - ./:/src
-    environment:
-      WAIT_FOR_HOST: *otel-collector-host
-      WAIT_FOR_PORT: 4318
-    working_dir: /src
-    command: [ "scripts/wait-for-port-up.sh" ]
-
   test:
     networks: [bots]
     container_name: germ-test
@@ -193,3 +220,4 @@ services:
 
 volumes:
   grafana-storage: {}
+  neo4j-data: {}

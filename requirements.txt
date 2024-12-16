@@ -3,10 +3,13 @@ fastapi
 gunicorn
 httpx
 inflect
+neo4j
+numpy
 openai
 opentelemetry-distro
 opentelemetry-exporter-otlp-proto-http
 opentelemetry-instrumentation-fastapi
+opentelemetry-instrumentation-httpx
 opentelemetry-instrumentation-sqlalchemy
 prometheus_client
 psycopg2-binary
@@ -15,6 +18,8 @@ pytest
 pytest-cov
 pytest-xdist
 python-dotenv
+scikit-learn
+sentence-transformers
 sqlalchemy
 starlette
 tiktoken
