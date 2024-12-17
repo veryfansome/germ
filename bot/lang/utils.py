@@ -6,18 +6,43 @@ from openai import OpenAI
 from observability.logging import setup_logging
 
 ner_tagger = SequenceTagger.load("ner")
+pos_tagger = SequenceTagger.load("pos")
 
 
-def findall_regex_words(sentence: str) -> list[str]:
-    return re.findall(r'\w+', sentence)
+def flair_text_feature_extraction(text: str):
+    """
+    Old fashion NLP on the cheap.
 
-
-def flair_ner(sentence: Sentence):
-    ner_tagger.predict(sentence)
-    return sentence.get_spans('ner')
+    :param text:
+    :return:
+    """
+    proper_nouns = []
+    pos_tags = []
+    verbs = []
+    flair_sentence = Sentence(test)
+    pos_tagger.predict(flair_sentence)
+    ner_tagger.predict(flair_sentence)
+    for token in flair_sentence:
+        pos_tags.append(token.tag)
+        if token.tag in ("NNP", "NNPS"):
+            proper_nouns.append(token.text)
+        elif token.tag in ("VBD", "VBP", "VBZ"):
+            verbs.append(token.text)
+    return {
+        "ner": flair_sentence.get_spans("ner"),
+        "pos_blob": "_".join(pos_tags),
+        "proper_nouns": proper_nouns,
+        "verbs": verbs,
+    }
 
 
 def openai_text_feature_extraction(text: str):
+    """
+    Way better for emotionality (variety, intensity, transitions), sentiment, related knowledge areas, related topics.
+
+    :param text:
+    :return:
+    """
     with OpenAI() as client:
         completion = client.chat.completions.create(
             messages=[
@@ -69,9 +94,9 @@ def openai_text_feature_extraction(text: str):
                                             "type": "string",
                                             "description": "Named entity name."
                                         },
-                                        "tag": {
+                                        "type": {
                                             "type": "string",
-                                            "description": "Named entity tag like: PER, ORG, LOC, etc."
+                                            "description": "Named entity type."
                                         },
                                     }
                                 }
@@ -118,8 +143,8 @@ def openai_text_feature_extraction(text: str):
         return completion.choices[0].message.tool_calls[0].function.arguments
 
 
-def text_to_punctuation_blob(text: str):
-    return ''.join(re.findall(r'[^a-zA-Z0-9\s]+', text))
+def re_findall_numerals(sentence: str) -> list[str]:
+    return re.findall(r'\d+', sentence)
 
 
 if __name__ == '__main__':
@@ -131,6 +156,7 @@ if __name__ == '__main__':
         "This sucks!",
         "I hated broccoli as a kid but now I love it.",
         "Clifford is the big red dog.",
+        "Let's go to 711.",
         "I just love beyonce.",
         "Cut my hair just like Beyonce",
         "It's hard to believe my husband used to be such a rude person.",
@@ -143,12 +169,10 @@ if __name__ == '__main__':
         "People might just be self-serving in the end.",
     ]
     for test in test_set:
-        flair_sentence = Sentence(test)
         print(f"""
 Sentence: {test}
 ---
-findall_regex_words: {findall_regex_words(test)}
-flair_ner: {flair_ner(flair_sentence)}
+flair_feature_extraction: {flair_text_feature_extraction(test)}
 openai_text_feature_extraction: {openai_text_feature_extraction(test)}
-text_to_punctuation_blob: {text_to_punctuation_blob(test)}
+re_findall_numerals: {re_findall_numerals(test)}
 """)
