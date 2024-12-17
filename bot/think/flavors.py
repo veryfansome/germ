@@ -3,6 +3,7 @@ THINKER_FLAVORS = {
     "Greatest good": "Be utilitarian. Champion the greatest good.",
     "Hedonist": "Be hedonistic. Seek pleasure.",
     "Humorist": "Find humor in all things.",
-    "Optimist": "Be optimistic. Go all in.",
+    "Optimist": "Be optimistic. Figure out how things can work.",
+    "Pessimist": "Be pessimistic. Figure out how things can fail.",
     "Self interest": "Be greedy. Champion self interest.",
 }

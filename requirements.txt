@@ -1,5 +1,7 @@
 apscheduler
+datasets
 fastapi
+flair
 gunicorn
 httpx
 inflect
@@ -20,7 +22,9 @@ pytest-xdist
 python-dotenv
 scikit-learn
 sentence-transformers
+#spacy  # Dependency problems
 sqlalchemy
 starlette
 tiktoken
+transformers
 uvicorn[standard]

@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 
 def add_sentence_to_graph(connection, sentence):
     # TODO: we probably need more concepts like named entities, phrases, etc.
-    words = findall_words(sentence.strip().lower())
+    sentence = sentence.strip()
+    words = findall_words(sentence)
 
     # Check if the sentence already exists
     existing_sentences = connection.query("MATCH (s:Sentence {text: $text}) RETURN s", {"text": sentence})
