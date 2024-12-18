@@ -1,7 +1,6 @@
 import difflib
 from flair.data import Sentence
 from flair.models import SequenceTagger
-from inflect import engine as inflect_engine
 from openai import OpenAI
 
 from observability.logging import logging, setup_logging
@@ -9,7 +8,6 @@ from observability.logging import logging, setup_logging
 logger = logging.getLogger(__name__)
 
 differ = difflib.Differ()
-inf_engine = inflect_engine()
 ner_tagger = SequenceTagger.load("ner")
 pos_tagger = SequenceTagger.load("pos")
 
@@ -84,12 +82,12 @@ def openai_text_feature_extraction(text: str,
         "emotional_intensity": {
             "type": "string",
             "description": "Intensity of emotions.",
-            "enum": ["n/a", "low", "high"]
+            "enum": ["low", "medium", "high"]
         },
         "emotional_nuance": {
             "type": "string",
             "description": "Complexity of emotions.",
-            "enum": ["n/a", "low", "high"]
+            "enum": ["low", "medium", "high"]
         },
         "entities": {
             "type": "array",
@@ -131,11 +129,7 @@ def openai_text_feature_extraction(text: str,
                     "type": {
                         "type": "string",
                         "description": "Type of numeric value."
-                    },
-                    "unit": {
-                        "type": "string",
-                        "description": "Unit of numeric value."
-                    },
+                    }
                 }
             }
         },

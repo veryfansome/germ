@@ -1,12 +1,9 @@
 apscheduler
-datasets
 fastapi
 flair
 gunicorn
 httpx
-inflect
 neo4j
-numpy
 openai
 opentelemetry-distro
 opentelemetry-exporter-otlp-proto-http
@@ -20,13 +17,7 @@ pytest
 pytest-cov
 pytest-xdist
 python-dotenv
-scikit-learn
-sentence-transformers
-#spacy  # Dependency problems
-spacy-legacy
 sqlalchemy
 starlette
-textblob
-tiktoken
 transformers
 uvicorn[standard]
