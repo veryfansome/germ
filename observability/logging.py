@@ -28,6 +28,10 @@ def setup_logging(global_level: str = germ_settings.LOG_LEVEL):
                     "level": "ERROR",
                     "handlers": ["console"],
                 },
+                "neo4j.notifications": {
+                    "level": "ERROR",
+                    "handlers": ["console"],
+                },
                 "uvicorn.error": {
                     "level": "ERROR",
                     "handlers": ["console"],

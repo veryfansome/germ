@@ -3,7 +3,6 @@ from flair.data import Sentence
 from flair.models import SequenceTagger
 from inflect import engine as inflect_engine
 from openai import OpenAI
-from textblob import TextBlob
 
 from observability.logging import logging, setup_logging
 
@@ -31,7 +30,7 @@ def flair_text_feature_extraction(text: str):
     pos_tags = []
     proper_nouns = []
     verbs = []
-    flair_sentence = Sentence(test)
+    flair_sentence = Sentence(text)
     pos_tagger.predict(flair_sentence)
     ner_tagger.predict(flair_sentence)
     for token in flair_sentence:
@@ -44,8 +43,7 @@ def flair_text_feature_extraction(text: str):
         "ner": flair_sentence.get_spans("ner"),
         "pos_blob": "_".join(pos_tags),
         "proper_nouns": proper_nouns,
-        "verbs": verbs,
-    }
+        "verbs": verbs}
 
 
 def openai_text_feature_extraction(text: str,
@@ -53,7 +51,7 @@ def openai_text_feature_extraction(text: str,
                                    model: str = "gpt-4o-mini",
                                    prefer_second_opinion: bool = False,
                                    second_opinion: bool = False,
-                                   temperature: int = 0):
+                                   temperature: int = 0) -> str:
     """
     Way better for emotionality (variety, intensity, transitions), sentiment, related knowledge areas, related topics,
     and other contextual tasks.
@@ -100,13 +98,13 @@ def openai_text_feature_extraction(text: str,
                 "type": "object",
                 "description": "A named entity.",
                 "properties": {
-                    "name": {
+                    "entity": {
                         "type": "string",
-                        "description": "Named entity name."
+                        "description": "Entity name."
                     },
                     "type": {
                         "type": "string",
-                        "description": "Named entity type."
+                        "description": "Type of named entity."
                     },
                 }
             }
@@ -224,6 +222,6 @@ if __name__ == '__main__':
         print(f"""
 Sentence: {test}
 ---
-flair_feature_extraction: {flair_text_feature_extraction(test)}
+flair_text_feature_extraction: {flair_text_feature_extraction(test)}
 openai_text_feature_extraction: {openai_text_feature_extraction(test, second_opinion=True)}
 """)
