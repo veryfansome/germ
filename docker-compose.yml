@@ -1,18 +1,18 @@
 networks:
   bots: {}
 
+volumes:
+  flair-data: {}
+  grafana-storage: {}
+  neo4j-data: {}
+  nltk-data: {}
+
 services:
   bot:
     networks: [bots]
     container_name: germ-bot
     depends_on:
-      db-init:
-        condition: service_completed_successfully
-      jaeger-init:
-        condition: service_completed_successfully
-      neo4j-init:
-        condition: service_completed_successfully
-      otel-collector-init:
+      bot-init:
         condition: service_completed_successfully
       test:
         condition: service_completed_successfully
@@ -22,6 +22,8 @@ services:
     image: "germ:latest"
     volumes:
       - ./:/src:rw
+      - flair-data:/root/.flair
+      - nltk-data:/root/nltk_data
     environment: &local-dev
       DB_HOST: &db-host germ-db
       HF_HOME: ${HF_HOME:-/src/data/huggingface}
@@ -41,6 +43,45 @@ services:
       interval: 10s
       timeout: 9s
       retries: 6
+
+  bot-bg:
+    networks: [bots]
+    container_name: germ-bot-bg
+    depends_on:
+      bot-init:
+        condition: service_completed_successfully
+      test:
+        condition: service_completed_successfully
+    image: "germ:latest"
+    volumes:
+      - ./:/src:rw
+      - flair-data:/root/.flair
+      - nltk-data:/root/nltk_data
+    environment: *local-dev
+    working_dir: /src
+    command: [
+      "python", "-m", "bot.scheduler", "--idea-distillation",
+    ]
+
+  bot-init:
+    networks: [ bots ]
+    container_name: germ-bot-init
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      jaeger-init:
+        condition: service_completed_successfully
+      otel-collector-init:
+        condition: service_completed_successfully
+    image: "germ:latest"
+    volumes:
+      - ./:/src
+    environment:
+      <<: *local-dev
+      WAIT_FOR_HOST: &neo4j-host germ-neo4j
+      WAIT_FOR_PORT: 7474
+    working_dir: /src
+    command: [ "scripts/wait-for-port-up.sh" ]
 
   db:
     networks: [bots]
@@ -123,7 +164,7 @@ services:
 
   neo4j:
     networks: [ bots ]
-    container_name: &neo4j-host germ-neo4j
+    container_name: *neo4j-host
     image: neo4j:latest
     volumes:
       - neo4j-data:/data  # Persist data
@@ -132,18 +173,6 @@ services:
     ports:
       - "7474:7474" # HTTP
       - "7687:7687" # Bolt
-
-  neo4j-init:
-    networks: [ bots ]
-    container_name: germ-neo4j-init
-    image: "germ:latest"
-    volumes:
-      - ./:/src
-    environment:
-      WAIT_FOR_HOST: *neo4j-host
-      WAIT_FOR_PORT: 7474
-    working_dir: /src
-    command: [ "scripts/wait-for-port-up.sh" ]
 
   # Has a loose dependency on jaeger - exports data to jaeger but not until bot is up.
   # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
@@ -217,7 +246,3 @@ services:
     environment: *local-dev
     working_dir: /src
     command: ["tests/run.sh"]
-
-volumes:
-  grafana-storage: {}
-  neo4j-data: {}

@@ -4,6 +4,7 @@ flair
 gunicorn
 httpx
 neo4j
+nltk
 openai
 opentelemetry-distro
 opentelemetry-exporter-otlp-proto-http

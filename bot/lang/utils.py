@@ -1,15 +1,14 @@
 import difflib
 from flair.data import Sentence
-from flair.models import SequenceTagger
+from nltk.tokenize import sent_tokenize
 from openai import OpenAI
 
+from bot.lang.dependencies import pos_tagger, ner_tagger
 from observability.logging import logging, setup_logging
 
 logger = logging.getLogger(__name__)
 
 differ = difflib.Differ()
-ner_tagger = SequenceTagger.load("ner")
-pos_tagger = SequenceTagger.load("pos")
 
 
 def diff_strings(str1, str2):
@@ -115,23 +114,10 @@ def openai_text_feature_extraction(text: str,
                 "description": "A category."
             }
         },
-        "numerals": {
-            "type": "array",
-            "description": "List of numeric values.",
-            "items": {
-                "type": "object",
-                "description": "A numeric value.",
-                "properties": {
-                    "value": {
-                        "type": "string",
-                        "description": "Numeric value."
-                    },
-                    "type": {
-                        "type": "string",
-                        "description": "Type of numeric value."
-                    }
-                }
-            }
+        "sentence_type": {
+            "type": "string",
+            "description": "Sentence type.",
+            "enum": ["complex", "conditional", "exclamatory", "declarative", "interrogative", "imperative"],
         },
         "sentiment": {
             "type": "string",
@@ -191,6 +177,10 @@ def openai_text_feature_extraction(text: str,
             return json_to_check
 
 
+def split_to_sentences(text: str) -> list[str]:
+    return sent_tokenize(text)
+
+
 if __name__ == '__main__':
     setup_logging(global_level="INFO")
 
@@ -211,6 +201,10 @@ if __name__ == '__main__':
         "People might be self-interested; goodness could just be a disguise.",
         "People might surprise us with kindness when we least expect it.",
         "People might just be self-serving in the end.",
+        ("In Revelation 13:18, it says, \"let the one who has understanding calculate the number of the beast, "
+         "for it is the number of a man, and his number is 666\"."),
+        "Maybe you should call 1-800-222-1222, the poison control hotline, or even 9-11!",
+        "You can't break your 20 down the street because the 711 doesn't opens until 7am.",
     ]
     for test in test_set:
         print(f"""
