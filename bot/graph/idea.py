@@ -86,6 +86,10 @@ class IdeaGraph:
 
     def add_sentence(self, sentence: str, current_rounded_time=None, flair_features=None, openai_features=None):
         sentence = sentence.strip()
+
+        # TODO: Integrate PostgreSQL calls here so we can store and reuse text features
+        # TODO: Flesh out verbs and other flair stuff
+
         flair_features = flair_features if flair_features is not None else flair_text_feature_extraction(sentence)
         openai_features = openai_features if openai_features is not None else json.loads(openai_text_feature_extraction(sentence))
         sentence_node_type = SENTENCE_NODE_TYPE[openai_features["sentence_type"]]
