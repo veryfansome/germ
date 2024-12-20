@@ -4,10 +4,8 @@ import signal
 import traceback
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-import bot.lang.dependencies  # For model downloads
 from bot.graph.idea import get_idea_graph
-from bot.think import core_identity
-from bot.think import idea_distillation
+from bot.graph import core_identity, inconsistency_finder
 from db.utils import db_stats_job
 from observability.logging import logging, setup_logging
 
@@ -38,7 +36,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Build a graph of ideas.')
     parser.add_argument("--core-identity", help='Enable core identity reinforcement runs.',
                         action="store_true", default=False)
-    parser.add_argument("--idea-distillation", help='Enable idea distillation runs.',
+    parser.add_argument("--inconsistency-finder", help='Enable idea distillation runs.',
                         action="store_true", default=False)
     args = parser.parse_args()
     scheduler = AsyncIOScheduler()
@@ -46,8 +44,8 @@ if __name__ == "__main__":
 
     if args.core_identity:
         scheduler.add_job(core_identity.main, "interval", minutes=15, name="Core identity")
-    if args.idea_distillation:
-        scheduler.add_job(idea_distillation.main, "interval", minutes=5, name="Idea distillation")
+    if args.inconsistency_finder:
+        scheduler.add_job(inconsistency_finder.main, "interval", minutes=5, name="Inconsistency finder")
 
     try:
         asyncio.run(main())

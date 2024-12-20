@@ -66,8 +66,9 @@ class IdeaGraph:
         logger.info(f"entity_type: {entity_type_record}")
         return entity_type_record
 
-    def add_idea(self, idea: str):
-        current_rounded_time, _, _ = self.add_time()
+    def add_idea(self, idea: str, current_rounded_time=None):
+        if current_rounded_time is None:
+            current_rounded_time, _, _ = self.add_time()
         idea_record = self.driver.query("MERGE (i:Idea {text: $idea}) RETURN i", {"idea": idea})
         logger.info(f"idea: {idea_record}")
         time_record_link = self.driver.query(
@@ -83,14 +84,16 @@ class IdeaGraph:
         logger.info(f"knowledge_category: {knowledge_category_record}")
         return knowledge_category_record
 
-    def add_sentence(self, sentence: str, flair_features=None, openai_features=None):
+    def add_sentence(self, sentence: str, current_rounded_time=None, flair_features=None, openai_features=None):
         sentence = sentence.strip()
         flair_features = flair_features if flair_features is not None else flair_text_feature_extraction(sentence)
         openai_features = openai_features if openai_features is not None else json.loads(openai_text_feature_extraction(sentence))
         sentence_node_type = SENTENCE_NODE_TYPE[openai_features["sentence_type"]]
 
+        if current_rounded_time is None:
+            current_rounded_time, _, _ = self.add_time()
+
         # Sentence
-        current_rounded_time, _, _ = self.add_time()
         sentence_record = self.driver.query("MERGE (s:" + sentence_node_type + " {text: $sentence}) RETURN s",
                                             {"sentence": sentence})
         logger.info(f"sentence: {sentence_record}")
@@ -99,6 +102,14 @@ class IdeaGraph:
             "MERGE (s)-[r:CONTAINS]->(t) "
             "RETURN r", {"time": str(current_rounded_time), "sentence": sentence})
         logger.info(f"sentence/time link: {time_record_link}")
+
+        # Create a linked idea because every sentence serializes at least one idea.
+        self.add_idea(sentence, current_rounded_time=current_rounded_time)
+        idea_link_record = self.driver.query(
+            "MATCH (i:Idea {text: $idea}), (s:" + sentence_node_type + " {text: $sentence}) "
+            "MERGE (s)-[r:CONTAINS]->(i) "
+            "RETURN r", {"idea": sentence, "sentence": sentence})
+        logger.info(f"idea link: {idea_link_record}")
 
         # Emotion
         for emotion in openai_features["emotions"]:
@@ -185,6 +196,15 @@ class IdeaGraph:
     def delete_all_data(self):
         self.driver.delete_all_data()
 
+    def get_random_ideas(self, count: int = 2):
+        results = self.driver.query(
+            "MATCH (idea:Idea) "
+            "WITH idea "
+            "ORDER BY rand() "
+            f"LIMIT {count} "
+            "RETURN idea")
+        return results
+
     def link_emotion_to_sentence(self, emotion: str, sentence: str, sentence_node_type: str,
                                  intensity: str = None, nuance: str = None):
         emotion_link_record = self.driver.query(
@@ -258,16 +278,6 @@ def get_idea_graph(name: str):
     return INSTANCE_MANIFEST[name]
 
 
-def get_sentences_related_to_any_of_the_words(connection, words):
-    # Create a parameterized query to match any of the words
-    query = """
-    MATCH (w:Word)-[:CONTAINS]->(s:Sentence)
-    WHERE w.text IN $words
-    RETURN DISTINCT s.text AS sentence
-    """
-    return connection.query(query, {"words": words})
-
-
 def round_time_now_down_to_nearst_15(dt):
     minutes = dt.minute
     remainder = minutes % 15  # How many 15-minute increments have passed
@@ -281,14 +291,9 @@ if __name__ == '__main__':
     setup_logging(global_level="INFO")
 
     parser = argparse.ArgumentParser(description='Build a graph of ideas.')
-    parser.add_argument("-d", "--delete", help='Delete all data.',
-                        action="store_true", default=False)
     args = parser.parse_args()
 
     idea_graph = get_idea_graph(__name__)
-    if args.delete:
-        logger.info("deleting existing data")
-        idea_graph.delete_all_data()
 
     for doc_title, doc_body in doc_examples.all_examples:
         idea_graph.add_document(doc_title, doc_body)
@@ -296,10 +301,5 @@ if __name__ == '__main__':
     # Add sentences to the graph
     for exp in sentence_examples.all_examples:
         idea_graph.add_sentence(exp)
-
-    # Query related sentences
-    #related_sentences = get_sentences_related_to_word(driver, "cat")
-    #for relation in related_sentences:
-    #    print(relation['sentence'])
 
     idea_graph.close()
