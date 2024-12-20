@@ -1,17 +1,14 @@
 import difflib
 from flair.data import Sentence
-from flair.models import SequenceTagger
-from inflect import engine as inflect_engine
+from nltk.tokenize import sent_tokenize
 from openai import OpenAI
 
+from bot.lang.dependencies import pos_tagger, ner_tagger
 from observability.logging import logging, setup_logging
 
 logger = logging.getLogger(__name__)
 
 differ = difflib.Differ()
-inf_engine = inflect_engine()
-ner_tagger = SequenceTagger.load("ner")
-pos_tagger = SequenceTagger.load("pos")
 
 
 def diff_strings(str1, str2):
@@ -39,11 +36,13 @@ def flair_text_feature_extraction(text: str):
             proper_nouns.append(token.text)
         elif token.tag in ("VBD", "VBP", "VBZ"):
             verbs.append(token.text)
-    return {
+    flair_features = {
         "ner": flair_sentence.get_spans("ner"),
         "pos_blob": "_".join(pos_tags),
         "proper_nouns": proper_nouns,
         "verbs": verbs}
+    logger.info(f"flair_features: {flair_features}")
+    return flair_features
 
 
 def openai_text_feature_extraction(text: str,
@@ -84,12 +83,12 @@ def openai_text_feature_extraction(text: str,
         "emotional_intensity": {
             "type": "string",
             "description": "Intensity of emotions.",
-            "enum": ["n/a", "low", "high"]
+            "enum": ["low", "medium", "high"]
         },
         "emotional_nuance": {
             "type": "string",
             "description": "Complexity of emotions.",
-            "enum": ["n/a", "low", "high"]
+            "enum": ["low", "medium", "high"]
         },
         "entities": {
             "type": "array",
@@ -117,27 +116,10 @@ def openai_text_feature_extraction(text: str,
                 "description": "A category."
             }
         },
-        "numerals": {
-            "type": "array",
-            "description": "List of numeric values.",
-            "items": {
-                "type": "object",
-                "description": "A numeric value.",
-                "properties": {
-                    "value": {
-                        "type": "string",
-                        "description": "Numeric value."
-                    },
-                    "type": {
-                        "type": "string",
-                        "description": "Type of numeric value."
-                    },
-                    "unit": {
-                        "type": "string",
-                        "description": "Unit of numeric value."
-                    },
-                }
-            }
+        "sentence_type": {
+            "type": "string",
+            "description": "Sentence type.",
+            "enum": ["complex", "conditional", "exclamatory", "declarative", "interrogative", "imperative"],
         },
         "sentiment": {
             "type": "string",
@@ -187,14 +169,21 @@ def openai_text_feature_extraction(text: str,
                 text, json_to_check=new_feature_json, prefer_second_opinion=prefer_second_opinion)
 
         if json_to_check is None:
+            logger.info(f"openai_features: {new_feature_json}")
             return new_feature_json
         else:
             diffs = diff_strings(json_to_check, new_feature_json)
             if diffs:
                 logger.warning("diffs on second opinion:\n" + '\n'.join(diffs))
                 if prefer_second_opinion:
+                    logger.info(f"openai_features: {new_feature_json}")
                     return new_feature_json
+            logger.info(f"openai_features: {json_to_check}")
             return json_to_check
+
+
+def split_to_sentences(text: str) -> list[str]:
+    return sent_tokenize(text)
 
 
 if __name__ == '__main__':
@@ -217,6 +206,10 @@ if __name__ == '__main__':
         "People might be self-interested; goodness could just be a disguise.",
         "People might surprise us with kindness when we least expect it.",
         "People might just be self-serving in the end.",
+        ("In Revelation 13:18, it says, \"let the one who has understanding calculate the number of the beast, "
+         "for it is the number of a man, and his number is 666\"."),
+        "Maybe you should call 1-800-222-1222, the poison control hotline, or even 9-11!",
+        "You can't break your 20 down the street because the 711 doesn't opens until 7am.",
     ]
     for test in test_set:
         print(f"""

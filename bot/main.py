@@ -12,7 +12,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider, SynchronousMultiSpanProcessor
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import SpanKind
-from prometheus_client import Gauge, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.requests import Request
@@ -27,9 +27,8 @@ from bot.websocket import (WebSocketConnectionManager,
                            get_chat_session_messages, get_chat_session_summaries,
                            update_chat_session_is_hidden)
 from bot.chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
-from db.models import (DATABASE_URL, SessionLocal,
-                       ChatSession, ChatRequestReceived, ChatResponseSent,
-                       engine)
+from db.models import (DATABASE_URL, SessionLocal, engine)
+from db.utils import db_stats_job
 from observability.logging import logging, setup_logging
 from settings import germ_settings
 
@@ -65,19 +64,6 @@ tracer = trace.get_tracer(__name__)
 
 
 ##
-# Metrics
-
-METRIC_CHAT_SESSION_ROW_COUNT = Gauge(
-    "chat_session_row_count", "Number of rows in the chat_session table")
-
-METRIC_CHAT_REQUEST_RECEIVED_ROW_COUNT = Gauge(
-    "chat_request_received_row_count", "Number of rows in the chat_request_received table")
-
-METRIC_CHAT_RESPONSE_SENT_ROW_COUNT = Gauge(
-    "chat_response_sent_row_count", "Number of rows in the chat_response_sent table")
-
-
-##
 # App
 
 websocket_manager = WebSocketConnectionManager()
@@ -98,11 +84,7 @@ async def lifespan(app: FastAPI):
     :return:
     """
     # DB stats
-    async def db_stats_job():
-        await run_in_threadpool(db_stats)
     await db_stats_job()  # Warms up DB connections on startup
-    scheduler.add_job(db_stats_job, 'interval', seconds=60, name='DB stats')
-    scheduler.start()
     websocket_manager.background_thread.start()
     # Started
     yield
@@ -231,22 +213,3 @@ async def websocket_chat(ws: WebSocket):
     logger.info(f"starting session {chat_session_id}")
     await websocket_manager.monitor_chat_session(chat_session_id, ws)
     await websocket_manager.conduct_chat_session(chat_session_id)
-
-
-##
-# Functions
-
-
-def db_stats():
-    with SessionLocal() as session:
-        chat_session_count = session.query(ChatSession).count()
-        METRIC_CHAT_SESSION_ROW_COUNT.set(chat_session_count)
-        chat_request_received_count = session.query(ChatRequestReceived).count()
-        METRIC_CHAT_REQUEST_RECEIVED_ROW_COUNT.set(chat_request_received_count)
-        chat_response_sent_count = session.query(ChatResponseSent).count()
-        METRIC_CHAT_RESPONSE_SENT_ROW_COUNT.set(chat_response_sent_count)
-        logger.info("db_stats: %s", " ".join((
-            f"chat_session_count={chat_session_count}",
-            f"chat_request_received_count={chat_request_received_count}",
-            F"chat_response_sent_count={chat_response_sent_count}"
-        )))
