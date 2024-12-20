@@ -1,5 +1,6 @@
 import json
 import signal
+import threading
 from datetime import datetime, timedelta
 from db.neo4j import Neo4jDriver
 
@@ -8,6 +9,8 @@ from bot.lang.examples import documents as doc_examples, sentences as sentence_e
 from observability.logging import logging, setup_logging
 
 logger = logging.getLogger(__name__)
+
+lock = threading.RLock()
 
 INSTANCE_MANIFEST = {}
 SENTENCE_NODE_TYPE = {
@@ -25,15 +28,20 @@ class IdeaGraph:
         self.driver = driver
 
     def add_document(self, name: str, body: str):
+        current_rounded_time, _, _ = self.add_time()
         document_record = self.driver.query("MERGE (d:Document {name: $name}) RETURN d",
                                             {"name": name})
         logger.info(f"document: {document_record}")
+        time_record_link = self.driver.query(
+            "MATCH (t:Time {text: $time}), (d:Document {name: $name}) "
+            "MERGE (d)-[r:CONTAINS]->(t) "
+            "RETURN r", {"time": str(current_rounded_time), "name": name})
+        logger.info(f"document/time link: {time_record_link}")
         for body_sentence in split_to_sentences(body):
             _, body_sentence_node_type = self.add_sentence(body_sentence)
             body_sentence_link_record = self.driver.query(
                 "MATCH (d:Document {name: $document}), (s:" + body_sentence_node_type + " {text: $sentence}) "
                 "MERGE (s)-[r:CONTAINS]->(d) "
-                "ON CREATE SET r.createdAt = timestamp() "
                 "RETURN r", {
                     "document": name, "sentence": body_sentence,
                 })
@@ -58,56 +66,71 @@ class IdeaGraph:
         logger.info(f"entity_type: {entity_type_record}")
         return entity_type_record
 
+    def add_idea(self, idea: str):
+        current_rounded_time, _, _ = self.add_time()
+        idea_record = self.driver.query("MERGE (i:Idea {text: $idea}) RETURN i", {"idea": idea})
+        logger.info(f"idea: {idea_record}")
+        time_record_link = self.driver.query(
+            "MATCH (t:Time {text: $time}), (i:Idea {text: $idea}) "
+            "MERGE (i)-[r:CONTAINS]->(t) "
+            "RETURN r", {"time": str(current_rounded_time), "idea": idea})
+        logger.info(f"idea/time link: {time_record_link}")
+        return idea_record
+
     def add_knowledge_category(self, knowledge_category: str):
         knowledge_category_record = self.driver.query("MERGE (k:KnowledgeCategory {text: $knowledge_category}) RETURN k",
                                                       {"knowledge_category": knowledge_category})
         logger.info(f"knowledge_category: {knowledge_category_record}")
         return knowledge_category_record
 
-    def add_sentence(self, sentence: str):
+    def add_sentence(self, sentence: str, flair_features=None, openai_features=None):
         sentence = sentence.strip()
-        sentence_flair_features = flair_text_feature_extraction(sentence)
-        sentence_openai_features = json.loads(openai_text_feature_extraction(sentence))
-        logger.info(f"sentence_flair_features: {sentence_flair_features}")
-        logger.info(f"sentence_openai_features: {sentence_openai_features}")
-        sentence_node_type = SENTENCE_NODE_TYPE[sentence_openai_features["sentence_type"]]
+        flair_features = flair_features if flair_features is not None else flair_text_feature_extraction(sentence)
+        openai_features = openai_features if openai_features is not None else json.loads(openai_text_feature_extraction(sentence))
+        sentence_node_type = SENTENCE_NODE_TYPE[openai_features["sentence_type"]]
 
         # Sentence
+        current_rounded_time, _, _ = self.add_time()
         sentence_record = self.driver.query("MERGE (s:" + sentence_node_type + " {text: $sentence}) RETURN s",
                                             {"sentence": sentence})
         logger.info(f"sentence: {sentence_record}")
+        time_record_link = self.driver.query(
+            "MATCH (t:Time {text: $time}), (s:" + sentence_node_type + " {text: $sentence}) "
+            "MERGE (s)-[r:CONTAINS]->(t) "
+            "RETURN r", {"time": str(current_rounded_time), "sentence": sentence})
+        logger.info(f"sentence/time link: {time_record_link}")
 
         # Emotion
-        for emotion in sentence_openai_features["emotions"]:
+        for emotion in openai_features["emotions"]:
             self.add_emotion(emotion)
             self.link_emotion_to_sentence(emotion, sentence, sentence_node_type,
-                                          intensity=sentence_openai_features["emotional_intensity"],
-                                          nuance=sentence_openai_features["emotional_nuance"])
+                                          intensity=openai_features["emotional_intensity"],
+                                          nuance=openai_features["emotional_nuance"])
 
         # Entity
-        for entity in sentence_openai_features["entities"]:
+        for entity in openai_features["entities"]:
             self.add_entity(entity["entity"])
             self.link_entity_to_sentence(entity["entity"], sentence, sentence_node_type)
             self.add_entity_type(entity["type"])
             self.link_entity_type_to_entity(entity["entity"], entity["type"])
 
         # Knowledge category
-        for knowledge_category in sentence_openai_features["knowledge"]:
+        for knowledge_category in openai_features["knowledge"]:
             self.add_knowledge_category(knowledge_category)
             self.link_knowledge_category_to_sentence(knowledge_category, sentence, sentence_node_type)
 
         # Sentiment, but maybe this should be an attribute on the sentence?
-        sentiment = sentence_openai_features["sentiment"]
+        sentiment = openai_features["sentiment"]
         self.add_sentiment_label(sentiment)
         self.link_sentiment_to_sentence(sentiment, sentence, sentence_node_type)
 
         # Sentence subject
-        for subject in sentence_openai_features["subjects"]:
+        for subject in openai_features["subjects"]:
             self.add_sentence_subject(subject)
             self.link_sentence_subject_to_sentence(subject, sentence, sentence_node_type)
 
         # Topic
-        for topic in sentence_openai_features["topics"]:
+        for topic in openai_features["topics"]:
             self.add_topic_label(topic)
             self.link_topic_label_to_sentence(topic, sentence, sentence_node_type)
 
@@ -126,10 +149,20 @@ class IdeaGraph:
         return sentiment_record
 
     def add_time(self):
+        """
+        Time nodes are created in set intervals and changed together to match the directionality of real time.
+        The idea, here, is that every node created should be linked to its proper chunk of time. This provides a sense
+        of temporality.
+
+        :return:
+        """
         now = datetime.now().replace(second=0, microsecond=0)
         current_rounded_time = round_time_now_down_to_nearst_15(now)
-        current_time_record = self.driver.query("MERGE (t:Time {text: $time}) RETURN t",
-                                                {"time": str(current_rounded_time)})
+        # This lock throttles Neo4j calls but is a lazy way to make sure Time nodes are not created more than once.
+        # Even with the `MERGE`, if multiple identical such queries fire concurrently, duplicates are created.
+        with lock:
+            current_time_record = self.driver.query("MERGE (t:Time {text: $time}) RETURN t",
+                                                    {"time": str(current_rounded_time)})
         logger.info(f"time: {current_time_record}")
         last_rounded_time = current_rounded_time - timedelta(minutes=15)
         time_record_links = self.driver.query(
@@ -138,7 +171,7 @@ class IdeaGraph:
             "MERGE (l)-[rf:FOLLOWS]->(n) "
             "RETURN rp, rf", {"now": str(current_rounded_time), "last": str(last_rounded_time)})
         logger.info(f"time links: {time_record_links}")
-        return current_time_record, time_record_links
+        return current_rounded_time, current_time_record, time_record_links
 
     def add_topic_label(self, topic: str):
         topic_record = self.driver.query("MERGE (e:TopicLabel {text: $topic}) RETURN e",
@@ -157,12 +190,11 @@ class IdeaGraph:
         emotion_link_record = self.driver.query(
             "MATCH (e:EmotionLabel {text: $emotion}), (s:" + sentence_node_type + " {text: $sentence}) "
             "MERGE (e)-[r:CONTAINS]->(s) "
-            "ON CREATE SET r.createdAt = timestamp()" + (", r.intensity = $intensity" if intensity else "") + (", r.nuance = $nuance" if nuance else "") + " "
-            "RETURN r",
-            {
+            "ON CREATE SET r.createdAt = timestamp(), r.intensity = $intensity, r.nuance = $nuance "
+            "ON MATCH SET r.lastMatchedAt = timestamp() "
+            "RETURN r", {
                 "emotion": emotion, "sentence": sentence,
-                **({"intensity": intensity} if intensity else {}),
-                **({"nuance": nuance} if nuance else {}),
+                "intensity": intensity, "nuance": nuance,
             })
         logger.info(f"emotion link: {emotion_link_record}")
         return emotion_link_record
@@ -171,7 +203,6 @@ class IdeaGraph:
         entity_link_record = self.driver.query(
             "MATCH (e:Entity {text: $entity}), (s:" + sentence_node_type + " {text: $sentence}) "
             "MERGE (e)-[r:CONTAINS]->(s) "
-            "ON CREATE SET r.createdAt = timestamp() "
             "RETURN r", {"entity": entity, "sentence": sentence})
         logger.info(f"entity link: {entity_link_record}")
         return entity_link_record
@@ -180,7 +211,6 @@ class IdeaGraph:
         entity_type_link_record = self.driver.query(
             "MATCH (e:Entity {text: $entity}), (t:EntityType {text: $entity_type}) "
             "MERGE (t)-[r:CONTAINS]->(e) "
-            "ON CREATE SET r.createdAt = timestamp() "
             "RETURN r", {"entity": entity, "entity_type": entity_type})
         logger.info(f"entity type link: {entity_type_link_record}")
         return entity_type_link_record
@@ -189,7 +219,6 @@ class IdeaGraph:
         knowledge_category_link_record = self.driver.query(
             "MATCH (k:KnowledgeCategory {text: $knowledge_category}), (s:" + sentence_node_type + " {text: $sentence}) "
             "MERGE (k)-[r:CONTAINS]->(s) "
-            "ON CREATE SET r.createdAt = timestamp() "
             "RETURN r", {"knowledge_category": knowledge_category, "sentence": sentence})
         logger.info(f"knowledge category link: {knowledge_category_link_record}")
 
@@ -197,7 +226,6 @@ class IdeaGraph:
         sentiment_link_record = self.driver.query(
             "MATCH (n:SentimentLabel {text: $sentiment}), (s:" + sentence_node_type + " {text: $sentence}) "
             "MERGE (n)-[r:CONTAINS]->(s) "
-            "ON CREATE SET r.createdAt = timestamp() "
             "RETURN r", {"sentiment": sentiment, "sentence": sentence})
         logger.info(f"sentiment link: {sentiment_link_record}")
         return sentiment_link_record
@@ -206,7 +234,6 @@ class IdeaGraph:
         sentence_subject_link_record = self.driver.query(
             "MATCH (n:SentenceSubject {text: $sentence_subject}), (s:" + sentence_node_type + " {text: $sentence}) "
             "MERGE (n)-[r:CONTAINS]->(s) "
-            "ON CREATE SET r.createdAt = timestamp() "
             "RETURN r", {"sentence_subject": sentence_subject, "sentence": sentence})
         logger.info(f"sentence_subject link: {sentence_subject_link_record}")
         return sentence_subject_link_record
@@ -215,7 +242,6 @@ class IdeaGraph:
         topic_label_link_record = self.driver.query(
             "MATCH (t:TopicLabel {text: $topic_label}), (s:" + sentence_node_type + " {text: $sentence}) "
             "MERGE (t)-[r:CONTAINS]->(s) "
-            "ON CREATE SET r.createdAt = timestamp() "
             "RETURN r", {"topic_label": topic_label, "sentence": sentence})
         logger.info(f"topic_label link: {topic_label_link_record}")
         return topic_label_link_record

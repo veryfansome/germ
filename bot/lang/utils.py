@@ -36,11 +36,13 @@ def flair_text_feature_extraction(text: str):
             proper_nouns.append(token.text)
         elif token.tag in ("VBD", "VBP", "VBZ"):
             verbs.append(token.text)
-    return {
+    flair_features = {
         "ner": flair_sentence.get_spans("ner"),
         "pos_blob": "_".join(pos_tags),
         "proper_nouns": proper_nouns,
         "verbs": verbs}
+    logger.info(f"flair_features: {flair_features}")
+    return flair_features
 
 
 def openai_text_feature_extraction(text: str,
@@ -167,13 +169,16 @@ def openai_text_feature_extraction(text: str,
                 text, json_to_check=new_feature_json, prefer_second_opinion=prefer_second_opinion)
 
         if json_to_check is None:
+            logger.info(f"openai_features: {new_feature_json}")
             return new_feature_json
         else:
             diffs = diff_strings(json_to_check, new_feature_json)
             if diffs:
                 logger.warning("diffs on second opinion:\n" + '\n'.join(diffs))
                 if prefer_second_opinion:
+                    logger.info(f"openai_features: {new_feature_json}")
                     return new_feature_json
+            logger.info(f"openai_features: {json_to_check}")
             return json_to_check
 
 
