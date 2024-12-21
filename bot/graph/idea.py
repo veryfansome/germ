@@ -1,6 +1,7 @@
 import json
 import signal
 import threading
+import time
 from datetime import datetime, timedelta
 from db.neo4j import Neo4jDriver
 
@@ -28,13 +29,20 @@ class IdeaGraph:
         self.driver = driver
 
     def add_document(self, name: str, body: str):
+        """
+        An article, a poem, or even a chapter of a book.
+
+        :param name:
+        :param body:
+        :return:
+        """
         current_rounded_time, _, _ = self.add_time()
         document_record = self.driver.query("MERGE (d:Document {name: $name}) RETURN d",
                                             {"name": name})
         logger.info(f"document: {document_record}")
         time_record_link = self.driver.query(
             "MATCH (t:Time {text: $time}), (d:Document {name: $name}) "
-            "MERGE (d)-[r:CONTAINS]->(t) "
+            "MERGE (d)-[r:OCCURRED]-(t) "
             "RETURN r", {"time": str(current_rounded_time), "name": name})
         logger.info(f"document/time link: {time_record_link}")
         for body_sentence in split_to_sentences(body):
@@ -73,7 +81,7 @@ class IdeaGraph:
         logger.info(f"idea: {idea_record}")
         time_record_link = self.driver.query(
             "MATCH (t:Time {text: $time}), (i:Idea {text: $idea}) "
-            "MERGE (i)-[r:CONTAINS]->(t) "
+            "MERGE (i)-[r:OCCURRED]->(t) "
             "RETURN r", {"time": str(current_rounded_time), "idea": idea})
         logger.info(f"idea/time link: {time_record_link}")
         return idea_record
@@ -103,7 +111,7 @@ class IdeaGraph:
         logger.info(f"sentence: {sentence_record}")
         time_record_link = self.driver.query(
             "MATCH (t:Time {text: $time}), (s:" + sentence_node_type + " {text: $sentence}) "
-            "MERGE (s)-[r:CONTAINS]->(t) "
+            "MERGE (s)-[r:OCCURRED]->(t) "
             "RETURN r", {"time": str(current_rounded_time), "sentence": sentence})
         logger.info(f"sentence/time link: {time_record_link}")
 
@@ -111,7 +119,7 @@ class IdeaGraph:
         self.add_idea(sentence, current_rounded_time=current_rounded_time)
         idea_link_record = self.driver.query(
             "MATCH (i:Idea {text: $idea}), (s:" + sentence_node_type + " {text: $sentence}) "
-            "MERGE (s)-[r:CONTAINS]->(i) "
+            "MERGE (s)<-[r:EXPRESSES]-(i) "
             "RETURN r", {"idea": sentence, "sentence": sentence})
         logger.info(f"idea link: {idea_link_record}")
 
@@ -176,8 +184,8 @@ class IdeaGraph:
         # This lock throttles Neo4j calls but is a lazy way to make sure Time nodes are not created more than once.
         # Even with the `MERGE`, if multiple identical such queries fire concurrently, duplicates are created.
         with lock:
-            current_time_record = self.driver.query("MERGE (t:Time {text: $time}) RETURN t",
-                                                    {"time": str(current_rounded_time)})
+            current_time_record = self.driver.query("MERGE (t:Time {text: $time, epoch: $epoch}) RETURN t",
+                                                    {"time": str(current_rounded_time), "epoch": int(time.time())})
         logger.info(f"time: {current_time_record}")
         last_rounded_time = current_rounded_time - timedelta(minutes=15)
         time_record_links = self.driver.query(
@@ -199,6 +207,27 @@ class IdeaGraph:
 
     def delete_all_data(self):
         self.driver.delete_all_data()
+
+    def get_similar_but_disconnected_ideas_by_random_topic(self):
+        # Get a random topic that is linked to two ideas that are not the same and not connected
+        topic_results = self.driver.query(
+            "MATCH (i1:Idea)-[:EXPRESSES]->(s1:DeclarativeSentence)<-[:CONTAINS]-(topic:TopicLabel) "
+            "MATCH (i2:Idea)-[:EXPRESSES]->(s2:DeclarativeSentence)<-[:CONTAINS]-(topic) "
+            "WHERE i1 <> i2 "
+            "AND NOT (i1)-[:RELATED]-(i2) "
+            "ORDER BY rand() "
+            f"LIMIT 1 "
+            "RETURN topic")
+        # Get ideas that are linked by this topic
+        logger.info(f"random topic: {topic_results[0]['topic']['text']}")
+        idea_results = self.driver.query(
+            "MATCH (i1:Idea)-[:EXPRESSES]->(s1:DeclarativeSentence)<-[:CONTAINS]-(t:TopicLabel {text: $topic}) "
+            "MATCH (i2:Idea)-[:EXPRESSES]->(s2:DeclarativeSentence)<-[:CONTAINS]-(t) "
+            "WHERE i1 <> i2 "
+            "AND NOT (i1)-[:RELATED]-(i2) "
+            "AND i1.text < i2.text "  # Sorting ensures unique combo
+            "RETURN DISTINCT i1, i2", {"topic": topic_results[0]["topic"]["text"]})
+        return topic_results, idea_results
 
     def get_random_ideas(self, count: int = 2):
         results = self.driver.query(
@@ -295,15 +324,17 @@ if __name__ == '__main__':
     setup_logging(global_level="INFO")
 
     parser = argparse.ArgumentParser(description='Build a graph of ideas.')
+    parser.add_argument("--load-examples", action="store_true", help='Load example data.',
+                        default=False)
     args = parser.parse_args()
-
     idea_graph = get_idea_graph(__name__)
 
-    for doc_title, doc_body in doc_examples.all_examples:
-        idea_graph.add_document(doc_title, doc_body)
+    if args.load_examples:
+        for doc_title, doc_body in doc_examples.all_examples:
+            idea_graph.add_document(doc_title, doc_body)
 
-    # Add sentences to the graph
-    for exp in sentence_examples.all_examples:
-        idea_graph.add_sentence(exp)
+        # Add sentences to the graph
+        for exp in sentence_examples.all_examples:
+            idea_graph.add_sentence(exp)
 
     idea_graph.close()
