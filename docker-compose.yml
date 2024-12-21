@@ -60,7 +60,11 @@ services:
     environment: *local-dev
     working_dir: /src
     command: [
-      "python", "-m", "bot.scheduler", "--core-identity", "--inconsistency-finder",
+      "python",
+      "-m", "bot.scheduler",
+      "--core-identity",
+      "--idea-deduper",
+      "--inconsistency-finder",
     ]
 
   bot-init:

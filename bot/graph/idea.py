@@ -219,15 +219,17 @@ class IdeaGraph:
             f"LIMIT 1 "
             "RETURN topic")
         # Get ideas that are linked by this topic
-        logger.info(f"random topic: {topic_results[0]['topic']['text']}")
-        idea_results = self.driver.query(
-            "MATCH (i1:Idea)-[:EXPRESSES]->(s1:DeclarativeSentence)<-[:CONTAINS]-(t:TopicLabel {text: $topic}) "
-            "MATCH (i2:Idea)-[:EXPRESSES]->(s2:DeclarativeSentence)<-[:CONTAINS]-(t) "
-            "WHERE i1 <> i2 "
-            "AND NOT (i1)-[:RELATED]-(i2) "
-            "AND i1.text < i2.text "  # Sorting ensures unique combo
-            "RETURN DISTINCT i1, i2", {"topic": topic_results[0]["topic"]["text"]})
-        return topic_results, idea_results
+        if topic_results:
+            logger.info(f"random topic: {topic_results[0]['topic']['text']}")
+            idea_results = self.driver.query(
+                "MATCH (i1:Idea)-[:EXPRESSES]->(s1:DeclarativeSentence)<-[:CONTAINS]-(t:TopicLabel {text: $topic}) "
+                "MATCH (i2:Idea)-[:EXPRESSES]->(s2:DeclarativeSentence)<-[:CONTAINS]-(t) "
+                "WHERE i1 <> i2 "
+                "AND NOT (i1)-[:RELATED]-(i2) "
+                "AND i1.text < i2.text "  # Sorting ensures unique combo
+                "RETURN DISTINCT i1, i2", {"topic": topic_results[0]["topic"]["text"]})
+            return topic_results, idea_results
+        return topic_results, []
 
     def get_random_ideas(self, count: int = 2):
         results = self.driver.query(
@@ -298,6 +300,22 @@ class IdeaGraph:
             "RETURN r", {"topic_label": topic_label, "sentence": sentence})
         logger.info(f"topic_label link: {topic_label_link_record}")
         return topic_label_link_record
+
+    def merge_ideas(self, idea_to_keep: str, idea_to_merge: str):
+        results = self.driver.query("""
+MATCH (idea_to_keep:Idea {text: $idea_to_keep}), (idea_to_merge:Idea {text: $idea_to_merge})
+WITH idea_to_keep, idea_to_merge
+MATCH (idea_to_merge)-[r:EXPRESSES]->(x)
+MERGE (idea_to_keep)-[:EXPRESSES]->(x)
+DELETE r
+WITH idea_to_keep, idea_to_merge
+MATCH (idea_to_merge)-[r:OCCURRED]->(x)
+DELETE r
+DELETE idea_to_merge
+RETURN idea_to_keep
+""".strip(), {
+                "idea_to_keep": idea_to_keep, "idea_to_merge": idea_to_merge})
+        logger.info(f"idea kept: {results}")
 
     def signal_handler(self, sig, frame):
         self.close()
