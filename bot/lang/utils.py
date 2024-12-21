@@ -39,8 +39,8 @@ def flair_text_feature_extraction(text: str):
     flair_features = {
         "ner": flair_sentence.get_spans("ner"),
         "pos_blob": "_".join(pos_tags),
-        "proper_nouns": proper_nouns,
-        "verbs": verbs}
+        "proper_nouns": set(proper_nouns),
+        "verbs": set(verbs)}
     logger.info(f"flair_features: {flair_features}")
     return flair_features
 

@@ -64,12 +64,20 @@ async def main():
 
 if __name__ == "__main__":
     setup_logging()
-    asyncio.run(main())
+    while True:
+        asyncio.run(main())
 
-    find_inconsistency(["I love cats.", "I hate animals."])
-    find_inconsistency(["I want to live a long life.", "I can keep smoking, I won't get cancer."])
-    find_inconsistency(["John lied to me.", "John is a reliable friend."])
-    find_inconsistency(["I respect the rule of law.", "If I can get away with it, I should cheat to get ahead."])
-    find_inconsistency(["We should reduce dependence on fossil fuels.", "Drill baby, drill!"])
-    find_inconsistency(["We should reduce dependence on fossil fuels.", "Buy oil stocks when crude prices are lows."])
+    # find_inconsistency(["I love cats.", "I hate animals."])
+    # find_inconsistency(["I want to live a long life.", "I can keep smoking, I won't get cancer."])
+    # find_inconsistency(["John lied to me.", "John is a reliable friend."])
+    # find_inconsistency(["I respect the rule of law.", "If I can get away with it, I should cheat to get ahead."])
+    # find_inconsistency(["We should reduce dependence on fossil fuels.", "Drill baby, drill!"])
+    # find_inconsistency(["We should reduce dependence on fossil fuels.", "Buy oil stocks when crude prices are lows."])
 
+    # TODO: Just looking at statements side by side using a LLM is not enough because the LLM doesn't have access
+    #       to context from the graph. The inconsistency checker actually needs to query the graph as we would during a
+    #       human user interaction - this can be a first test of that.
+
+    # idea_graph.add_sentence("I am a little furry dog.")
+    # idea_graph.add_sentence("I am a human man in a funny coat.")
+    # idea_graph.add_sentence("I have mother name Loraine.")

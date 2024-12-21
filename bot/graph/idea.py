@@ -96,7 +96,6 @@ class IdeaGraph:
         sentence = sentence.strip()
 
         # TODO: Integrate PostgreSQL calls here so we can store and reuse text features
-        # TODO: Flesh out verbs and other flair stuff
 
         flair_features = flair_features if flair_features is not None else flair_text_feature_extraction(sentence)
         openai_features = openai_features if openai_features is not None else json.loads(openai_text_feature_extraction(sentence))
@@ -131,6 +130,12 @@ class IdeaGraph:
                                           nuance=openai_features["emotional_nuance"])
 
         # Entity
+        for proper_noun in flair_features["proper_nouns"]:
+            self.add_entity(proper_noun)
+            self.link_entity_to_sentence(proper_noun, sentence, sentence_node_type)
+        for entity in flair_features["ner"]:
+            self.add_entity(entity.text)
+            self.link_entity_to_sentence(entity.text, sentence, sentence_node_type)
         for entity in openai_features["entities"]:
             self.add_entity(entity["entity"])
             self.link_entity_to_sentence(entity["entity"], sentence, sentence_node_type)
@@ -156,6 +161,11 @@ class IdeaGraph:
         for topic in openai_features["topics"]:
             self.add_topic_label(topic)
             self.link_topic_label_to_sentence(topic, sentence, sentence_node_type)
+
+        # Verb
+        for verb in flair_features["verbs"]:
+            self.add_verb(verb)
+            self.link_verb_to_sentence(verb, sentence, sentence_node_type)
 
         return sentence_record, sentence_node_type
 
@@ -202,6 +212,12 @@ class IdeaGraph:
         logger.info(f"topic_label: {topic_record}")
         return topic_record
 
+    def add_verb(self, verb: str):
+        verb_record = self.driver.query("MERGE (v:Verb {text: $verb}) RETURN v",
+                                        {"verb": verb})
+        logger.info(f"verb: {verb_record}")
+        return verb_record
+
     def close(self):
         self.driver.close()
 
@@ -245,8 +261,7 @@ class IdeaGraph:
         emotion_link_record = self.driver.query(
             "MATCH (e:EmotionLabel {text: $emotion}), (s:" + sentence_node_type + " {text: $sentence}) "
             "MERGE (e)-[r:CONTAINS]->(s) "
-            "ON CREATE SET r.createdAt = timestamp(), r.intensity = $intensity, r.nuance = $nuance "
-            "ON MATCH SET r.lastMatchedAt = timestamp() "
+            "ON CREATE SET r.intensity = $intensity, r.nuance = $nuance "
             "RETURN r", {
                 "emotion": emotion, "sentence": sentence,
                 "intensity": intensity, "nuance": nuance,
@@ -300,6 +315,14 @@ class IdeaGraph:
             "RETURN r", {"topic_label": topic_label, "sentence": sentence})
         logger.info(f"topic_label link: {topic_label_link_record}")
         return topic_label_link_record
+
+    def link_verb_to_sentence(self, verb: str, sentence: str, sentence_node_type: str):
+        verb_link_record = self.driver.query(
+            "MATCH (v:Verb {text: $verb}), (s:" + sentence_node_type + " {text: $sentence}) "
+            "MERGE (v)-[r:CONTAINS]->(s) "
+            "RETURN r", {"verb": verb, "sentence": sentence})
+        logger.info(f"verb link: {verb_link_record}")
+        return verb_link_record
 
     def merge_ideas(self, idea_to_keep: str, idea_to_merge: str):
         results = self.driver.query("""
