@@ -47,9 +47,9 @@ if __name__ == "__main__":
     if args.core_identity:
         scheduler.add_job(core_identity.main, "interval", minutes=15, name="Core identity")
     if args.idea_deduper:
-        scheduler.add_job(idea_deduper.main, "interval", minutes=5, name="Idea deduper")
+        scheduler.add_job(idea_deduper.main, "interval", minutes=1, name="Idea deduper")
     if args.inconsistency_finder:
-        scheduler.add_job(inconsistency_finder.main, "interval", minutes=5, name="Inconsistency finder")
+        scheduler.add_job(inconsistency_finder.main, "interval", minutes=1, name="Inconsistency finder")
 
     try:
         asyncio.run(main())

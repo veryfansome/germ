@@ -20,7 +20,8 @@ tool = {
             "properties": {
                 "is_duplicate": {
                     "type": "string",
-                    "description": "true, if the statements convey the same idea without significant nuance.",
+                    "description": ("true, if the statements convey the same idea "
+                                    "without nuance or variation in informational value."),
                     "enum": ["true", "false"]
                 },
             },
@@ -41,7 +42,7 @@ def find_duplicates(ideas: list[tuple[str, str]]):
                     {
                         "role": "system",
                         "content": "Consider the statements in the list. "
-                                   "Do they convey the same fundamental idea? "
+                                   "Do they convey the same idea?"
                     },
                     {
                         "role": "user",
@@ -54,7 +55,7 @@ def find_duplicates(ideas: list[tuple[str, str]]):
                 },
                 tools=[tool])
             is_duplicate = json.loads(completion.choices[0].message.tool_calls[0].function.arguments)["is_duplicate"]
-            logger.info(f"is_duplicate {is_duplicate}")
+            logger.info(f"is_duplicate {is_duplicate}, {idea_pair}")
             if is_duplicate == "true":
                 # If two sentences convey the same idea, keep the one that uses fewer words.
                 if len(idea_pair[0].split()) < len(idea_pair[1].split()):
@@ -65,7 +66,7 @@ def find_duplicates(ideas: list[tuple[str, str]]):
 
 async def main():
     topic_results, idea_results = idea_graph.get_similar_but_disconnected_ideas_by_random_topic()
-    candidate_tuples = [(record["i1"]["text"], record["i2"]["text"]) for record in idea_results]
+    candidate_tuples = [(record["idea1"]["text"], record["idea2"]["text"]) for record in idea_results]
     await run_in_threadpool(find_duplicates, candidate_tuples)
 
 

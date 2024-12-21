@@ -211,10 +211,10 @@ class IdeaGraph:
     def get_similar_but_disconnected_ideas_by_random_topic(self):
         # Get a random topic that is linked to two ideas that are not the same and not connected
         topic_results = self.driver.query(
-            "MATCH (i1:Idea)-[:EXPRESSES]->(s1:DeclarativeSentence)<-[:CONTAINS]-(topic:TopicLabel) "
-            "MATCH (i2:Idea)-[:EXPRESSES]->(s2:DeclarativeSentence)<-[:CONTAINS]-(topic) "
-            "WHERE i1 <> i2 "
-            "AND NOT (i1)-[:RELATED]-(i2) "
+            "MATCH (idea1:Idea)-[:EXPRESSES]->(s1:DeclarativeSentence)<-[:CONTAINS]-(topic:TopicLabel) "
+            "MATCH (idea2:Idea)-[:EXPRESSES]->(s2:DeclarativeSentence)<-[:CONTAINS]-(topic) "
+            "WHERE idea1 <> idea2 "
+            "AND NOT (idea1)-[:RELATED]-(idea2) "
             "ORDER BY rand() "
             f"LIMIT 1 "
             "RETURN topic")
@@ -222,12 +222,12 @@ class IdeaGraph:
         if topic_results:
             logger.info(f"random topic: {topic_results[0]['topic']['text']}")
             idea_results = self.driver.query(
-                "MATCH (i1:Idea)-[:EXPRESSES]->(s1:DeclarativeSentence)<-[:CONTAINS]-(t:TopicLabel {text: $topic}) "
-                "MATCH (i2:Idea)-[:EXPRESSES]->(s2:DeclarativeSentence)<-[:CONTAINS]-(t) "
-                "WHERE i1 <> i2 "
-                "AND NOT (i1)-[:RELATED]-(i2) "
-                "AND i1.text < i2.text "  # Sorting ensures unique combo
-                "RETURN DISTINCT i1, i2", {"topic": topic_results[0]["topic"]["text"]})
+                "MATCH (idea1:Idea)-[:EXPRESSES]->(s1:DeclarativeSentence)<-[:CONTAINS]-(t:TopicLabel {text: $topic}) "
+                "MATCH (idea2:Idea)-[:EXPRESSES]->(s2:DeclarativeSentence)<-[:CONTAINS]-(t) "
+                "WHERE idea1 <> idea2 "
+                "AND NOT (idea1)-[:RELATED]-(idea2) "
+                "AND idea1.text < idea2.text "  # Sorting ensures unique combo
+                "RETURN DISTINCT idea1, idea2", {"topic": topic_results[0]["topic"]["text"]})
             return topic_results, idea_results
         return topic_results, []
 
