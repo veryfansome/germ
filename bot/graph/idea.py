@@ -1,8 +1,8 @@
-import hashlib
 import json
 import signal
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta
 
 from bot.lang.utils import (flair_text_feature_extraction, openai_detect_sentence_type,
@@ -16,6 +16,7 @@ from observability.logging import logging, setup_logging
 logger = logging.getLogger(__name__)
 
 lock = threading.RLock()
+uuid5_namespace = uuid.UUID("246a5463-afae-4571-a6e0-f319d74147d3")  # Changes sentences signatures
 
 INSTANCE_MANIFEST = {}
 SENTENCE_NODE_TYPE = {
@@ -46,11 +47,11 @@ class IdeaGraph:
         logger.info(f"document: {document_record}")
         time_record_link = self.driver.query(
             "MATCH (t:Time {text: $time}), (d:Document {name: $name}) "
-            "MERGE (d)-[r:OCCURRED]-(t) "
+            "MERGE (d)-[r:OCCURRED]->(t) "
             "RETURN r", {"time": str(current_rounded_time), "name": name})
         logger.debug(f"document/time link: {time_record_link}")
         for body_sentence in split_to_sentences(body):
-            _, body_sentence_node_type = self.add_sentence(body_sentence)
+            _, body_sentence_node_type = self.add_sentence(body_sentence, current_rounded_time=current_rounded_time)
             body_sentence_link_record = self.driver.query(
                 "MATCH (d:Document {name: $document}), (s:" + body_sentence_node_type + " {text: $sentence}) "
                 "MERGE (s)-[r:CONTAINS]->(d) "
@@ -102,7 +103,8 @@ class IdeaGraph:
         if current_rounded_time is None:
             current_rounded_time, _, _ = self.add_time()
 
-        sentence_signature = hashlib.sha256(sentence.encode()).hexdigest()
+        # Generate signature for lookup in PostgreSQL
+        sentence_signature = uuid.uuid5(uuid5_namespace, sentence)
         with SessionLocal() as session:
             sentence_rdb_record = session.query(
                 Sentence).filter(Sentence.sentence_signature == sentence_signature).first()
@@ -121,12 +123,11 @@ class IdeaGraph:
                 sentence_rdb_record.sentence_node_type = SENTENCE_NODE_TYPE[openai_sentence_type_result["sentence_type"]]
                 session.commit()
 
-            # Create sentence node and link to time
+            # Create sentence node and link to current time node
             sentence_node_type = sentence_rdb_record.sentence_node_type
             sentence_graph_record = self.driver.query(
                 "MERGE (s:" + sentence_node_type + " {text: $text, sentence_id: $sentence_id}) RETURN s",
                 {"text": sentence, "sentence_id": sentence_rdb_record.sentence_id})
-
             logger.info(f"sentence: {sentence_graph_record}")
             time_record_link = self.driver.query(
                 "MATCH (t:Time {text: $time}), (s:" + sentence_node_type + " {text: $sentence}) "
@@ -134,14 +135,15 @@ class IdeaGraph:
                 "RETURN r", {"time": str(current_rounded_time), "sentence": sentence})
             logger.debug(f"sentence/time link: {time_record_link}")
 
-            # Create a linked idea because every sentence serializes at least one idea.
+            # Create a linked idea because every sentence expresses at least one idea.
             self.add_idea(sentence, current_rounded_time=current_rounded_time)
             idea_link_record = self.driver.query(
                 "MATCH (i:Idea {text: $idea}), (s:" + sentence_node_type + " {text: $sentence}) "
-                "MERGE (s)<-[r:EXPRESSES]-(i) "
+                "MERGE (s)-[r:EXPRESSES]->(i) "
                 "RETURN r", {"idea": sentence, "sentence": sentence})
             logger.info(f"idea link: {idea_link_record}")
 
+            # Get emotion features
             if sentence_rdb_record.sentence_openai_emotion_features is None:
                 sentence_rdb_record.sentence_openai_emotion_features = json.loads(
                     extract_openai_emotion_features(sentence))
@@ -156,46 +158,61 @@ class IdeaGraph:
                                               intensity=emotion["intensity"],
                                               nuance=emotion["nuance"])
 
-                # Add emotion source and target to entities
+                # TODO: Connect entity to emotion
+                # Add emotion source to entities
                 self.add_entity(emotion["emotion_source"])
                 self.link_entity_to_sentence(emotion["emotion_source"], sentence_rdb_record.sentence_id, sentence_node_type)
                 self.add_entity_type(emotion["emotion_source_entity_type"])
                 self.link_entity_type_to_entity(emotion["emotion_source"], emotion["emotion_source_entity_type"])
 
+                # Add emotion target to entities
                 self.add_entity(emotion["emotion_target"])
                 self.link_entity_to_sentence(emotion["emotion_target"], sentence_rdb_record.sentence_id, sentence_node_type)
                 self.add_entity_type(emotion["emotion_target_entity_type"])
                 self.link_entity_type_to_entity(emotion["emotion_target"], emotion["emotion_target_entity_type"])
 
+                # Add and link similar emotions
                 for synonymous_emotion in emotion["synonymous_emotions"]:
                     self.add_emotion(synonymous_emotion)
                     self.link_emotion_to_emotion(emotion["emotion"], synonymous_emotion)
 
+            # Get flair text features
             if sentence_rdb_record.sentence_flair_text_features is None:
                 sentence_rdb_record.sentence_flair_text_features = (flair_features if flair_features is not None
                                                                     else flair_text_feature_extraction(sentence))
                 session.commit()
             flair_features = sentence_rdb_record.sentence_flair_text_features
 
+            # Get OpenAI entity features
             if sentence_rdb_record.sentence_openai_entity_features is None:
                 sentence_rdb_record.sentence_openai_entity_features = json.loads(
                     extract_openai_entity_features(sentence))
                 session.commit()
             openai_entity_features = sentence_rdb_record.sentence_openai_entity_features
 
-            # Entity
+            # Entities
+            entity_set = set()
             for proper_noun in flair_features["proper_nouns"]:
+                entity_set.add(proper_noun)
                 self.add_entity(proper_noun)
                 self.link_entity_to_sentence(proper_noun, sentence_rdb_record.sentence_id, sentence_node_type)
             for entity in flair_features["ner"]:
+                entity_set.add(entity)
                 self.add_entity(entity)
                 self.link_entity_to_sentence(entity, sentence_rdb_record.sentence_id, sentence_node_type)
             for entity in openai_entity_features["entities"]:
+                logger.info(f"emotion: {entity}")
+                # Add entity and link to sentence.
+                entity_set.add(entity["entity"])
                 self.add_entity(entity["entity"])
                 self.link_entity_to_sentence(entity["entity"], sentence_rdb_record.sentence_id, sentence_node_type)
+                # Add entity type and link entity to is type
                 self.add_entity_type(entity["entity_type"])
                 self.link_entity_type_to_entity(entity["entity"], entity["entity_type"])
-                self.link_entity_to_sentiment(entity["entity"], entity["sentiment"])
+                # Link entity to a sentiment based on context.
+                if "sentiment" in entity:
+                    self.add_sentiment_label(entity["sentiment"])
+                    self.link_entity_to_sentiment(entity["entity"], entity["sentiment"])
 
             if sentence_rdb_record.sentence_openai_text_features is None:
                 sentence_rdb_record.sentence_openai_text_features = (
@@ -218,6 +235,8 @@ class IdeaGraph:
             for subject in openai_features["subjects"]:
                 self.add_sentence_subject(subject)
                 self.link_sentence_subject_to_sentence(subject, sentence, sentence_node_type)
+                if subject in entity_set:
+                    self.link_sentence_subject_to_entity(subject, subject)
 
             # Topic
             for topic in openai_features["topics"]:
@@ -266,8 +285,8 @@ class IdeaGraph:
         last_rounded_time = current_rounded_time - timedelta(minutes=15)
         time_record_links = self.driver.query(
             "MATCH (n:Time {text: $now}), (l:Time {text: $last}) "
-            "MERGE (n)-[rp:PRECEDES]->(l) "
-            "MERGE (l)-[rf:FOLLOWS]->(n) "
+            "MERGE (n)-[rp:FOLLOWS]->(l) "
+            "MERGE (l)-[rf:PRECEDES]->(n) "
             "RETURN rp, rf", {"now": str(current_rounded_time), "last": str(last_rounded_time)})
         logger.debug(f"time links: {time_record_links}")
         return current_rounded_time, current_time_record, time_record_links
@@ -322,11 +341,11 @@ class IdeaGraph:
             "RETURN idea")
         return results
 
-    def link_emotion_to_emotion(self, emotion1: str, emotion2_id: int):
+    def link_emotion_to_emotion(self, emotion: str, synonymous_emotion: int):
         emotion_link_record = self.driver.query(
-            "MATCH (e1:EmotionLabel {text: $emotion1}), (e2:EmotionLabel {text: $emotion2}) "
-            "MERGE (e1)-[r:RELATED]->(e2) "
-            "RETURN r", {"emotion1": emotion1, "emotion2": emotion2_id})
+            "MATCH (e1:EmotionLabel {text: $emotion}), (e2:EmotionLabel {text: $synonymous_emotion}) "
+            "MERGE (e2)-[r:SYNONYMOUS]->(e1) "
+            "RETURN r", {"emotion": emotion, "synonymous_emotion": synonymous_emotion})
         logger.info(f"emotion/emotion link: {emotion_link_record}")
         return emotion_link_record
 
@@ -335,7 +354,7 @@ class IdeaGraph:
         logger.info(f"link_emotion_to_sentence: {emotion} {sentence_id} {sentence_node_type} {intensity} {nuance}")
         emotion_link_record = self.driver.query(
             "MATCH (e:EmotionLabel {text: $emotion}), (s:" + sentence_node_type + " {sentence_id: $sentence_id}) "
-            "MERGE (e)-[r:CONTAINS]->(s) "
+            "MERGE (s)-[r:EVOKED]->(e) "
             "ON CREATE SET r.intensity = $intensity, r.nuance = $nuance "
             "RETURN r", {
                 "emotion": emotion, "sentence_id": sentence_id,
@@ -347,7 +366,7 @@ class IdeaGraph:
     def link_entity_to_sentence(self, entity: str, sentence_id: int, sentence_node_type: str):
         entity_link_record = self.driver.query(
             "MATCH (e:Entity {text: $entity}), (s:" + sentence_node_type + " {sentence_id: $sentence_id}) "
-            "MERGE (e)-[r:CONTAINS]->(s) "
+            "MERGE (s)-[r:REFERENCES]->(e) "
             "RETURN r", {"entity": entity, "sentence_id": sentence_id})
         logger.info(f"entity link: {entity_link_record}")
         return entity_link_record
@@ -355,7 +374,7 @@ class IdeaGraph:
     def link_entity_to_sentiment(self, entity: str, sentiment: str):
         entity_link_record = self.driver.query(
             "MATCH (e:Entity {text: $entity}), (s:SentimentLabel {text: $sentiment}) "
-            "MERGE (e)-[r:VIBED]-(s) "
+            "MERGE (e)-[r:EVOKED]->(s) "
             "RETURN r", {"entity": entity, "sentiment": sentiment})
         logger.info(f"entity/sentiment link: {entity_link_record}")
         return entity_link_record
@@ -363,7 +382,7 @@ class IdeaGraph:
     def link_entity_type_to_entity(self, entity: str, entity_type: str):
         entity_type_link_record = self.driver.query(
             "MATCH (e:Entity {text: $entity}), (t:EntityType {text: $entity_type}) "
-            "MERGE (t)-[r:CONTAINS]->(e) "
+            "MERGE (e)-[r:TYPE_OF]->(t) "
             "RETURN r", {"entity": entity, "entity_type": entity_type})
         logger.info(f"entity type link: {entity_type_link_record}")
         return entity_type_link_record
@@ -371,30 +390,38 @@ class IdeaGraph:
     def link_knowledge_category_to_sentence(self, knowledge_category: str, sentence: str, sentence_node_type: str):
         knowledge_category_link_record = self.driver.query(
             "MATCH (k:KnowledgeCategory {text: $knowledge_category}), (s:" + sentence_node_type + " {text: $sentence}) "
-            "MERGE (k)-[r:CONTAINS]->(s) "
+            "MERGE (s)-[r:CONTEXT_FROM]->(k) "
             "RETURN r", {"knowledge_category": knowledge_category, "sentence": sentence})
         logger.info(f"knowledge category link: {knowledge_category_link_record}")
 
     def link_sentiment_to_sentence(self, sentiment: str, sentence: str, sentence_node_type: str):
         sentiment_link_record = self.driver.query(
             "MATCH (n:SentimentLabel {text: $sentiment}), (s:" + sentence_node_type + " {text: $sentence}) "
-            "MERGE (n)-[r:VIBED]-(s) "
+            "MERGE (s)-[r:EVOKED]->(n) "
             "RETURN r", {"sentiment": sentiment, "sentence": sentence})
         logger.info(f"sentiment link: {sentiment_link_record}")
         return sentiment_link_record
 
+    def link_sentence_subject_to_entity(self, sentence_subject: str, entity: str):
+        sentence_subject_link_record = self.driver.query(
+            "MATCH (s:SentenceSubject {text: $subject}), (e:Entity {text: $entity}) "
+            "MERGE (s)-[r:REFERS_TO]->(e) "
+            "RETURN r", {"subject": sentence_subject, "entity": entity})
+        logger.info(f"subject/entity link: {sentence_subject_link_record}")
+        return sentence_subject_link_record
+
     def link_sentence_subject_to_sentence(self, sentence_subject: str, sentence: str, sentence_node_type: str):
         sentence_subject_link_record = self.driver.query(
-            "MATCH (n:SentenceSubject {text: $sentence_subject}), (s:" + sentence_node_type + " {text: $sentence}) "
-            "MERGE (n)-[r:CONTAINS]->(s) "
+            "MATCH (u:SentenceSubject {text: $sentence_subject}), (s:" + sentence_node_type + " {text: $sentence}) "
+            "MERGE (s)-[r:IS_ABOUT]->(u) "
             "RETURN r", {"sentence_subject": sentence_subject, "sentence": sentence})
-        logger.info(f"sentence_subject link: {sentence_subject_link_record}")
+        logger.info(f"subject link: {sentence_subject_link_record}")
         return sentence_subject_link_record
 
     def link_topic_label_to_sentence(self, topic_label: str, sentence: str, sentence_node_type: str):
         topic_label_link_record = self.driver.query(
             "MATCH (t:TopicLabel {text: $topic_label}), (s:" + sentence_node_type + " {text: $sentence}) "
-            "MERGE (t)-[r:CONTAINS]->(s) "
+            "MERGE (s)-[r:IS_ABOUT]->(t) "
             "RETURN r", {"topic_label": topic_label, "sentence": sentence})
         logger.info(f"topic_label link: {topic_label_link_record}")
         return topic_label_link_record
@@ -458,7 +485,7 @@ if __name__ == '__main__':
             idea_graph.add_document(doc_title, doc_body)
 
         # Add sentences to the graph
-        for exp in sentence_examples.all_examples:
-            idea_graph.add_sentence(exp)
+        #for exp in sentence_examples.all_examples:
+        #    idea_graph.add_sentence(exp)
 
     idea_graph.close()

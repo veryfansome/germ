@@ -1,5 +1,5 @@
 from sqlalchemy import (create_engine, Boolean, Column, DateTime, ForeignKey,
-                        Index, Integer, JSON, String)
+                        Index, Integer, JSON, String, UUID)
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 from settings import germ_settings
@@ -107,7 +107,7 @@ class Sentence(Base):
     sentence_openai_emotion_features = Column(JSON)
     sentence_openai_entity_features = Column(JSON)
     sentence_openai_text_features = Column(JSON)
-    sentence_signature = Column(String)
+    sentence_signature = Column(UUID)
     text = Column(String)
 
     __table_args__ = (
