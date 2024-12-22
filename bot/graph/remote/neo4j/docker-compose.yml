@@ -1,0 +1,18 @@
+networks:
+  neo4j: {}
+
+volumes:
+  neo4j-data: {}
+
+services:
+  neo4j:
+    networks: [ neo4j ]
+    container_name: neo4j
+    image: neo4j:latest
+    volumes:
+      - neo4j-data:/data  # Persist data
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
+    ports:
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt

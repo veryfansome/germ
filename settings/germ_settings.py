@@ -18,6 +18,9 @@ LOG_LEVEL = os.getenv("GERM_LOG_LEVEL", "INFO")
 OTLP_HOST = os.getenv("GERM_OTLP_HOST", "germ-otel-collector")
 OTLP_PORT = os.getenv("GERM_OTLP_PORT", "4318")
 
+# Neo4j
+NEO4J_HOST = os.getenv("GERM_NEO4J_HOST", "germ-neo4j")
+
 # PostgreSQL
 
 DB_HOST = os.getenv("DB_HOST", "germ-db")

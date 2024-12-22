@@ -1,6 +1,8 @@
 import os
 from neo4j import GraphDatabase
 
+from settings.germ_settings import NEO4J_HOST
+
 NEO4J_AUTH = os.getenv("NEO4J_AUTH", "neo4j/oops")
 neo4j_auth_parts = NEO4J_AUTH.split("/")
 
@@ -8,7 +10,7 @@ neo4j_auth_parts = NEO4J_AUTH.split("/")
 class Neo4jDriver:
     def __init__(self):
         self.driver = GraphDatabase.driver(
-            "bolt://germ-neo4j:7687", auth=(neo4j_auth_parts[0], neo4j_auth_parts[1]))
+            f"bolt://{NEO4J_HOST}:7687", auth=(neo4j_auth_parts[0], neo4j_auth_parts[1]))
 
     def close(self):
         self.driver.close()
