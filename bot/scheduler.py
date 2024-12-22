@@ -21,7 +21,7 @@ async def main():
     signal.signal(signal.SIGTERM, signal_handler)
     scheduler.start()
 
-    await core_identity.main()
+    #await core_identity.main()
     while True:
         await asyncio.sleep(10)
 
@@ -45,7 +45,8 @@ if __name__ == "__main__":
     scheduler.add_job(db_stats_job, "interval", minutes=15, name="PostgreSQL stats")
 
     if args.core_identity:
-        scheduler.add_job(core_identity.main, "interval", minutes=15, name="Core identity")
+        #scheduler.add_job(core_identity.main, "interval", minutes=15, name="Core identity")
+        pass
     if args.idea_deduper:
         scheduler.add_job(idea_deduper.main, "interval", minutes=1, name="Idea deduper")
     if args.inconsistency_finder:

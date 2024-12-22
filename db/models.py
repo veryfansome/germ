@@ -38,40 +38,6 @@ class ChatSession(Base):
         secondary="chat_session_chat_user_profile_link", back_populates="chat_sessions")
 
 
-class ChatMessageIdea(Base):
-    """
-    Message ideas are options for proactively interacting with users. They are generated over the course of chat
-    sessions and prioritized for experimentation.
-    """
-    __tablename__ = "chat_message_idea"
-    chat_message_idea_id = Column(Integer, primary_key=True, autoincrement=True)
-    chat_session_id = Column(Integer, ForeignKey("chat_session.chat_session_id"), nullable=False)
-    context = Column(String)
-    idea = Column(String, nullable=False)
-    time_created = Column(DateTime)
-
-    # Relationship to progenitors ideas through the link table
-    progenitors = relationship(
-        "ChatMessageIdea",
-        secondary="chat_message_idea_chat_message_idea_link",
-        primaryjoin="ChatMessageIdea.chat_message_idea_id == ChatMessageIdeaChatMessageIdeaLink.derivative_idea_id",
-        foreign_keys="[ChatMessageIdeaChatMessageIdeaLink.derivative_idea_id]",
-        back_populates="derivatives")
-    # Relationship to derivatives ideas through the link table
-    derivatives = relationship(
-        "ChatMessageIdea",
-        secondary="chat_message_idea_chat_message_idea_link",
-        primaryjoin="ChatMessageIdea.chat_message_idea_id == ChatMessageIdeaChatMessageIdeaLink.progenitor_idea_id",
-        foreign_keys="[ChatMessageIdeaChatMessageIdeaLink.progenitor_idea_id]",
-        back_populates="progenitors")
-
-
-class ChatMessageIdeaChatMessageIdeaLink(Base):
-    __tablename__ = "chat_message_idea_chat_message_idea_link"
-    progenitor_idea_id = Column(Integer, ForeignKey('chat_message_idea.chat_message_idea_id'), primary_key=True)
-    derivative_idea_id = Column(Integer, ForeignKey('chat_message_idea.chat_message_idea_id'), primary_key=True)
-
-
 class ChatRequestReceived(Base):
     __tablename__ = "chat_request_received"
     chat_session_id = Column(Integer, ForeignKey("chat_session.chat_session_id"), nullable=False)
@@ -131,6 +97,22 @@ class ChatSessionChatUserProfileLink(Base):
     __tablename__ = "chat_session_chat_user_profile_link"
     chat_session_id = Column(Integer, ForeignKey('chat_session.chat_session_id'), primary_key=True)
     chat_user_profile_id = Column(Integer, ForeignKey('chat_user_profile.chat_user_profile_id'), primary_key=True)
+
+
+class Sentence(Base):
+    __tablename__ = "sentence"
+    sentence_id = Column(Integer, primary_key=True, autoincrement=True)
+    sentence_flair_text_features = Column(JSON)
+    sentence_node_type = Column(String)
+    sentence_openai_emotion_features = Column(JSON)
+    sentence_openai_entity_features = Column(JSON)
+    sentence_openai_text_features = Column(JSON)
+    sentence_signature = Column(String)
+    text = Column(String)
+
+    __table_args__ = (
+        Index('idx_sentence_signature', 'sentence_signature'),  # Secondary index
+    )
 
 
 # Create the tables in the database

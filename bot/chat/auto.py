@@ -25,7 +25,7 @@ class SingleSentenceChatter:
                     {
                         "role": "system",
                         "content": f"""
-- Be efficient. Deliver the point only. Use a single concise sentence with simple structure.
+- Deliver the point only. Use a single concise sentence with simple structure.
 - {self.system_message}
 """,
                     },
@@ -46,7 +46,7 @@ class SingleSentenceChatter:
                     {
                         "role": "system",
                         "content": f"""
-- Be efficient. Deliver the point only. Use a single concise sentence with simple structure.
+- Deliver the point only. Use a single concise sentence with simple structure.
 - {self.system_message}
 """,
                     },

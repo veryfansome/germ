@@ -3,7 +3,7 @@ from starlette.concurrency import run_in_threadpool
 
 from bot.graph.idea import get_idea_graph, IdeaGraph
 from bot.lang.examples import sentences as sentence_examples
-from observability.logging import logging
+from observability.logging import logging, setup_logging
 
 logger = logging.getLogger(__name__)
 idea_graph: IdeaGraph = get_idea_graph(__name__)
@@ -21,5 +21,10 @@ async def main():
     for sentence in sentence_examples.core_identity:
         tasks.append(run_in_threadpool(idea_graph.add_sentence, sentence,
                                        current_rounded_time=current_rounded_time,
-                                       flair_features=None, openai_features=None))
+                                       flair_features=None, openai_features=None, sentence_node_type=None))
     await asyncio.gather(*tasks)
+
+
+if __name__ == '__main__':
+    setup_logging()
+    asyncio.run(main())

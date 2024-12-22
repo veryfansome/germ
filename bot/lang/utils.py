@@ -17,6 +17,150 @@ def diff_strings(str1, str2):
     return differences
 
 
+def extract_openai_emotion_features(text: str,
+                                    model: str = "gpt-4o-mini") -> str:
+    system_message = "Extract emotional nuance from text."
+    tool_name = "store_emotional_features"
+    tool_properties_spec = {
+        "emotions": {
+            "type": "array",
+            "description": "List of perceivable emotions, capturing nuanced contextual meaning.",
+            "items": {
+                "type": "object",
+                "description": "An emotion from the text.",
+                "properties": {
+                    "emotion": {
+                        "type": "string",
+                        "description": "Detected emotion name."
+                    },
+                    "emotion_source": {
+                        "type": "string",
+                        "description": "Who feels this emotion?.",
+                    },
+                    "emotion_source_entity_type": {
+                        "type": "string",
+                        "description": "What kind of entity is the source of this emotion.",
+                    },
+                    "emotion_target": {
+                        "type": "string",
+                        "description": "What is this emotion directed at?",
+                    },
+                    "emotion_target_entity_type": {
+                        "type": "string",
+                        "description": "What kind of entity is the target of this emotion?",
+                    },
+                    "intensity": {
+                        "type": "string",
+                        "description": "Intensity of detected emotion.",
+                        "enum": ["low", "medium", "high"]
+                    },
+                    "nuance": {
+                        "type": "string",
+                        "description": "Emotion complexity.",
+                        "enum": ["simple", "complex"]
+                    },
+                    "synonymous_emotions": {
+                        "type": "array",
+                        "description": "List of synonymous emotions based on context.",
+                        "items": {
+                            "type": "string",
+                            "description": "Name of a synonymous emotion."
+                        }
+                    },
+                }
+            }
+        }
+    }
+    with OpenAI() as client:
+        completion = client.chat.completions.create(
+            messages=[{"role": "system", "content": system_message}, {"role": "user", "content": text}],
+            model=model, n=1, temperature=0, timeout=180,
+
+            # -2 to 2, lower values to stay more focused on the text vs using different words
+            # frequency_penalty=0,
+
+            # -2 to 2, lower values discourage new topics
+            # presence_penalty=0,
+
+            tool_choice={"type": "function", "function": {"name": tool_name}},
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": "Store text emotion features.",
+                    "parameters": {
+                        "type": "object",
+                        "description": "Emotion features extracted from text.",
+                        "properties": tool_properties_spec,
+                        "required": list(tool_properties_spec.keys()),
+                        "additionalProperties": False,
+                    },
+                }
+            }]
+        )
+        return completion.choices[0].message.tool_calls[0].function.arguments
+
+
+def extract_openai_entity_features(text: str,
+                                   model: str = "gpt-4o-mini") -> str:
+    system_message = "Extract entities from text."
+    tool_name = "store_entity_features"
+    tool_properties_spec = {
+        "entities": {
+            "type": "array",
+            "description": "List of entities from the text.",
+            "items": {
+                "type": "object",
+                "description": "An entity from the text.",
+                "properties": {
+                    "entity": {
+                        "type": "string",
+                        "description": "Entity name."
+                    },
+                    "entity_type": {
+                        "type": "string",
+                        "description": "What type of entity is this?",
+                        "enum": ["concept", "date", "organization", "person"]
+                    },
+                    "sentiment": {
+                        "type": "string",
+                        "description": "Sentiment towards entity in text.",
+                        "enum": ["mixed", "negative", "neutral", "positive"]
+                    }
+                }
+            }
+        }
+    }
+    with OpenAI() as client:
+        completion = client.chat.completions.create(
+            messages=[{"role": "system", "content": system_message}, {"role": "user", "content": text}],
+            model=model, n=1, temperature=0, timeout=180,
+
+            # -2 to 2, lower values to stay more focused on the text vs using different words
+            # frequency_penalty=0,
+
+            # -2 to 2, lower values discourage new topics
+            # presence_penalty=0,
+
+            tool_choice={"type": "function", "function": {"name": tool_name}},
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": "Store text entity features.",
+                    "parameters": {
+                        "type": "object",
+                        "description": "Entity features extracted from text.",
+                        "properties": tool_properties_spec,
+                        "required": list(tool_properties_spec.keys()),
+                        "additionalProperties": False,
+                    },
+                }
+            }]
+        )
+        return completion.choices[0].message.tool_calls[0].function.arguments
+
+
 def flair_text_feature_extraction(text: str):
     """
     Old fashion NLP on the cheap.
@@ -24,33 +168,67 @@ def flair_text_feature_extraction(text: str):
     :param text:
     :return:
     """
-    pos_tags = []
     proper_nouns = []
     verbs = []
     flair_sentence = Sentence(text)
     pos_tagger.predict(flair_sentence)
     ner_tagger.predict(flair_sentence)
     for token in flair_sentence:
-        pos_tags.append(token.tag)
         if token.tag in ("NNP", "NNPS"):
             proper_nouns.append(token.text)
         elif token.tag in ("VBD", "VBP", "VBZ"):
             verbs.append(token.text)
     flair_features = {
-        "ner": flair_sentence.get_spans("ner"),
-        "pos_blob": "_".join(pos_tags),
-        "proper_nouns": set(proper_nouns),
-        "verbs": set(verbs)}
+        "ner": [e.text for e in flair_sentence.get_spans("ner")],
+        "proper_nouns": list(set(proper_nouns)),
+        "verbs": list(set(verbs))}
     logger.info(f"flair_features: {flair_features}")
     return flair_features
+
+
+def openai_detect_sentence_type(text: str,
+                                model: str = "gpt-4o-mini"):
+    system_message = "Detect sentence type from textual context."
+    tool_name = "store_sentence_type"
+    tool_properties_spec = {
+        "sentence_type": {
+            "type": "string",
+            "description": "Sentence type.",
+            "enum": ["complex", "conditional", "exclamatory", "declarative", "interrogative", "imperative"],
+        }
+    }
+    with OpenAI() as client:
+        completion = client.chat.completions.create(
+            messages=[{"role": "system", "content": system_message}, {"role": "user", "content": text}],
+            model=model, n=1, temperature=0, timeout=30,
+            # -2 to 2, lower values to stay more focused on the text vs using different words
+            frequency_penalty=0,
+            # -2 to 2, lower values discourage new topics
+            presence_penalty=0,
+            tool_choice={"type": "function", "function": {"name": tool_name}},
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": "Store sentence type.",
+                    "parameters": {
+                        "type": "object",
+                        "description": "Sentence type to store.",
+                        "properties": tool_properties_spec,
+                        "required": list(tool_properties_spec.keys()),
+                        "additionalProperties": False,
+                    },
+                }
+            }]
+        )
+        return completion.choices[0].message.tool_calls[0].function.arguments
 
 
 def openai_text_feature_extraction(text: str,
                                    json_to_check: str = None,
                                    model: str = "gpt-4o-mini",
                                    prefer_second_opinion: bool = False,
-                                   second_opinion: bool = False,
-                                   temperature: int = 0) -> str:
+                                   second_opinion: bool = False) -> str:
     """
     Way better for emotionality (variety, intensity, transitions), sentiment, related knowledge areas, related topics,
     and other contextual tasks.
@@ -72,42 +250,6 @@ def openai_text_feature_extraction(text: str,
 
     tool_name = "store_text_features"
     tool_properties_spec = {
-        "emotions": {
-            "type": "array",
-            "description": "List of emotions.",
-            "items": {
-                "type": "string",
-                "description": "An emotion.",
-            }
-        },
-        "emotional_intensity": {
-            "type": "string",
-            "description": "Intensity of emotions.",
-            "enum": ["low", "medium", "high"]
-        },
-        "emotional_nuance": {
-            "type": "string",
-            "description": "Complexity of emotions.",
-            "enum": ["low", "medium", "high"]
-        },
-        "entities": {
-            "type": "array",
-            "description": "List of named entities.",
-            "items": {
-                "type": "object",
-                "description": "A named entity.",
-                "properties": {
-                    "entity": {
-                        "type": "string",
-                        "description": "Entity name."
-                    },
-                    "type": {
-                        "type": "string",
-                        "description": "Type of named entity."
-                    },
-                }
-            }
-        },
         "knowledge": {
             "type": "array",
             "description": "List of applicable knowledge categories.",
@@ -115,11 +257,6 @@ def openai_text_feature_extraction(text: str,
                 "type": "string",
                 "description": "A category."
             }
-        },
-        "sentence_type": {
-            "type": "string",
-            "description": "Sentence type.",
-            "enum": ["complex", "conditional", "exclamatory", "declarative", "interrogative", "imperative"],
         },
         "sentiment": {
             "type": "string",
@@ -146,7 +283,13 @@ def openai_text_feature_extraction(text: str,
     with OpenAI() as client:
         completion = client.chat.completions.create(
             messages=[{"role": "system", "content": system_message}, {"role": "user", "content": text}],
-            model=model, n=1, temperature=temperature, timeout=60,
+            model=model, n=1, temperature=0, timeout=60,
+
+            # -2 to 2, lower values to stay more focused on the text vs using different words
+            frequency_penalty=0,
+
+            # -2 to 2, lower values discourage new topics
+            presence_penalty=0,
             tool_choice={"type": "function", "function": {"name": tool_name}},
             tools=[{
                 "type": "function",
