@@ -67,6 +67,14 @@ def extract_openai_emotion_features(text: str,
                             "description": "Name of a synonymous emotion."
                         }
                     },
+                    "opposite_emotions": {
+                        "type": "array",
+                        "description": "List of opposite emotions based on context.",
+                        "items": {
+                            "type": "string",
+                            "description": "Name of an opposite emotion."
+                        }
+                    },
                 }
             }
         }

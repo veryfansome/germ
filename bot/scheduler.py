@@ -51,7 +51,7 @@ if __name__ == "__main__":
         #scheduler.add_job(idea_deduper.main, "interval", minutes=1, name="Idea deduper")
         pass
     if args.inconsistency_finder:
-        scheduler.add_job(inconsistency_finder.main, "interval", minutes=1, name="Inconsistency finder")
+        #scheduler.add_job(inconsistency_finder.main, "interval", minutes=1, name="Inconsistency finder")
         pass
 
     try:
