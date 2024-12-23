@@ -5,6 +5,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 from sqlalchemy.future import select as sql_select
+from starlette.concurrency import run_in_threadpool
 
 from bot.lang.utils import (flair_text_feature_extraction, openai_detect_sentence_type,
                             extract_openai_emotion_features, extract_openai_entity_features,
@@ -124,10 +125,12 @@ class IdeaGraph:
 
                 # Get sentence type if not set
                 if sentence_rdb_record.sentence_node_type is None:
-                    openai_sentence_type_result = ({"sentence_type": sentence_node_type}
-                                                   if sentence_node_type is not None
-                                                   else json.loads(openai_detect_sentence_type(sentence)))
-                    sentence_rdb_record.sentence_node_type = SENTENCE_NODE_TYPE[openai_sentence_type_result["sentence_type"]]
+                    openai_sentence_type_result = (
+                        {"sentence_type": sentence_node_type}
+                        if sentence_node_type is not None else json.loads(run_in_threadpool(
+                            openai_detect_sentence_type, sentence, model="gpt-4o-mini")))
+                    sentence_rdb_record.sentence_node_type = SENTENCE_NODE_TYPE[
+                        openai_sentence_type_result["sentence_type"]]
                     await rdb_session.commit()
                     await rdb_session.refresh(sentence_rdb_record)
 
@@ -161,7 +164,7 @@ class IdeaGraph:
                 # Get emotion features
                 if sentence_rdb_record.sentence_openai_emotion_features is None:
                     sentence_rdb_record.sentence_openai_emotion_features = json.loads(
-                        extract_openai_emotion_features(sentence))
+                        run_in_threadpool(extract_openai_emotion_features, sentence, model="gpt-4o-mini"))
                     await rdb_session.commit()
                     await rdb_session.refresh(sentence_rdb_record)
 
@@ -208,8 +211,9 @@ class IdeaGraph:
 
                 # Get flair text features
                 if sentence_rdb_record.sentence_flair_text_features is None:
-                    sentence_rdb_record.sentence_flair_text_features = (flair_features if flair_features is not None
-                                                                        else flair_text_feature_extraction(sentence))
+                    sentence_rdb_record.sentence_flair_text_features = (
+                        flair_features if flair_features is not None else run_in_threadpool(
+                            flair_text_feature_extraction, sentence))
                     await rdb_session.commit()
                     await rdb_session.refresh(sentence_rdb_record)
                 flair_features = sentence_rdb_record.sentence_flair_text_features
@@ -217,7 +221,7 @@ class IdeaGraph:
                 # Get OpenAI entity features
                 if sentence_rdb_record.sentence_openai_entity_features is None:
                     sentence_rdb_record.sentence_openai_entity_features = json.loads(
-                        extract_openai_entity_features(sentence))
+                        run_in_threadpool(extract_openai_entity_features, sentence, model="gpt-4o-mini"))
                     await rdb_session.commit()
                     await rdb_session.refresh(sentence_rdb_record)
                 openai_entity_features = sentence_rdb_record.sentence_openai_entity_features
