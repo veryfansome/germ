@@ -419,8 +419,8 @@ class IdeaGraph:
                                intensity: str = "none", nuance: str = "none"):
         emotion_link_record = await self.driver.query(
             "MATCH (e:EmotionLabel {text: $emotion}), (n:Entity {text: $entity}) "
-            # MERGE clobbers last link attributes so whatever was experienced last is used and whatever was experienced
-            # previously is forgotten.
+            # TODO: Implement retention policy on emotion->entity link based on age.
+            # The timestamp() means every time words are seen, they are "felt".
             "MERGE (n)-[r:" + link_type + " {sentence_id: $sentence_id, intensity: $intensity, nuance: $nuance, time_evoked: timestamp()}]->(e) "
             "RETURN r", {
                 "emotion": emotion, "entity": entity,

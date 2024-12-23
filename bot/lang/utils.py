@@ -82,7 +82,7 @@ def extract_openai_emotion_features(text: str,
     with OpenAI() as client:
         completion = client.chat.completions.create(
             messages=[{"role": "system", "content": system_message}, {"role": "user", "content": text}],
-            model=model, n=1, temperature=0, timeout=180,
+            model=model, n=1, temperature=0, timeout=30,
 
             # -2 to 2, lower values to stay more focused on the text vs using different words
             # frequency_penalty=0,
@@ -116,7 +116,7 @@ def extract_openai_entity_features(text: str,
     tool_properties_spec = {
         "entities": {
             "type": "array",
-            "description": "List of entities from the text.",
+            "description": "List of all entities identified in the text.",
             "items": {
                 "type": "object",
                 "description": "An entity from the text.",
@@ -127,14 +127,48 @@ def extract_openai_entity_features(text: str,
                     },
                     "entity_type": {
                         "type": "string",
-                        "description": "What type of entity is this?",
-                        "enum": ["concept", "date", "organization", "person"]
+                        "description": "What type or class of entity is this?",
+                        "enum": [
+                            "action or possible action",
+                            "concept", "creature", "currency",
+                            "event in time",
+                            "geographic feature",
+                            "location",
+                            "organization",
+                            "person or personified being", "point in time", "possession object",
+                            "quantity",
+                            "structure",
+                        ]
                     },
                     "sentiment": {
                         "type": "string",
                         "description": "Sentiment towards entity in text.",
                         "enum": ["mixed", "negative", "neutral", "positive"]
-                    }
+                    },
+                    "is_agent": {
+                        "type": "string",
+                        "description": "Is this entity a doer of the sentence?",
+                        "enum": ["true", "false"]
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "Action performed if agent or instrument, and action received if patient.",
+                    },
+                    "is_patient": {
+                        "type": "string",
+                        "description": "Is this entity a receiver of the actions of the sentence?",
+                        "enum": ["true", "false"]
+                    },
+                    "is_experiencer": {
+                        "type": "string",
+                        "description": "Is this entity the perceiver in the sentence?",
+                        "enum": ["true", "false"]
+                    },
+                    "is_instrument": {
+                        "type": "string",
+                        "description": "Is this entity an instrument an action is performed in the sentence?",
+                        "enum": ["true", "false"]
+                    },
                 }
             }
         }
@@ -142,7 +176,7 @@ def extract_openai_entity_features(text: str,
     with OpenAI() as client:
         completion = client.chat.completions.create(
             messages=[{"role": "system", "content": system_message}, {"role": "user", "content": text}],
-            model=model, n=1, temperature=0, timeout=180,
+            model=model, n=1, temperature=0, timeout=30,
 
             # -2 to 2, lower values to stay more focused on the text vs using different words
             # frequency_penalty=0,
