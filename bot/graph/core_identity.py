@@ -17,11 +17,11 @@ async def main():
     """
     logger.info("Reinforcing core identity")
     tasks = []
-    current_rounded_time, _, _ = idea_graph.add_time()
+    current_rounded_time, _, _ = await idea_graph.add_time()
     for sentence in sentence_examples.core_identity:
-        tasks.append(run_in_threadpool(idea_graph.add_sentence, sentence,
-                                       current_rounded_time=current_rounded_time,
-                                       flair_features=None, openai_features=None, sentence_node_type=None))
+        tasks.append(idea_graph.add_sentence(
+            sentence, current_rounded_time=current_rounded_time,
+            flair_features=None, openai_features=None, sentence_node_type=None))
     await asyncio.gather(*tasks)
 
 

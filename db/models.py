@@ -1,5 +1,6 @@
 from sqlalchemy import (create_engine, Boolean, Column, DateTime, ForeignKey,
                         Index, Integer, JSON, String, UUID)
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 from settings import germ_settings
@@ -10,7 +11,10 @@ DATABASE_URL = "{name}:{password}@{host}/germ".format(
     name=germ_settings.POSTGRES_USER,
     password=germ_settings.POSTGRES_PASSWORD,
 )
-engine = create_engine(f"postgresql+psycopg2://{DATABASE_URL}")
+async_engine = create_async_engine(f"postgresql+asyncpg://{DATABASE_URL}", echo=True)
+AsyncSessionLocal = async_sessionmaker(bind=async_engine, class_=AsyncSession, expire_on_commit=False)
+
+engine = create_engine(f"postgresql+psycopg2://{DATABASE_URL}", echo=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
