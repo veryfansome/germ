@@ -21,7 +21,7 @@ async def main():
     for sentence in sentence_examples.core_identity:
         tasks.append(idea_graph.add_sentence(
             sentence, current_rounded_time=current_rounded_time,
-            flair_features=None, openai_features=None, sentence_node_type=None))
+            flair_features=None, openai_features=None, openai_sentence_type=None))
     await asyncio.gather(*tasks)
 
 

@@ -1,9 +1,12 @@
 import os
+import uuid
 
 # Service
 
 SERVICE_NAME = os.getenv("GERM_SERVICE_NAME", "germ-bot")
 WEBSOCKET_CONNECTION_IDLE_TIMEOUT = 3600
+
+UUID5_NS = uuid.UUID("246a5463-afae-4571-a6e0-f319d74147d3")  # Changes sentences signatures
 
 # Model training
 

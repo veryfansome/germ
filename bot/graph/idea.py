@@ -14,9 +14,9 @@ from bot.lang.examples import documents as doc_examples, sentences as sentence_e
 from db.neo4j import AsyncNeo4jDriver
 from db.models import AsyncSessionLocal, Sentence
 from observability.logging import logging, setup_logging
+from settings.germ_settings import UUID5_NS
 
 logger = logging.getLogger(__name__)
-uuid5_namespace = uuid.UUID("246a5463-afae-4571-a6e0-f319d74147d3")  # Changes sentences signatures
 
 INSTANCE_MANIFEST = {}
 SENTENCE_NODE_TYPE = {
@@ -109,13 +109,13 @@ class IdeaGraph:
 
     async def add_sentence(self, sentence: str,
                            current_rounded_time=None, flair_features=None, openai_features=None,
-                           sentence_node_type=None):
+                           openai_sentence_type=None):
         sentence = sentence.strip()
         if current_rounded_time is None:
             current_rounded_time, _, _ = await self.add_time()
 
         # Generate signature for lookup in PostgreSQL
-        sentence_signature = uuid.uuid5(uuid5_namespace, sentence)
+        sentence_signature = uuid.uuid5(UUID5_NS, sentence)
         async with AsyncSessionLocal() as rdb_session:
             async with rdb_session.begin():
                 sentence_select_stmt = sql_select(Sentence).where(Sentence.sentence_signature == sentence_signature)
@@ -131,13 +131,15 @@ class IdeaGraph:
             # Get sentence type if not set
             if sentence_rdb_record.sentence_node_type is None:
                 openai_sentence_type = (
-                    {"sentence_type": sentence_node_type}
-                    if sentence_node_type is not None else json.loads(await run_in_threadpool(
+                    openai_sentence_type
+                    if openai_sentence_type is not None else json.loads(await run_in_threadpool(
                         openai_detect_sentence_type, sentence, model="gpt-4o-mini")))
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
-                    sentence_rdb_record.sentence_node_type = SENTENCE_NODE_TYPE[openai_sentence_type["sentence_type"]]
+                    sentence_rdb_record.sentence_node_type = SENTENCE_NODE_TYPE[openai_sentence_type["functional_type"]]
+                    sentence_rdb_record.sentence_openai_sentence_features = openai_sentence_type
                     await rdb_session.commit()
+            logger.info(f"openai_sentence_features: {sentence_rdb_record.sentence_openai_sentence_features}")
 
             # Create sentence node and link to current time node
             sentence_node_type = sentence_rdb_record.sentence_node_type

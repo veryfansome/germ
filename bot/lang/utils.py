@@ -216,11 +216,58 @@ def openai_detect_sentence_type(text: str,
     system_message = "Detect sentence type from textual context."
     tool_name = "store_sentence_type"
     tool_properties_spec = {
-        "sentence_type": {
+        "change_of_state": {
             "type": "string",
-            "description": "Sentence type.",
-            "enum": ["complex", "conditional", "exclamatory", "declarative", "interrogative", "imperative"],
-        }
+            "description": "Do the subjects or objects in this sentence undergo a change in state?",
+            "enum": ["complex changes", "objects change", "static", "subjects change"],
+        },
+        "contains_interjection": {
+            "type": "string",
+            "description": "Does the sentence include a sudden direction change, often standing alone?",
+            "enum": ["true", "false"],
+        },
+        "functional_type": {
+            "type": "string",
+            "description": "Type of sentence based on purpose.",
+            "enum": ["conditional", "exclamatory", "declarative", "interrogative", "imperative"],
+        },
+        "narrative_structure": {
+            "type": "string",
+            "description": "Does the sentence try to tell a story or is it providing descriptions?",
+            "enum": ["event-driven", "detail-driven"],
+        },
+        "organizational_type": {
+            "type": "string",
+            "description": "Type of sentence based on organization.",
+            "enum": ["simple", "compound", "complex", "complex-compound"],
+        },
+        "reports_speech": {
+            "type": "string",
+            "description": "How does the sentence report speech?",
+            "enum": ["no speech", "direct speech", "paraphrased speech"],
+        },
+        "spatiality": {
+            "type": "string",
+            "description": "Do the subjects or objects in this sentence move through space?",
+            "enum": ["complex movements", "objects move", "static", "subjects move"],
+        },
+        "style": {
+            "type": "string",
+            "description": ("Does the sentence adhere to standard language rules (formal) "
+                            "or does it include colloquialisms or slang (informal)"),
+            "enum": ["formal", "informal"],
+        },
+        "temporality": {
+            "type": "string",
+            "description": "Does time progress in this sentence or is it static?",
+            "enum": ["past to past", "past to present", "present to future",
+                     "static future", "static past", "static present"],
+        },
+        "voice": {
+            "type": "string",
+            "description": "Does the subject perform the action (active) or receive the action (passive)?",
+            "enum": ["active", "passive"],
+        },
     }
     with OpenAI() as client:
         completion = client.chat.completions.create(

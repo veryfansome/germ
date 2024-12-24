@@ -110,6 +110,7 @@ class Sentence(Base):
     sentence_node_type = Column(String)
     sentence_openai_emotion_features = Column(JSON)
     sentence_openai_entity_features = Column(JSON)
+    sentence_openai_sentence_features = Column(JSON)
     sentence_openai_text_features = Column(JSON)
     sentence_signature = Column(UUID)
     text = Column(String)
