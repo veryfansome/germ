@@ -145,29 +145,9 @@ def extract_openai_entity_features(text: str,
                         "description": "Sentiment towards entity in text.",
                         "enum": ["mixed", "negative", "neutral", "positive"]
                     },
-                    "is_agent": {
+                    "semantic_role": {
                         "type": "string",
-                        "description": "Is this entity a doer of the sentence?",
-                        "enum": ["true", "false"]
-                    },
-                    "action": {
-                        "type": "string",
-                        "description": "Action performed if agent or instrument, and action received if patient.",
-                    },
-                    "is_patient": {
-                        "type": "string",
-                        "description": "Is this entity a receiver of the actions of the sentence?",
-                        "enum": ["true", "false"]
-                    },
-                    "is_experiencer": {
-                        "type": "string",
-                        "description": "Is this entity the perceiver in the sentence?",
-                        "enum": ["true", "false"]
-                    },
-                    "is_instrument": {
-                        "type": "string",
-                        "description": "Is this entity an instrument an action is performed in the sentence?",
-                        "enum": ["true", "false"]
+                        "description": "Semantic role of entity in text.",
                     },
                 }
             }
@@ -210,18 +190,21 @@ def flair_text_feature_extraction(text: str):
     :param text:
     :return:
     """
+    pos_tags = []
     proper_nouns = []
     verbs = []
     flair_sentence = Sentence(text)
     pos_tagger.predict(flair_sentence)
     ner_tagger.predict(flair_sentence)
     for token in flair_sentence:
+        pos_tags.append(token.tag)
         if token.tag in ("NNP", "NNPS"):
             proper_nouns.append(token.text)
         elif token.tag in ("VBD", "VBP", "VBZ"):
             verbs.append(token.text)
     flair_features = {
         "ner": [e.text for e in flair_sentence.get_spans("ner")],
+        "pos_tags": pos_tags,
         "proper_nouns": list(set(proper_nouns)),
         "verbs": list(set(verbs))}
     logger.info(f"flair_features: {flair_features}")

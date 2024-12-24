@@ -74,6 +74,12 @@ class IdeaGraph:
         logger.info(f"entity: {entity_record}")
         return entity_record
 
+    async def add_entity_role(self, entity_role: str):
+        entity_role_record = await self.driver.query("MERGE (e:EntityRole {text: $entity_role}) RETURN e",
+                                                     {"entity_role": entity_role})
+        logger.info(f"entity_role: {entity_role_record}")
+        return entity_role_record
+
     async def add_entity_type(self, entity_type: str):
         entity_type_record = await self.driver.query(
             "MERGE (e:EntityType {text: $entity_type}) RETURN e", {"entity_type": entity_type})
@@ -158,6 +164,7 @@ class IdeaGraph:
             logger.info(f"idea link: {idea_link_record}")
 
             entity_set = set()
+            entity_token_set = set()
             knowledge_category_set = set()
 
             # Get emotion features
@@ -184,6 +191,8 @@ class IdeaGraph:
                 # Add emotion source to entities
                 emotion_source = remove_leading_the(emotion["emotion_source"])
                 entity_set.add(emotion_source)
+                for token in emotion_source.split():
+                    entity_token_set.add(token)
                 await self.add_entity(emotion_source)
                 await self.link_emotion_to_entity(
                     emotion["emotion"], emotion_source, sentence_rdb_record.sentence_id, "FELT",
@@ -196,6 +205,8 @@ class IdeaGraph:
                 # Add emotion target to entities
                 emotion_target = remove_leading_the(emotion["emotion_target"])
                 entity_set.add(emotion_target)
+                for token in emotion_target.split():
+                    entity_token_set.add(token)
                 await self.add_entity(emotion_target)
                 await self.link_emotion_to_entity(
                     emotion["emotion"], emotion_target, sentence_rdb_record.sentence_id, "EVOKED",
@@ -235,20 +246,14 @@ class IdeaGraph:
                     await rdb_session.commit()
 
             # Entities
-            for proper_noun in sentence_rdb_record.sentence_flair_text_features["proper_nouns"]:
-                entity_set.add(proper_noun)
-                await self.add_entity(proper_noun)
-                await self.link_entity_to_sentence(proper_noun, sentence_rdb_record.sentence_id, sentence_node_type)
-            for entity in sentence_rdb_record.sentence_flair_text_features["ner"]:
-                entity_set.add(entity)
-                await self.add_entity(entity)
-                await self.link_entity_to_sentence(entity, sentence_rdb_record.sentence_id, sentence_node_type)
             for entity in sentence_rdb_record.sentence_openai_entity_features["entities"]:
                 logger.info(f"entity: {entity}")
 
                 # Add entity and link to sentence.
                 entity_name = remove_leading_the(entity["entity"])
                 entity_set.add(entity_name)
+                for token in entity_name.split():
+                    entity_token_set.add(token)
                 await self.add_entity(entity_name)
                 await self.link_entity_to_sentence(entity_name, sentence_rdb_record.sentence_id, sentence_node_type)
 
@@ -256,10 +261,30 @@ class IdeaGraph:
                 await self.add_entity_type(entity["entity_type"])
                 await self.link_entity_type_to_entity(entity_name, entity["entity_type"])
 
+                if "semantic_role" in entity:
+                    await self.add_entity_role(entity["semantic_role"])
+                    await self.link_entity_role_to_entity(entity_name, entity["semantic_role"],
+                                                          sentence_rdb_record.sentence_id)
+
                 # Link entity to a sentiment based on context.
                 if "sentiment" in entity and entity["sentiment"] != "neutral":
                     await self.add_sentiment_label(entity["sentiment"])
-                    await self.link_entity_to_sentiment(entity_name, entity["sentiment"])
+                    await self.link_entity_to_sentiment(entity_name, entity["sentiment"],
+                                                        sentence_rdb_record.sentence_id)
+
+            for entity in sentence_rdb_record.sentence_flair_text_features["ner"]:
+                entity_set.add(entity)
+                for token in entity.split():
+                    entity_token_set.add(token)
+                await self.add_entity(entity)
+                await self.link_entity_to_sentence(entity, sentence_rdb_record.sentence_id, sentence_node_type)
+            for proper_noun in sentence_rdb_record.sentence_flair_text_features["proper_nouns"]:
+                if proper_noun not in entity_set and proper_noun not in entity_token_set:
+                    entity_set.add(proper_noun)
+                    for token in proper_noun.split():
+                        entity_token_set.add(token)
+                    await self.add_entity(proper_noun)
+                    await self.link_entity_to_sentence(proper_noun, sentence_rdb_record.sentence_id, sentence_node_type)
 
             if sentence_rdb_record.sentence_openai_text_features is None:
                 openai_text_features = (
@@ -295,6 +320,7 @@ class IdeaGraph:
                 if topic in knowledge_category_set:
                     await self.link_topic_label_to_knowledge_category(topic, topic)
 
+            # TODO: Convert this to use OpenAI for get rid of it.
             # Verb
             for verb in sentence_rdb_record.sentence_flair_text_features["verbs"]:
                 verb = verb.lower()
@@ -449,13 +475,21 @@ class IdeaGraph:
         logger.info(f"entity link: {entity_link_record}")
         return entity_link_record
 
-    async def link_entity_to_sentiment(self, entity: str, sentiment: str):
+    async def link_entity_to_sentiment(self, entity: str, sentiment: str, sentence_id: int):
         entity_link_record = await self.driver.query(
             "MATCH (e:Entity {text: $entity}), (s:SentimentLabel {text: $sentiment}) "
-            "MERGE (e)-[r:EVOKED]->(s) "
-            "RETURN r", {"entity": entity, "sentiment": sentiment})
+            "MERGE (e)-[r:EVOKED {sentence_id: $sentence_id, time_evoked: timestamp()}]->(s) "
+            "RETURN r", {"entity": entity, "sentiment": sentiment, "sentence_id": sentence_id})
         logger.info(f"entity/sentiment link: {entity_link_record}")
         return entity_link_record
+
+    async def link_entity_role_to_entity(self, entity: str, entity_role: str, sentence_id: int):
+        entity_role_link_record = await self.driver.query(
+            "MATCH (e:Entity {text: $entity}), (er:EntityRole {text: $entity_role}) "
+            "MERGE (e)-[r:ROLE_OF {sentence_id: $sentence_id}]->(er) "
+            "RETURN r", {"entity": entity, "entity_role": entity_role, "sentence_id": sentence_id})
+        logger.info(f"entity role link: {entity_role_link_record}")
+        return entity_role_link_record
 
     async def link_entity_type_to_entity(self, entity: str, entity_type: str):
         entity_type_link_record = await self.driver.query(
