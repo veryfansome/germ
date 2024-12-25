@@ -7,9 +7,9 @@ from datetime import datetime, timedelta
 from sqlalchemy.future import select as sql_select
 from starlette.concurrency import run_in_threadpool
 
-from bot.lang.utils import (flair_text_feature_extraction, openai_detect_sentence_type,
+from bot.lang.utils import (extract_openai_sentence_type_features,
                             extract_openai_emotion_features, extract_openai_entity_features,
-                            openai_text_feature_extraction, split_to_sentences)
+                            extract_openai_text_features, split_to_sentences)
 from bot.lang.examples import documents as doc_examples, sentences as sentence_examples
 from db.neo4j import AsyncNeo4jDriver
 from db.models import AsyncSessionLocal, Sentence
@@ -108,8 +108,7 @@ class IdeaGraph:
         return knowledge_category_record
 
     async def add_sentence(self, sentence: str,
-                           current_rounded_time=None, flair_features=None, openai_features=None,
-                           openai_sentence_type=None):
+                           current_rounded_time=None, openai_features=None, openai_sentence_type=None):
         sentence = sentence.strip()
         if current_rounded_time is None:
             current_rounded_time, _, _ = await self.add_time()
@@ -133,7 +132,7 @@ class IdeaGraph:
                 openai_sentence_type = (
                     openai_sentence_type
                     if openai_sentence_type is not None else json.loads(await run_in_threadpool(
-                        openai_detect_sentence_type, sentence, model="gpt-4o-mini")))
+                        extract_openai_sentence_type_features, sentence, model="gpt-4o-mini")))
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
                     sentence_rdb_record.sentence_node_type = SENTENCE_NODE_TYPE[openai_sentence_type["functional_type"]]
@@ -228,16 +227,6 @@ class IdeaGraph:
                     await self.add_emotion(opposite_emotion)
                     await self.link_emotion_to_emotion(emotion["emotion"], opposite_emotion, "OPPOSITE")
 
-            # Get flair text features
-            if sentence_rdb_record.sentence_flair_text_features is None:
-                flair_features = (
-                    flair_features if flair_features is not None else await run_in_threadpool(
-                        flair_text_feature_extraction, sentence))
-                async with rdb_session.begin():
-                    await rdb_session.refresh(sentence_rdb_record)
-                    sentence_rdb_record.sentence_flair_text_features = flair_features
-                    await rdb_session.commit()
-
             # Get OpenAI entity features
             if sentence_rdb_record.sentence_openai_entity_features is None:
                 openai_entity_features = json.loads(await run_in_threadpool(
@@ -274,24 +263,10 @@ class IdeaGraph:
                     await self.link_entity_to_sentiment(entity_name, entity["sentiment"],
                                                         sentence_rdb_record.sentence_id)
 
-            for entity in sentence_rdb_record.sentence_flair_text_features["ner"]:
-                entity_set.add(entity)
-                for token in entity.split():
-                    entity_token_set.add(token)
-                await self.add_entity(entity)
-                await self.link_entity_to_sentence(entity, sentence_rdb_record.sentence_id, sentence_node_type)
-            for proper_noun in sentence_rdb_record.sentence_flair_text_features["proper_nouns"]:
-                if proper_noun not in entity_set and proper_noun not in entity_token_set:
-                    entity_set.add(proper_noun)
-                    for token in proper_noun.split():
-                        entity_token_set.add(token)
-                    await self.add_entity(proper_noun)
-                    await self.link_entity_to_sentence(proper_noun, sentence_rdb_record.sentence_id, sentence_node_type)
-
             if sentence_rdb_record.sentence_openai_text_features is None:
                 openai_text_features = (
                     openai_features if openai_features is not None
-                    else json.loads(openai_text_feature_extraction(sentence)))
+                    else json.loads(extract_openai_text_features(sentence)))
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
                     sentence_rdb_record.sentence_openai_text_features = openai_text_features
@@ -321,31 +296,6 @@ class IdeaGraph:
                 await self.link_topic_label_to_sentence(topic, sentence, sentence_node_type)
                 if topic in knowledge_category_set:
                     await self.link_topic_label_to_knowledge_category(topic, topic)
-
-            # TODO: Convert this to use OpenAI for get rid of it.
-            # Verb
-            for verb in sentence_rdb_record.sentence_flair_text_features["verbs"]:
-                verb = verb.lower()
-                # Filter out states-of-being verbs because these should be modeled as connections between entities.
-                if verb in ["be", "become"]:
-                    logger.info(f"future verb: {verb}")
-                elif verb in ["will"]:
-                    logger.info(f"future modal verb: {verb}")
-                elif verb in ["became", "been", "was", "were"]:
-                    logger.info(f"past verb: {verb}")
-                elif verb in ["could", "would"]:
-                    logger.info(f"past modal verb: {verb}")
-                elif verb in ["had"]:
-                    logger.info(f"past possessive verb: {verb}")
-                elif verb in ["am", "are", "is", "being"]:
-                    logger.info(f"present verb: {verb}")
-                elif verb in ["can"]:
-                    logger.info(f"present modal verb: {verb}")
-                elif verb in ["has", "have"]:
-                    logger.info(f"present possessive verb: {verb}")
-                else:
-                    await self.add_verb(verb)
-                    await self.link_verb_to_sentence(verb, sentence, sentence_node_type)
 
         return sentence_graph_record, sentence_node_type
 

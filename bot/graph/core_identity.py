@@ -1,5 +1,4 @@
 import asyncio
-from starlette.concurrency import run_in_threadpool
 
 from bot.graph.idea import get_idea_graph, IdeaGraph
 from bot.lang.examples import sentences as sentence_examples
@@ -20,8 +19,7 @@ async def main():
     current_rounded_time, _, _ = await idea_graph.add_time()
     for sentence in sentence_examples.core_identity:
         tasks.append(idea_graph.add_sentence(
-            sentence, current_rounded_time=current_rounded_time,
-            flair_features=None, openai_features=None, openai_sentence_type=None))
+            sentence, current_rounded_time=current_rounded_time, openai_features=None, openai_sentence_type=None))
     await asyncio.gather(*tasks)
 
 

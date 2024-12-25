@@ -1,14 +1,11 @@
 import difflib
-from flair.data import Sentence
 from nltk.tokenize import sent_tokenize
 from openai import OpenAI
 
-from bot.lang.dependencies import pos_tagger, ner_tagger
-from observability.logging import logging, setup_logging
-
-logger = logging.getLogger(__name__)
+from observability.logging import logging
 
 differ = difflib.Differ()
+logger = logging.getLogger(__name__)
 
 
 def diff_strings(str1, str2):
@@ -19,12 +16,13 @@ def diff_strings(str1, str2):
 
 def extract_openai_emotion_features(text: str,
                                     model: str = "gpt-4o-mini") -> str:
-    system_message = "Extract emotional nuance from text."
     tool_name = "store_emotional_features"
+    system_message = ("Analyze the emotional nuance from the text "
+                      f"and populate the emotions array for the {tool_name} tool.")
     tool_properties_spec = {
         "emotions": {
             "type": "array",
-            "description": "List of perceivable emotions, capturing nuanced contextual meaning.",
+            "description": "List of all perceivable emotions, capturing nuanced contextual meaning.",
             "items": {
                 "type": "object",
                 "description": "An emotion from the text.",
@@ -129,9 +127,9 @@ def extract_openai_entity_features(text: str,
                         "type": "string",
                         "description": "What type or class of entity is this?",
                         "enum": [
+                            "event in time",
                             "action or possible action",
                             "concept", "creature", "currency",
-                            "event in time",
                             "geographic feature",
                             "location",
                             "organization",
@@ -183,36 +181,8 @@ def extract_openai_entity_features(text: str,
         return completion.choices[0].message.tool_calls[0].function.arguments
 
 
-def flair_text_feature_extraction(text: str):
-    """
-    Old fashion NLP on the cheap.
-
-    :param text:
-    :return:
-    """
-    pos_tags = []
-    proper_nouns = []
-    verbs = []
-    flair_sentence = Sentence(text)
-    pos_tagger.predict(flair_sentence)
-    ner_tagger.predict(flair_sentence)
-    for token in flair_sentence:
-        pos_tags.append(token.tag)
-        if token.tag in ("NNP", "NNPS"):
-            proper_nouns.append(token.text)
-        elif token.tag in ("VBD", "VBP", "VBZ"):
-            verbs.append(token.text)
-    flair_features = {
-        "ner": [e.text for e in flair_sentence.get_spans("ner")],
-        "pos_tags": pos_tags,
-        "proper_nouns": list(set(proper_nouns)),
-        "verbs": list(set(verbs))}
-    logger.info(f"flair_features: {flair_features}")
-    return flair_features
-
-
-def openai_detect_sentence_type(text: str,
-                                model: str = "gpt-4o-mini"):
+def extract_openai_sentence_type_features(text: str,
+                                          model: str = "gpt-4o-mini"):
     system_message = "Detect sentence type from textual context."
     tool_name = "store_sentence_type"
     tool_properties_spec = {
@@ -296,11 +266,11 @@ def openai_detect_sentence_type(text: str,
         return completion.choices[0].message.tool_calls[0].function.arguments
 
 
-def openai_text_feature_extraction(text: str,
-                                   json_to_check: str = None,
-                                   model: str = "gpt-4o-mini",
-                                   prefer_second_opinion: bool = False,
-                                   second_opinion: bool = False) -> str:
+def extract_openai_text_features(text: str,
+                                 json_to_check: str = None,
+                                 model: str = "gpt-4o-mini",
+                                 prefer_second_opinion: bool = False,
+                                 second_opinion: bool = False) -> str:
     """
     Way better for emotionality (variety, intensity, transitions), sentiment, related knowledge areas, related topics,
     and other contextual tasks.
@@ -380,7 +350,7 @@ def openai_text_feature_extraction(text: str,
         )
         new_feature_json = completion.choices[0].message.tool_calls[0].function.arguments
         if second_opinion:
-            return openai_text_feature_extraction(
+            return extract_openai_text_features(
                 text, json_to_check=new_feature_json, prefer_second_opinion=prefer_second_opinion)
 
         if json_to_check is None:
@@ -399,37 +369,3 @@ def openai_text_feature_extraction(text: str,
 
 def split_to_sentences(text: str) -> list[str]:
     return sent_tokenize(text)
-
-
-if __name__ == '__main__':
-    setup_logging(global_level="INFO")
-
-    test_set = [
-        "Hello, world!",
-        "The Earth is round?",
-        "This sucks!",
-        "I hated broccoli as a kid but now I love it.",
-        "Clifford is the big red dog.",
-        "Let's go to 711.",
-        "I just love beyonce.",
-        "Cut my hair just like Beyonce",
-        "It's hard to believe my husband used to be such a rude person.",
-        "Nevermind is my favorite Nirvana album",
-        "People might just be nice for their gain.",
-        "People may have complex motivations that require discernment.",
-        "Maybe people bring joy, but not always in ways I expect.",
-        "People might be self-interested; goodness could just be a disguise.",
-        "People might surprise us with kindness when we least expect it.",
-        "People might just be self-serving in the end.",
-        ("In Revelation 13:18, it says, \"let the one who has understanding calculate the number of the beast, "
-         "for it is the number of a man, and his number is 666\"."),
-        "Maybe you should call 1-800-222-1222, the poison control hotline, or even 9-11!",
-        "You can't break your 20 down the street because the 711 doesn't opens until 7am.",
-    ]
-    for test in test_set:
-        print(f"""
-Sentence: {test}
----
-flair_text_feature_extraction: {flair_text_feature_extraction(test)}
-openai_text_feature_extraction: {openai_text_feature_extraction(test, second_opinion=True)}
-""")

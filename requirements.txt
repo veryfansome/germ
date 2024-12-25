@@ -1,7 +1,6 @@
 apscheduler
 asyncpg
 fastapi
-flair
 gunicorn
 httpx
 neo4j
