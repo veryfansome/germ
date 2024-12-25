@@ -266,29 +266,18 @@ def extract_openai_sentence_type_features(text: str,
         return completion.choices[0].message.tool_calls[0].function.arguments
 
 
-def extract_openai_text_features(text: str,
-                                 json_to_check: str = None,
-                                 model: str = "gpt-4o-mini",
-                                 prefer_second_opinion: bool = False,
-                                 second_opinion: bool = False) -> str:
+def extract_openai_text_features(text: str, model: str = "gpt-4o-mini") -> str:
     """
     Way better for emotionality (variety, intensity, transitions), sentiment, related knowledge areas, related topics,
     and other contextual tasks.
 
     Setting `second_opinion` to True can improve accuracy but is obviously more expensive.
 
-    :param json_to_check:
-    :param model:
-    :param prefer_second_opinion:
-    :param second_opinion:
-    :param temperature:
     :param text:
+    :param model:
     :return:
     """
     system_message = "Extract text features."
-    if json_to_check is not None:
-        system_message = "Check the extracted text features and correct errors."
-        text = f"# Text\n{text}\n\n# Features JSON\n{json_to_check}"
 
     tool_name = "store_text_features"
     tool_properties_spec = {
@@ -328,10 +317,11 @@ def extract_openai_text_features(text: str,
             model=model, n=1, temperature=0, timeout=60,
 
             # -2 to 2, lower values to stay more focused on the text vs using different words
-            frequency_penalty=0,
+            # frequency_penalty=0,
 
             # -2 to 2, lower values discourage new topics
-            presence_penalty=0,
+            # presence_penalty=0,
+
             tool_choice={"type": "function", "function": {"name": tool_name}},
             tools=[{
                 "type": "function",
@@ -348,23 +338,7 @@ def extract_openai_text_features(text: str,
                 }
             }]
         )
-        new_feature_json = completion.choices[0].message.tool_calls[0].function.arguments
-        if second_opinion:
-            return extract_openai_text_features(
-                text, json_to_check=new_feature_json, prefer_second_opinion=prefer_second_opinion)
-
-        if json_to_check is None:
-            logger.info(f"openai_features: {new_feature_json}")
-            return new_feature_json
-        else:
-            diffs = diff_strings(json_to_check, new_feature_json)
-            if diffs:
-                logger.warning("diffs on second opinion:\n" + '\n'.join(diffs))
-                if prefer_second_opinion:
-                    logger.info(f"openai_features: {new_feature_json}")
-                    return new_feature_json
-            logger.info(f"openai_features: {json_to_check}")
-            return json_to_check
+        return completion.choices[0].message.tool_calls[0].function.arguments
 
 
 def split_to_sentences(text: str) -> list[str]:

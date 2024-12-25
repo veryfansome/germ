@@ -3,7 +3,7 @@ import re
 import signal
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.future import select as sql_select
 from starlette.concurrency import run_in_threadpool
 
@@ -115,7 +115,7 @@ class IdeaGraph:
 
         # Generate signature for lookup in PostgreSQL
         sentence_signature = uuid.uuid5(UUID5_NS, sentence)
-        async with AsyncSessionLocal() as rdb_session:
+        async with (AsyncSessionLocal() as rdb_session):
             async with rdb_session.begin():
                 sentence_select_stmt = sql_select(Sentence).where(Sentence.sentence_signature == sentence_signature)
                 sentence_select_result = await rdb_session.execute(sentence_select_stmt)
@@ -128,7 +128,12 @@ class IdeaGraph:
                     await rdb_session.commit()
 
             # Get sentence type if not set
-            if sentence_rdb_record.sentence_node_type is None:
+            if (sentence_rdb_record.sentence_node_type is None
+                    or is_stale(
+                        sentence_rdb_record.sentence_openai_sentence_features_time_changed,
+                        sentence_rdb_record.sentence_openai_sentence_features_fetch_count,
+                        hours=24
+                    )):
                 openai_sentence_type = (
                     openai_sentence_type
                     if openai_sentence_type is not None else json.loads(await run_in_threadpool(
@@ -137,6 +142,8 @@ class IdeaGraph:
                     await rdb_session.refresh(sentence_rdb_record)
                     sentence_rdb_record.sentence_node_type = SENTENCE_NODE_TYPE[openai_sentence_type["functional_type"]]
                     sentence_rdb_record.sentence_openai_sentence_features = openai_sentence_type
+                    sentence_rdb_record.sentence_openai_sentence_features_time_changed = utc_now()
+                    sentence_rdb_record.sentence_openai_sentence_features_fetch_count += 1
                     await rdb_session.commit()
             logger.info(f"openai_sentence_features: {sentence_rdb_record.sentence_openai_sentence_features}")
 
@@ -169,12 +176,18 @@ class IdeaGraph:
             knowledge_category_set = set()
 
             # Get emotion features
-            if sentence_rdb_record.sentence_openai_emotion_features is None:
-                openai_emotion_features = json.loads(await run_in_threadpool(
-                    extract_openai_emotion_features, sentence, model="gpt-4o-mini"))
+            if (sentence_rdb_record.sentence_openai_emotion_features is None
+                    or is_stale(
+                        sentence_rdb_record.sentence_openai_emotion_features_time_changed,
+                        sentence_rdb_record.sentence_openai_emotion_features_fetch_count,
+                        hours=24
+                    )):
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
-                    sentence_rdb_record.sentence_openai_emotion_features = openai_emotion_features
+                    sentence_rdb_record.sentence_openai_emotion_features = json.loads(await run_in_threadpool(
+                        extract_openai_emotion_features, sentence, model="gpt-4o-mini"))
+                    sentence_rdb_record.sentence_openai_emotion_features_time_changed = utc_now()
+                    sentence_rdb_record.sentence_openai_emotion_features_fetch_count += 1
                     await rdb_session.commit()
 
             # Emotion
@@ -228,12 +241,18 @@ class IdeaGraph:
                     await self.link_emotion_to_emotion(emotion["emotion"], opposite_emotion, "OPPOSITE")
 
             # Get OpenAI entity features
-            if sentence_rdb_record.sentence_openai_entity_features is None:
-                openai_entity_features = json.loads(await run_in_threadpool(
-                    extract_openai_entity_features, sentence, model="gpt-4o-mini"))
+            if (sentence_rdb_record.sentence_openai_entity_features is None
+                    or is_stale(
+                        sentence_rdb_record.sentence_openai_entity_features_time_changed,
+                        sentence_rdb_record.sentence_openai_entity_features_fetch_count,
+                        hours=24
+                    )):
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
-                    sentence_rdb_record.sentence_openai_entity_features = openai_entity_features
+                    sentence_rdb_record.sentence_openai_entity_features = json.loads(await run_in_threadpool(
+                        extract_openai_entity_features, sentence, model="gpt-4o-mini"))
+                    sentence_rdb_record.sentence_openai_entity_features_time_changed = utc_now()
+                    sentence_rdb_record.sentence_openai_entity_features_fetch_count += 1
                     await rdb_session.commit()
 
             # Entities
@@ -263,13 +282,18 @@ class IdeaGraph:
                     await self.link_entity_to_sentiment(entity_name, entity["sentiment"],
                                                         sentence_rdb_record.sentence_id)
 
-            if sentence_rdb_record.sentence_openai_text_features is None:
-                openai_text_features = (
-                    openai_features if openai_features is not None
-                    else json.loads(extract_openai_text_features(sentence)))
+            if (sentence_rdb_record.sentence_openai_text_features is None
+                    or is_stale(
+                        sentence_rdb_record.sentence_openai_text_features_time_changed,
+                        sentence_rdb_record.sentence_openai_text_features_fetch_count,
+                        hours=24
+                    )):
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
-                    sentence_rdb_record.sentence_openai_text_features = openai_text_features
+                    sentence_rdb_record.sentence_openai_text_features = json.loads(
+                        await run_in_threadpool(extract_openai_text_features, sentence, model="gpt-4o-mini"))
+                    sentence_rdb_record.sentence_openai_text_features_time_changed = utc_now()
+                    sentence_rdb_record.sentence_openai_text_features_fetch_count += 1
                     await rdb_session.commit()
 
             # Knowledge category
@@ -319,11 +343,10 @@ class IdeaGraph:
 
         :return:
         """
-        now = datetime.now().replace(second=0, microsecond=0)
+        now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
         current_rounded_time = round_time_now_down_to_nearst_15(now)
         current_time_record = await self.driver.query(
-            "MERGE (t:Time {text: $time, epoch: $epoch}) RETURN t",
-            {"time": str(current_rounded_time), "epoch": int(time.time())})
+            "MERGE (t:Time {text: $time}) RETURN t", {"time": str(current_rounded_time)})
         logger.info(f"time: {current_time_record}")
         last_rounded_time = current_rounded_time - timedelta(minutes=15)
         time_record_links = await self.driver.query(
@@ -534,6 +557,21 @@ def get_idea_graph(name: str):
     return INSTANCE_MANIFEST[name]
 
 
+def is_stale(dt, fetch_count: int, hours: int, max_fetch_count: int = 5):
+    """
+
+    :param dt:  Time changed Datetime object
+    :param fetch_count: Number of times fetched from OpenAI
+    :param hours: Number of hours to wait before fetching again
+    :param max_fetch_count: Maximum number of times fetched from OpenAI since the value diminishes.
+    :return:
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (fetch_count >= max_fetch_count  # Value of fetching diminishes
+            or (utc_now() - dt) > timedelta(hours=hours))
+
+
 def remove_leading_the(text: str):
     return re.sub(r'(?i)^the\s+', '', text)
 
@@ -543,6 +581,10 @@ def round_time_now_down_to_nearst_15(dt):
     remainder = minutes % 15  # How many 15-minute increments have passed
     rounded_minutes = minutes - remainder  # Subtract to round down
     return dt.replace(minute=rounded_minutes, second=0, microsecond=0)
+
+
+def utc_now():
+    return datetime.now(timezone.utc)
 
 
 if __name__ == '__main__':

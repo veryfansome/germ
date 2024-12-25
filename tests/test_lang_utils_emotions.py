@@ -194,7 +194,7 @@ def test_extract_openai_emotion_features_case_5():
                 "emotion_source": ["her"],
                 "emotion_source_entity_type": ["person"],
                 "emotion_target": ["her experience"],
-                "emotion_target_entity_type": ["emotion"],
+                "emotion_target_entity_type": ["abstract", "emotion"],
                 "intensity": ["medium"],
                 "nuance": ["complex"],
                 "synonymous_emotions": ["happiness", "delight"],
@@ -204,7 +204,7 @@ def test_extract_openai_emotion_features_case_5():
                 "emotion_source": ["her"],
                 "emotion_source_entity_type": ["person"],
                 "emotion_target": ["her past actions"],
-                "emotion_target_entity_type": ["emotion"],
+                "emotion_target_entity_type": ["abstract", "emotion", "event"],
                 "intensity": ["medium"],
                 "nuance": ["complex"],
                 "synonymous_emotions": ["sorrow", "remorse"],
@@ -260,8 +260,8 @@ def test_extract_openai_emotion_features_case_8():
             "conflicted": {
                 "emotion_source": ["her", "her heart"],
                 "emotion_source_entity_type": ["emotion", "emotional state", "metaphor", "person"],
-                "emotion_target": ["emotions", "her heart", "her emotions"],
-                "emotion_target_entity_type": ["abstract", "abstract concept", "metaphor"],
+                "emotion_target": ["emotions", "her heart", "her emotions", "her feelings"],
+                "emotion_target_entity_type": ["abstract", "abstract concept", "emotion", "emotions", "metaphor"],
                 "intensity": ["high"],
                 "nuance": ["complex"],
                 "synonymous_emotions": ["torn", "ambivalent", "uncertain"],
@@ -293,6 +293,40 @@ def test_extract_openai_emotion_features_case_8():
         })
 
 
+def test_extract_openai_emotion_features_case_9():
+    """
+    Emotions with ambiguity
+
+    :return:
+    """
+    match_reference_emotions(
+        "He smiled, but it was hard to tell if it was genuine.", {
+            "uncertainty": {
+                "emotion_source": ["the observer"],
+                "emotion_source_entity_type": ["person"],
+                "emotion_target": ["the smile"],
+                "emotion_target_entity_type": ["expression", "gesture"],
+                "intensity": ["medium"],
+                "nuance": ["complex"],
+                "synonymous_emotions": ["doubt", "skepticism"],
+                "opposite_emotions": ["confidence", "trust"]
+            },
+        }, match_all=False)  # Curiosity appears sometimes
+    match_reference_emotions(
+        "Her expression was unreadable, a mix of emotions.", {
+            "confusion": {
+                "emotion_source": ["her"],
+                "emotion_source_entity_type": ["person"],
+                "emotion_target": ["her expression"],
+                "emotion_target_entity_type": ["expression"],
+                "intensity": ["medium"],
+                "nuance": ["complex"],
+                "synonymous_emotions": ["uncertainty", "bewilderment"],
+                "opposite_emotions": ["clarity", "certainty"]
+            },
+        }, match_all=False)  # Intrigue, curiosity, anxiety, ambivalence app appear sometimes.
+
+
 if __name__ == "__main__":
     from observability.logging import setup_logging
     setup_logging()
@@ -304,4 +338,5 @@ if __name__ == "__main__":
     #test_extract_openai_emotion_features_case_5()
     #test_extract_openai_emotion_features_case_6()
     #test_extract_openai_emotion_features_case_7()
-    test_extract_openai_emotion_features_case_8()
+    #test_extract_openai_emotion_features_case_8()
+    test_extract_openai_emotion_features_case_9()

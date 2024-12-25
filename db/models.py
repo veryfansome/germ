@@ -29,8 +29,8 @@ class ChatSession(Base):
     chat_session_id = Column(Integer, primary_key=True, autoincrement=True)
     is_hidden = Column(Boolean, default=False)
     summary = Column(String)
-    time_started = Column(DateTime)
-    time_stopped = Column(DateTime)
+    time_started = Column(DateTime(timezone=True))
+    time_stopped = Column(DateTime(timezone=True))
 
     # Relationship to ChatUser through the link table
     chat_users = relationship(
@@ -47,7 +47,7 @@ class ChatRequestReceived(Base):
     chat_session_id = Column(Integer, ForeignKey("chat_session.chat_session_id"), nullable=False)
     chat_request_received_id = Column(Integer, primary_key=True, autoincrement=True)
     chat_request = Column(JSON)
-    time_received = Column(DateTime)
+    time_received = Column(DateTime(timezone=True))
 
 
 class ChatResponseSent(Base):
@@ -57,7 +57,7 @@ class ChatResponseSent(Base):
                                       nullable=True)
     chat_response_sent_id = Column(Integer, primary_key=True, autoincrement=True)
     chat_response = Column(JSON)
-    time_sent = Column(DateTime)
+    time_sent = Column(DateTime(timezone=True))
 
     __table_args__ = (
         # Since we look up responses by session for bookmarks.
@@ -106,12 +106,24 @@ class ChatSessionChatUserProfileLink(Base):
 class Sentence(Base):
     __tablename__ = "sentence"
     sentence_id = Column(Integer, primary_key=True, autoincrement=True)
-    sentence_flair_text_features = Column(JSON)
     sentence_node_type = Column(String)
+
     sentence_openai_emotion_features = Column(JSON)
+    sentence_openai_emotion_features_time_changed = Column(DateTime(timezone=True))
+    sentence_openai_emotion_features_fetch_count = Column(Integer, default=0)
+
     sentence_openai_entity_features = Column(JSON)
+    sentence_openai_entity_features_time_changed = Column(DateTime(timezone=True))
+    sentence_openai_entity_features_fetch_count = Column(Integer, default=0)
+
     sentence_openai_sentence_features = Column(JSON)
+    sentence_openai_sentence_features_time_changed = Column(DateTime(timezone=True))
+    sentence_openai_sentence_features_fetch_count = Column(Integer, default=0)
+
     sentence_openai_text_features = Column(JSON)
+    sentence_openai_text_features_time_changed = Column(DateTime(timezone=True))
+    sentence_openai_text_features_fetch_count = Column(Integer, default=0)
+
     sentence_signature = Column(UUID)
     text = Column(String)
 
