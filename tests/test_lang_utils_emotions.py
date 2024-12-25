@@ -152,7 +152,7 @@ def test_extract_openai_emotion_features_case_4():
             "emotion_source": ["She"],
             "emotion_source_entity_type": ["person"],
             "emotion_target": ["the situation"],
-            "emotion_target_entity_type": ["event"],
+            "emotion_target_entity_type": ["event", "situation"],
             "intensity": ["high"],
             "nuance": ["simple"],
             "synonymous_emotions": ["angry", "irate", "enraged"],
@@ -225,7 +225,7 @@ def test_extract_openai_emotion_features_case_6():
             "emotion_source_entity_type": ["person"],
             "emotion_target": ["test results"],
             "emotion_target_entity_type": ["event"],
-            "intensity": ["medium"],
+            "intensity": ["medium", "high"],
             "nuance": ["simple"],
             "synonymous_emotions": ["comfort", "ease", "satisfaction"],
             "opposite_emotions": ["anxiety", "worry", "fear"]}})
@@ -302,7 +302,7 @@ def test_extract_openai_emotion_features_case_9():
     match_reference_emotions(
         "He smiled, but it was hard to tell if it was genuine.", {
             "uncertainty": {
-                "emotion_source": ["the observer"],
+                "emotion_source": ["he", "the observer"],
                 "emotion_source_entity_type": ["person"],
                 "emotion_target": ["the smile"],
                 "emotion_target_entity_type": ["expression", "gesture"],

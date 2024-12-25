@@ -109,8 +109,9 @@ def extract_openai_emotion_features(text: str,
 
 def extract_openai_entity_features(text: str,
                                    model: str = "gpt-4o-mini") -> str:
-    system_message = "Extract entities from text."
     tool_name = "store_entity_features"
+    system_message = ("Analyze all entities from the text "
+                      f"and populate the entities array for the {tool_name} tool.")
     tool_properties_spec = {
         "entities": {
             "type": "array",
@@ -183,8 +184,9 @@ def extract_openai_entity_features(text: str,
 
 def extract_openai_sentence_type_features(text: str,
                                           model: str = "gpt-4o-mini"):
-    system_message = "Detect sentence type from textual context."
     tool_name = "store_sentence_type"
+    system_message = ("Analyze this sentence, classify it, "
+                      f"and populate the entities array for the {tool_name} tool.")
     tool_properties_spec = {
         "change_of_state": {
             "type": "string",
@@ -210,11 +212,6 @@ def extract_openai_sentence_type_features(text: str,
             "type": "string",
             "description": "Type of sentence based on organization.",
             "enum": ["simple", "compound", "complex", "complex-compound"],
-        },
-        "reports_speech": {
-            "type": "string",
-            "description": "How does the sentence report speech?",
-            "enum": ["no speech", "direct speech", "paraphrased speech"],
         },
         "spatiality": {
             "type": "string",
@@ -256,6 +253,136 @@ def extract_openai_sentence_type_features(text: str,
                     "parameters": {
                         "type": "object",
                         "description": "Sentence type to store.",
+                        "properties": tool_properties_spec,
+                        "required": list(tool_properties_spec.keys()),
+                        "additionalProperties": False,
+                    },
+                }
+            }]
+        )
+        return completion.choices[0].message.tool_calls[0].function.arguments
+
+
+def extract_openai_speech_features(text: str, model: str = "gpt-4o-mini"):
+    tool_name = "store_speech_features"
+    system_message = f"Analyze the speech in this text and populate the speech parameter for the {tool_name} tool."
+    tool_properties_spec = {
+        "speech": {
+            "type": "array",
+            "description": "List of all instances of reported speech found in text.",
+            "items": {
+                "type": "object",
+                "description": "An instance of reported speech from the text.",
+                "properties": {
+                    "speech": {
+                        "type": "string",
+                        "description": "Direct speech text or paraphrased text.",
+                    },
+                    "speech_type": {
+                        "type": "string",
+                        "description": "Type of speech.",
+                        "enum": ["first-person direct", "second-person direct", "third-person direct",
+                                 "first-person paraphrased", "second-person paraphrased", "third-person paraphrased"]
+                    },
+                    "narrator": {
+                        "type": "string",
+                        "description": "Who is the narrator?",
+                    },
+                    "listener": {
+                        "type": "string",
+                        "description": "Who is the listener?",
+                    },
+                    "speech_owner": {
+                        "type": "string",
+                        "description": "Who is responsible for the reported speech?",
+                    },
+                }
+            }
+        },
+    }
+    with OpenAI() as client:
+        completion = client.chat.completions.create(
+            messages=[{"role": "system", "content": system_message}, {"role": "user", "content": text}],
+            model=model, n=1, temperature=0, timeout=30,
+            # -2 to 2, lower values to stay more focused on the text vs using different words
+            frequency_penalty=0,
+            # -2 to 2, lower values discourage new topics
+            presence_penalty=0,
+            tool_choice={"type": "function", "function": {"name": tool_name}},
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": "Store speech features.",
+                    "parameters": {
+                        "type": "object",
+                        "description": "Speech features to store.",
+                        "properties": tool_properties_spec,
+                        "required": list(tool_properties_spec.keys()),
+                        "additionalProperties": False,
+                    },
+                }
+            }]
+        )
+        return completion.choices[0].message.tool_calls[0].function.arguments
+
+
+def extract_openai_state_change_features(text: str, model: str = "gpt-4o-mini"):
+    tool_name = "store_state_change_features"
+    system_message = ("Analyze the changes in state described in this text "
+                      f"and populate the state_changes parameter for the {tool_name} tool.")
+    tool_properties_spec = {
+        "state_changes": {
+            "type": "array",
+            "description": ("List of all changes in state related to entities, objects, subjects, "
+                            "or other elements of the text."),
+            "items": {
+                "type": "object",
+                "description": "An instance of of a state change from the text.",
+                "properties": {
+                    "what": {
+                        "type": "string",
+                        "description": "What is the thing that changes?",
+                    },
+                    "state_before_change": {
+                        "type": "string",
+                        "description": "State before change.",
+                    },
+                    "state_after_change": {
+                        "type": "string",
+                        "description": "State after change.",
+                    },
+                    "change_process": {
+                        "type": "string",
+                        "description": "Name or word that best describes the change process.",
+                    },
+                    "typical_duration": {
+                        "type": "string",
+                        "description": "Typical duration of the change process.",
+                        "enum": ["sub-seconds", "seconds", "minutes", "hours", "days", "weeks", "months", "years",
+                                 "decades", "centuries", "millennia"],
+                    },
+                }
+            }
+        },
+    }
+    with OpenAI() as client:
+        completion = client.chat.completions.create(
+            messages=[{"role": "system", "content": system_message}, {"role": "user", "content": text}],
+            model=model, n=1, temperature=0, timeout=30,
+            # -2 to 2, lower values to stay more focused on the text vs using different words
+            frequency_penalty=0,
+            # -2 to 2, lower values discourage new topics
+            presence_penalty=0,
+            tool_choice={"type": "function", "function": {"name": tool_name}},
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": "Store state change features.",
+                    "parameters": {
+                        "type": "object",
+                        "description": "State change features to store.",
                         "properties": tool_properties_spec,
                         "required": list(tool_properties_spec.keys()),
                         "additionalProperties": False,
