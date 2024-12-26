@@ -8,25 +8,30 @@ logger = logging.getLogger(__name__)
 
 def match_reference_features(test_sentence, reference_features):
     extracted_features = json.loads(extract_openai_sentence_type_features(test_sentence))
-    logger.info(extracted_features)
-    assert "change_of_state" in extracted_features
-    assert extracted_features["change_of_state"] in reference_features["change_of_state"]
-    assert "contains_interjection" in extracted_features
-    assert extracted_features["contains_interjection"] in reference_features["contains_interjection"]
+    logger.info(f"{test_sentence} {extracted_features}")
     assert "functional_type" in extracted_features
     assert extracted_features["functional_type"] in reference_features["functional_type"]
-    assert "narrative_structure" in extracted_features
-    assert extracted_features["narrative_structure"] in reference_features["narrative_structure"]
+
     assert "organizational_type" in extracted_features
     assert extracted_features["organizational_type"] in reference_features["organizational_type"]
+
+    assert "change_in_state" in extracted_features
+    assert extracted_features["change_in_state"] in reference_features["change_in_state"]
+
+    assert "noticeable_emotions" in extracted_features
+    assert extracted_features["noticeable_emotions"] in reference_features["noticeable_emotions"]
+
+    assert "reports_speech" in extracted_features
+    assert extracted_features["reports_speech"] in reference_features["reports_speech"]
+
     assert "spatiality" in extracted_features
     assert extracted_features["spatiality"] in reference_features["spatiality"]
-    assert "style" in extracted_features
-    assert extracted_features["style"] in reference_features["style"]
+
     assert "temporality" in extracted_features
     assert extracted_features["temporality"] in reference_features["temporality"]
-    assert "voice" in extracted_features
-    assert extracted_features["voice"] in reference_features["voice"]
+
+    assert "uses_jargon" in extracted_features
+    assert extracted_features["uses_jargon"] in reference_features["uses_jargon"]
 
 
 def test_extract_openai_sentence_type_features_case_1():
@@ -37,197 +42,312 @@ def test_extract_openai_sentence_type_features_case_1():
     """
     match_reference_features(
         "The cat sat on the mat.", {
-            "change_of_state": ["static"],
-            "contains_interjection": ["false"],
             "functional_type": ["declarative"],
-            "narrative_structure": ["event-driven"],
             "organizational_type": ["simple"],
-            "spatiality": ["static"],
-            "style": ["formal"],
-            "temporality": ["static present"],
-            "voice": ["active"]})
+            "change_in_state": ["no"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["yes"],
+            "temporality": ["no"],
+            "uses_jargon": ["no"],
+        })
 
 
 def test_extract_openai_sentence_type_features_case_2():
     """
-    Complex sentence with change of state.
-
-    :return:
-    """
-    match_reference_features(
-        "After the rain stopped, the flowers began to bloom.", {
-            "change_of_state": ["complex changes", "subjects change"],
-            "contains_interjection": ["false"],
-            "functional_type": ["declarative"],
-            "narrative_structure": ["event-driven"],
-            "organizational_type": ["complex"],
-            "spatiality": ["static", "subjects move"],
-            "style": ["formal"],
-            "temporality": ["past to present"],
-            "voice": ["active"]})
-
-
-def test_extract_openai_sentence_type_features_case_3():
-    """
-    Interrogatives.
+    Interrogative.
 
     :return:
     """
     match_reference_features(
         "What time does the meeting start?", {
-            "change_of_state": ["static"],
-            "contains_interjection": ["false"],
             "functional_type": ["interrogative"],
-            "narrative_structure": ["detail-driven"],
             "organizational_type": ["simple"],
-            "spatiality": ["static"],
-            "style": ["formal"],
-            "temporality": ["static present"],
-            "voice": ["active"]})
+            "change_in_state": ["no"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["no"],
+            "temporality": ["yes"],
+            "uses_jargon": ["no"],
+        })
 
 
-def test_extract_openai_sentence_type_features_case_4():
-    """
-    Exclamatory with interjection.
-
-    :return:
-    """
-    match_reference_features(
-        "Wow, that was an incredible performance!", {
-            "change_of_state": ["static"],
-            "contains_interjection": ["true"],
-            "functional_type": ["exclamatory"],
-            "narrative_structure": ["detail-driven"],
-            "organizational_type": ["simple"],
-            "spatiality": ["static"],
-            "style": ["informal"],
-            "temporality": ["static present"],
-            "voice": ["active"]})
-
-
-def test_extract_openai_sentence_type_features_case_5():
+def test_extract_openai_sentence_type_features_case_3():
     """
     Imperative.
 
     :return:
     """
     match_reference_features(
-        "Please close the door.", {
-            "change_of_state": ["static"],
-            "contains_interjection": ["false"],
+        "Turn off the lights when you leave.", {
             "functional_type": ["imperative"],
-            "narrative_structure": ["event-driven"],
             "organizational_type": ["simple"],
-            "spatiality": ["static"],
-            "style": ["formal"],
-            "temporality": ["static present"],
-            "voice": ["active"]})
+            "change_in_state": ["no"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["yes"],
+            "temporality": ["yes", "no"],
+            "uses_jargon": ["no"],
+        })
 
 
-def test_extract_openai_sentence_type_features_case_6():
+def test_extract_openai_sentence_type_features_case_4():
+    """
+    Exclamatory.
+
+    :return:
+    """
+    match_reference_features(
+        "I can't believe we won the game!", {
+            "functional_type": ["exclamatory"],
+            "organizational_type": ["simple"],
+            "change_in_state": ["no"],
+            "noticeable_emotions": ["yes"],
+            "reports_speech": ["no"],
+            "spatiality": ["no"],
+            "temporality": ["no"],
+            "uses_jargon": ["no"],
+        })
+
+
+def test_extract_openai_sentence_type_features_case_5():
     """
     Conditional.
 
     :return:
     """
     match_reference_features(
-        "If it rains tomorrow, we will cancel the picnic.", {
-            "change_of_state": ["subjects change"],
-            "contains_interjection": ["false"],
+        "Should you need any help, feel free to ask.", {
             "functional_type": ["conditional"],
-            "narrative_structure": ["event-driven"],
-            "organizational_type": ["complex"],
-            "spatiality": ["static"],
-            "style": ["formal"],
-            "temporality": ["present to future"],
-            "voice": ["active"]})
+            "organizational_type": ["simple"],
+            "change_in_state": ["no"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["no"],
+            "temporality": ["no"],
+            "uses_jargon": ["no"],
+        })
+
+
+def test_extract_openai_sentence_type_features_case_6():
+    """
+    Compound and/or complex.
+
+    :return:
+    """
+    match_reference_features(
+        "She likes coffee, but he prefers tea.", {
+            "functional_type": ["declarative"],
+            "organizational_type": ["compound and/or complex"],
+            "change_in_state": ["no"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["no"],
+            "temporality": ["no"],
+            "uses_jargon": ["no"],
+        })
+    match_reference_features(
+        "Although it was raining, we decided to go for a walk.", {
+            "functional_type": ["declarative"],
+            "organizational_type": ["compound and/or complex"],
+            "change_in_state": ["yes", "no"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["yes"],
+            "temporality": ["yes"],
+            "uses_jargon": ["no"],
+        })
 
 
 def test_extract_openai_sentence_type_features_case_7():
     """
-    Compound sentence.
+    Changes of state
 
     :return:
     """
     match_reference_features(
-        "I wanted to go for a walk, but it was too cold outside.", {
-            "change_of_state": ["complex changes"],
-            "contains_interjection": ["false"],
+        "The leaves turned from green to yellow.", {
             "functional_type": ["declarative"],
-            "narrative_structure": ["event-driven"],
-            "organizational_type": ["compound"],
-            "spatiality": ["static"],
-            "style": ["formal"],
-            "temporality": ["past to present"],
-            "voice": ["active"]})
+            "organizational_type": ["simple"],
+            "change_in_state": ["yes"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["no"],
+            "temporality": ["yes", "no"],
+            "uses_jargon": ["no"],
+        })
+    match_reference_features(
+        "He went from being a student to a teacher.", {
+            "functional_type": ["declarative"],
+            "organizational_type": ["simple"],
+            "change_in_state": ["yes"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["no"],
+            "temporality": ["yes", "no"],
+            "uses_jargon": ["no"],
+        })
 
 
 def test_extract_openai_sentence_type_features_case_8():
     """
-    Complex-compound sentence.
+    Non-neutral emotions.
 
     :return:
     """
     match_reference_features(
-        "Although it was raining, we decided to go hiking, and we had a great time.", {
-            "change_of_state": ["complex changes", "static"],
-            "contains_interjection": ["false"],
+        "I am thrilled about the promotion!", {
+            "functional_type": ["exclamatory"],
+            "organizational_type": ["simple"],
+            "change_in_state": ["no"],
+            "noticeable_emotions": ["yes"],
+            "reports_speech": ["no"],
+            "spatiality": ["no"],
+            "temporality": ["no"],
+            "uses_jargon": ["no"],
+        })
+    match_reference_features(
+        "He was devastated by the news.", {
             "functional_type": ["declarative"],
-            "narrative_structure": ["event-driven"],
-            "organizational_type": ["complex-compound"],
-            "spatiality": ["subjects move"],
-            "style": ["formal"],
-            "temporality": ["past to present"],
-            "voice": ["active"]})
+            "organizational_type": ["simple"],
+            "change_in_state": ["yes"],
+            "noticeable_emotions": ["yes"],
+            "reports_speech": ["no"],
+            "spatiality": ["no"],
+            "temporality": ["no"],
+            "uses_jargon": ["no"],
+        })
 
 
 def test_extract_openai_sentence_type_features_case_9():
     """
-    Passive voice.
+    Reports speech.
 
     :return:
     """
     match_reference_features(
-        "The book was read by the entire class.", {
-            "change_of_state": ["static"],
-            "contains_interjection": ["false"],
+        "He said, 'I will be there soon.'", {
             "functional_type": ["declarative"],
-            "narrative_structure": ["event-driven"],
             "organizational_type": ["simple"],
-            "spatiality": ["static"],
-            "style": ["formal"],
-            "temporality": ["static past"],
-            "voice": ["passive"]})
+            "change_in_state": ["no"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["yes"],
+            "spatiality": ["yes", "no"],
+            "temporality": ["yes", "no"],
+            "uses_jargon": ["no"],
+        })
+    match_reference_features(
+        "She asked if I had seen the movie.", {
+            "functional_type": ["interrogative"],
+            "organizational_type": ["simple"],
+            "change_in_state": ["no"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["yes"],
+            "spatiality": ["no"],
+            "temporality": ["no"],
+            "uses_jargon": ["no"],
+        })
 
 
 def test_extract_openai_sentence_type_features_case_10():
     """
-    Sentences with movement.
+    Spatial changes
 
     :return:
     """
     match_reference_features(
-        "The dancers twirled and leapt across the stage, their movements synchronized perfectly.", {
-            "change_of_state": ["complex changes"],
-            "contains_interjection": ["false"],
+        "The car moved from the garage to the driveway.", {
             "functional_type": ["declarative"],
-            "narrative_structure": ["event-driven"],
-            "organizational_type": ["compound"],
-            "spatiality": ["complex movements"],
-            "style": ["formal"],
-            "temporality": ["static present"],
-            "voice": ["active"]})
+            "organizational_type": ["simple"],
+            "change_in_state": ["yes"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["yes"],
+            "temporality": ["no"],
+            "uses_jargon": ["no"],
+        })
     match_reference_features(
-        "The car sped down the highway, leaving a trail of dust behind.", {
-            "change_of_state": ["complex changes"],
-            "contains_interjection": ["false"],
+        "He traveled from New York to Los Angeles.", {
             "functional_type": ["declarative"],
-            "narrative_structure": ["event-driven"],
-            "organizational_type": ["complex"],
-            "spatiality": ["complex movements", "subjects move"],
-            "style": ["formal"],
-            "temporality": ["static present"],
-            "voice": ["active"]})
+            "organizational_type": ["simple"],
+            "change_in_state": ["yes", "no"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["yes"],
+            "temporality": ["no"],
+            "uses_jargon": ["no"],
+        })
+
+
+def test_extract_openai_sentence_type_features_case_11():
+    """
+    Temporal relationships
+
+    :return:
+    """
+    match_reference_features(
+        "He visited the museum last week.", {
+            "functional_type": ["declarative"],
+            "organizational_type": ["simple"],
+            "change_in_state": ["yes", "no"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["yes", "no"],
+            "temporality": ["yes"],
+            "uses_jargon": ["no"],
+        })
+    match_reference_features(
+        "She is studying for her exams.", {
+            "functional_type": ["declarative"],
+            "organizational_type": ["simple"],
+            "change_in_state": ["no"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["no"],
+            "temporality": ["yes", "no"],
+            "uses_jargon": ["no"],
+        })
+    match_reference_features(
+        "She plans to start a new job next month.", {
+            "functional_type": ["declarative"],
+            "organizational_type": ["simple"],
+            "change_in_state": ["yes"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["no"],
+            "temporality": ["yes"],
+            "uses_jargon": ["no"],
+        })
+
+
+def test_extract_openai_sentence_type_features_case_12():
+    """
+    Temporal relationships
+
+    :return:
+    """
+    match_reference_features(
+        "The CPU is overheating due to overclocking.", {
+            "functional_type": ["declarative"],
+            "organizational_type": ["simple"],
+            "change_in_state": ["yes"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["no"],
+            "temporality": ["no"],
+            "uses_jargon": ["yes"],
+        })
+    match_reference_features(
+        "He nailed the presentation with his killer pitch.", {
+            "functional_type": ["declarative"],
+            "organizational_type": ["simple"],
+            "change_in_state": ["no"],
+            "noticeable_emotions": ["yes"],
+            "reports_speech": ["no"],
+            "spatiality": ["no"],
+            "temporality": ["no"],
+            "uses_jargon": ["yes"],
+        })
 
 
 if __name__ == "__main__":
@@ -243,4 +363,6 @@ if __name__ == "__main__":
     #test_extract_openai_sentence_type_features_case_7()
     #test_extract_openai_sentence_type_features_case_8()
     #test_extract_openai_sentence_type_features_case_9()
-    test_extract_openai_sentence_type_features_case_10()
+    #test_extract_openai_sentence_type_features_case_10()
+    #test_extract_openai_sentence_type_features_case_11()
+    test_extract_openai_sentence_type_features_case_12()

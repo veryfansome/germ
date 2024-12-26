@@ -23,7 +23,7 @@ def match_reference_emotions(test_sentence, reference_emotions, match_all=True):
     for extracted_emotion in extracted_features["emotions"]:
         emotions_found.add(extracted_emotion["emotion"])
         if not match_all and extracted_emotion["emotion"] not in reference_emotions:
-            # Some emotions are flakey so they may not be required for testing.
+            # Some emotions are flakey, so they may not be required for testing.
             continue
 
         # Since LLM outputs vary, we need to tolerate a range of answers.
