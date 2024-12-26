@@ -322,7 +322,7 @@ def test_extract_openai_sentence_type_features_case_11():
 
 def test_extract_openai_sentence_type_features_case_12():
     """
-    Temporal relationships
+    Jargon and slang.
 
     :return:
     """
