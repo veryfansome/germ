@@ -1,4 +1,3 @@
-import json
 import logging
 
 from bot.lang.utils import extract_openai_emotion_features
@@ -14,7 +13,7 @@ def have_common_element(list1, list2):
 
 
 def match_reference_emotions(test_sentence, reference_emotions, match_all=True):
-    extracted_features = json.loads(extract_openai_emotion_features(test_sentence))
+    extracted_features = extract_openai_emotion_features(test_sentence)
     logger.info(extracted_features)
     assert "emotions" in extracted_features
     assert len(extracted_features["emotions"]) >= len(reference_emotions)

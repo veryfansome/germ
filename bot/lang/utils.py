@@ -1,4 +1,5 @@
 import difflib
+import json
 from nltk.tokenize import sent_tokenize
 from openai import OpenAI
 
@@ -15,7 +16,7 @@ def diff_strings(str1, str2):
 
 
 def extract_openai_emotion_features(text: str,
-                                    model: str = "gpt-4o-mini") -> str:
+                                    model: str = "gpt-4o-mini"):
     tool_name = "store_emotional_features"
     system_message = ("Analyze the emotional nuance from the text "
                       f"and populate the emotions array for the {tool_name} tool.")
@@ -104,11 +105,11 @@ def extract_openai_emotion_features(text: str,
                 }
             }]
         )
-        return completion.choices[0].message.tool_calls[0].function.arguments
+        return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
 
 
 def extract_openai_entity_features(text: str,
-                                   model: str = "gpt-4o-mini") -> str:
+                                   model: str = "gpt-4o-mini"):
     tool_name = "store_entity_features"
     system_message = ("Analyze all entities from the text "
                       f"and populate the entities array for the {tool_name} tool.")
@@ -179,7 +180,7 @@ def extract_openai_entity_features(text: str,
                 }
             }]
         )
-        return completion.choices[0].message.tool_calls[0].function.arguments
+        return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
 
 
 def extract_openai_sentence_type_features(text: str,
@@ -252,7 +253,7 @@ def extract_openai_sentence_type_features(text: str,
                 }
             }]
         )
-        return completion.choices[0].message.tool_calls[0].function.arguments
+        return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
 
 
 def extract_openai_speech_features(text: str, model: str = "gpt-4o-mini"):
@@ -316,7 +317,7 @@ def extract_openai_speech_features(text: str, model: str = "gpt-4o-mini"):
                 }
             }]
         )
-        return completion.choices[0].message.tool_calls[0].function.arguments
+        return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
 
 
 def extract_openai_state_change_features(text: str, model: str = "gpt-4o-mini"):
@@ -390,10 +391,10 @@ def extract_openai_state_change_features(text: str, model: str = "gpt-4o-mini"):
                 }
             }]
         )
-        return completion.choices[0].message.tool_calls[0].function.arguments
+        return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
 
 
-def extract_openai_text_features(text: str, model: str = "gpt-4o-mini") -> str:
+def extract_openai_text_features(text: str, model: str = "gpt-4o-mini"):
     """
     Way better for emotionality (variety, intensity, transitions), sentiment, related knowledge areas, related topics,
     and other contextual tasks.
@@ -465,7 +466,7 @@ def extract_openai_text_features(text: str, model: str = "gpt-4o-mini") -> str:
                 }
             }]
         )
-        return completion.choices[0].message.tool_calls[0].function.arguments
+        return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
 
 
 def split_to_sentences(text: str) -> list[str]:

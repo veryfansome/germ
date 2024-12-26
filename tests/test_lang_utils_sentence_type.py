@@ -1,4 +1,3 @@
-import json
 import logging
 
 from bot.lang.utils import extract_openai_sentence_type_features
@@ -7,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 def match_reference_features(test_sentence, reference_features):
-    extracted_features = json.loads(extract_openai_sentence_type_features(test_sentence))
+    extracted_features = extract_openai_sentence_type_features(test_sentence)
     logger.info(f"{test_sentence} {extracted_features}")
     assert "functional_type" in extracted_features
     assert extracted_features["functional_type"] in reference_features["functional_type"]

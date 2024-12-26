@@ -1,5 +1,4 @@
 import asyncio
-import json
 import re
 import signal
 import uuid
@@ -150,8 +149,8 @@ class IdeaGraph:
                     )):
                 openai_sentence_type = (
                     openai_sentence_type
-                    if openai_sentence_type is not None else json.loads(await run_in_threadpool(
-                        extract_openai_sentence_type_features, sentence, model="gpt-4o-mini")))
+                    if openai_sentence_type is not None else await run_in_threadpool(
+                        extract_openai_sentence_type_features, sentence, model="gpt-4o-mini"))
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
                     sentence_rdb_record.sentence_node_type = SENTENCE_NODE_TYPE[openai_sentence_type["functional_type"]]
@@ -198,8 +197,8 @@ class IdeaGraph:
                     )):
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
-                    sentence_rdb_record.sentence_openai_emotion_features = json.loads(await run_in_threadpool(
-                        extract_openai_emotion_features, sentence, model="gpt-4o-mini"))
+                    sentence_rdb_record.sentence_openai_emotion_features = await run_in_threadpool(
+                        extract_openai_emotion_features, sentence, model="gpt-4o-mini")
                     sentence_rdb_record.sentence_openai_emotion_features_time_changed = utc_now()
                     sentence_rdb_record.sentence_openai_emotion_features_fetch_count += 1
                     await rdb_session.commit()
@@ -263,8 +262,8 @@ class IdeaGraph:
                     )):
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
-                    sentence_rdb_record.sentence_openai_entity_features = json.loads(await run_in_threadpool(
-                        extract_openai_entity_features, sentence, model="gpt-4o-mini"))
+                    sentence_rdb_record.sentence_openai_entity_features = await run_in_threadpool(
+                        extract_openai_entity_features, sentence, model="gpt-4o-mini")
                     sentence_rdb_record.sentence_openai_entity_features_time_changed = utc_now()
                     sentence_rdb_record.sentence_openai_entity_features_fetch_count += 1
                     await rdb_session.commit()
@@ -304,8 +303,8 @@ class IdeaGraph:
                     )):
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
-                    sentence_rdb_record.sentence_openai_text_features = json.loads(
-                        await run_in_threadpool(extract_openai_text_features, sentence, model="gpt-4o-mini"))
+                    sentence_rdb_record.sentence_openai_text_features = await run_in_threadpool(
+                        extract_openai_text_features, sentence, model="gpt-4o-mini")
                     sentence_rdb_record.sentence_openai_text_features_time_changed = utc_now()
                     sentence_rdb_record.sentence_openai_text_features_fetch_count += 1
                     await rdb_session.commit()
