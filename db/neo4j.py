@@ -37,8 +37,8 @@ class AsyncNeo4jDriver:
             f"bolt://{NEO4J_HOST}:7687", auth=(neo4j_auth_parts[0], neo4j_auth_parts[1]))
         self.query_cache: dict[str, tuple[float, list]] = {}
 
-    def close(self):
-        self.driver.close()
+    async def close(self):
+        await self.driver.close()
 
     async def query(self, query, parameters=None):
         query_signature = str(uuid.uuid5(

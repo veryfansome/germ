@@ -40,6 +40,6 @@ that government of the people, by the people, for the people, shall not perish f
 ]
 
 all_examples = [
-    *poems,
+    #*poems,
     *speeches,
 ]

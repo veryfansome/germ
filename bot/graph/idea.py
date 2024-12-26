@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 import signal
@@ -49,16 +50,30 @@ class IdeaGraph:
             "MERGE (d)-[r:OCCURRED]->(t) "
             "RETURN r", {"time": str(current_rounded_time), "name": name})
         logger.debug(f"document/time link: {time_record_link}")
+
+        last_sentence_id = None
+        last_sentence_node_type = None
         for body_sentence in split_to_sentences(body):
-            _, body_sentence_node_type = await self.add_sentence(body_sentence,
-                                                                 current_rounded_time=current_rounded_time)
-            body_sentence_link_record = await self.driver.query(
-                "MATCH (d:Document {name: $document}), (s:" + body_sentence_node_type + " {text: $sentence}) "
-                "MERGE (s)-[r:CONTAINS]->(d) "
+            _, this_sentence_node_type, this_sentence_id = await self.add_sentence(
+                body_sentence, current_rounded_time=current_rounded_time)
+
+            sentence_do_document_link_record = await self.driver.query(
+                "MATCH (d:Document {name: $document}), (s:" + this_sentence_node_type + " {sentence_id: $sentence_id}) "
+                "MERGE (d)-[r:CONTAINS]->(s) "
                 "RETURN r", {
-                    "document": name, "sentence": body_sentence,
+                    "document": name, "sentence_id": this_sentence_id
                 })
-            logger.info(f"sentence link: {body_sentence_link_record}")
+            if last_sentence_id is not None:
+                sentence_to_sentence_link = await self.driver.query(
+                    "MATCH (l:" + last_sentence_node_type + " {sentence_id: $last_sentence_id}), (t:" + this_sentence_node_type + " {sentence_id: $this_sentence_id}) "
+                    "MERGE (l)-[r:PRECEDES]->(t) "
+                    "RETURN r", {
+                        "last_sentence_id": last_sentence_id, "this_sentence_id": this_sentence_id,
+                    })
+
+            logger.info(f"sentence link: {sentence_do_document_link_record}")
+            last_sentence_id = this_sentence_id
+            last_sentence_node_type = this_sentence_node_type
         return document_record
 
     async def add_emotion(self, emotion: str):
@@ -320,7 +335,7 @@ class IdeaGraph:
                 if topic in knowledge_category_set:
                     await self.link_topic_label_to_knowledge_category(topic, topic)
 
-        return sentence_graph_record, sentence_node_type
+        return sentence_graph_record, sentence_node_type, sentence_rdb_record.sentence_id
 
     async def add_sentence_subject(self, subject: str):
         subject_record = await self.driver.query("MERGE (n:SentenceSubject {text: $subject}) RETURN n",
@@ -368,8 +383,8 @@ class IdeaGraph:
         logger.info(f"verb: {verb_record}")
         return verb_record
 
-    def close(self):
-        self.driver.close()
+    async def close(self):
+        await self.driver.close()
 
     async def delete_all_data(self):
         await self.driver.delete_all_data()
@@ -523,7 +538,7 @@ class IdeaGraph:
     async def link_verb_to_sentence(self, verb: str, sentence: str, sentence_node_type: str):
         verb_link_record = await self.driver.query(
             "MATCH (v:Verb {text: $verb}), (s:" + sentence_node_type + " {text: $sentence}) "
-            "MERGE (v)-[r:CONTAINS]->(s) "
+            "MERGE (s)-[r:CONTAINS]->(v) "
             "RETURN r", {"verb": verb, "sentence": sentence})
         logger.info(f"verb link: {verb_link_record}")
         return verb_link_record
@@ -545,7 +560,7 @@ RETURN idea_to_keep
         logger.info(f"idea kept: {results}")
 
     def signal_handler(self, sig, frame):
-        self.close()
+        asyncio.run(self.close())
 
 
 def get_idea_graph(name: str):
@@ -586,6 +601,20 @@ def utc_now():
     return datetime.now(timezone.utc)
 
 
+async def main(args):
+    idea_graph = get_idea_graph(__name__)
+
+    if args.load_examples:
+        for doc_title, doc_body in doc_examples.all_examples:
+            await idea_graph.add_document(doc_title, doc_body)
+
+        # Add sentences to the graph
+        #for exp in sentence_examples.all_examples:
+        #    await idea_graph.add_sentence(exp)
+
+    await idea_graph.close()
+
+
 if __name__ == '__main__':
     import argparse
 
@@ -594,15 +623,4 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Build a graph of ideas.')
     parser.add_argument("--load-examples", action="store_true", help='Load example data.',
                         default=False)
-    args = parser.parse_args()
-    idea_graph = get_idea_graph(__name__)
-
-    if args.load_examples:
-        for doc_title, doc_body in doc_examples.all_examples:
-            idea_graph.add_document(doc_title, doc_body)
-
-        # Add sentences to the graph
-        #for exp in sentence_examples.all_examples:
-        #    idea_graph.add_sentence(exp)
-
-    idea_graph.close()
+    asyncio.run(main(parser.parse_args()))

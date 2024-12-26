@@ -184,8 +184,8 @@ def extract_openai_entity_features(text: str,
 
 def extract_openai_sentence_type_features(text: str,
                                           model: str = "gpt-4o-mini"):
-    tool_name = "store_sentence_type"
-    system_message = f"Classify this sentence and generate the parameters for the {tool_name} tool."
+    tool_name = "store_sentence_classification"
+    system_message = f"Classify this sentence and generate parameters for the {tool_name} tool."
     tool_properties_spec = {
         "functional_type": {
             "type": "string",
@@ -241,10 +241,10 @@ def extract_openai_sentence_type_features(text: str,
                 "type": "function",
                 "function": {
                     "name": tool_name,
-                    "description": "Store sentence type.",
+                    "description": "Store sentence classification.",
                     "parameters": {
                         "type": "object",
-                        "description": "Sentence type to store.",
+                        "description": "Sentence classification to store.",
                         "properties": tool_properties_spec,
                         "required": list(tool_properties_spec.keys()),
                         "additionalProperties": False,
