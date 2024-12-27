@@ -117,7 +117,7 @@ emotion_to_entity_classifier = OpenAISentenceClassifier({
 equivalence_classifier = OpenAISentenceClassifier({
     "equivalences": {
         "type": "array",
-        "description": ("List of all equivalences, or X *is* Y type relationships, mentioned in the text, "
+        "description": ("List of all equivalences, or X *is* Y type relationships, in the text, "
                         "inclusive of numerals where applicable."),
         "items": {
             "type": "object",
@@ -125,27 +125,26 @@ equivalence_classifier = OpenAISentenceClassifier({
             "properties": {
                 "X": {
                     "type": "string",
-                    "description": "What is the X?",
+                    "description": "What is the term or thing being defined?",
                 },
                 "Y": {
                     "type": "string",
-                    "description": "What is the Y?",
+                    "description": "The complete definition, exclusive of conditions?",
                 },
                 "relationship_type": {
                     "type": "string",
                     "description": ("What type of equivalences is this; are X and Y the the same specific object "
                                     "(identical), do they have synonymous usages (synonym), is X a kind of Y "
-                                    "(subset), is X a concept that should be understood relative to concept Y "
-                                    "(definition), or do X and Y have the same interchangeable value, measurement, or "
-                                    "function (equivalent)?"),
+                                    "(subset), is X a concept that is explained through Y (definition), or do X and "
+                                    "Y have the same interchangeable value, measurement, or function (equivalent)?"),
                     "enum": ["identical", "synonym", "subset", "definition", "equivalent"]
                 },
                 "conditions": {
                     "type": "array",
-                    "description": "List of conditions for equivalence.",
+                    "description": "List of contextual conditions for the equivalence X and Y.",
                     "items": {
                         "type": "string",
-                        "description": "A condition spelled out in the text.",
+                        "description": "A condition in the text.",
                     }
                 },
             }
