@@ -71,6 +71,49 @@ class OpenAISentenceClassifier:
             return json.loads(new_json)
 
 
+# TODO: description classifier
+
+
+emotion_to_entity_classifier = OpenAISentenceClassifier({
+    "emotions": {
+        "type": "array",
+        "description": "List of all perceivable emotions, capturing nuanced contextual meaning.",
+        "items": {
+            "type": "object",
+            "description": "An emotion from the text.",
+            "properties": {
+                "emotion": {
+                    "type": "string",
+                    "description": "Detected emotion name."
+                },
+                "felt_by": {
+                    "type": "string",
+                    "description": "Who feels this emotion?.",
+                },
+                "felt_by_entity_type": {
+                    "type": "string",
+                    "description": "What kind of entity is the feeler of this emotion.",
+                },
+                "felt_towards": {
+                    "type": "string",
+                    "description": "What is this emotion felt towards?",
+                },
+                "felt_towards_entity_type": {
+                    "type": "string",
+                    "description": "What kind of entity is this emotion felt towards?",
+                },
+            }
+        }
+    }},
+    system_message=("Analyze the emotional nuance from the text "
+                    f"and populate the emotions array for the store_emotions tool."),
+    tool_name="store_emotions",
+    tool_description="Store generated emotion classifications.",
+    tool_parameter_description="Emotion classifications to be stored.",
+    frequency_penalty=1,
+)
+
+
 equivalence_classifier = OpenAISentenceClassifier({
     "equivalences": {
         "type": "array",
@@ -113,46 +156,6 @@ equivalence_classifier = OpenAISentenceClassifier({
     tool_name="store_equivalences",
     tool_description="Store generated equivalence classifications.",
     tool_parameter_description="Equivalences classifications to be stored.",
-    frequency_penalty=1,
-)
-
-
-emotion_to_entity_classifier = OpenAISentenceClassifier({
-    "emotions": {
-        "type": "array",
-        "description": "List of all perceivable emotions, capturing nuanced contextual meaning.",
-        "items": {
-            "type": "object",
-            "description": "An emotion from the text.",
-            "properties": {
-                "emotion": {
-                    "type": "string",
-                    "description": "Detected emotion name."
-                },
-                "felt_by": {
-                    "type": "string",
-                    "description": "Who feels this emotion?.",
-                },
-                "felt_by_entity_type": {
-                    "type": "string",
-                    "description": "What kind of entity is the feeler of this emotion.",
-                },
-                "felt_towards": {
-                    "type": "string",
-                    "description": "What is this emotion felt towards?",
-                },
-                "felt_towards_entity_type": {
-                    "type": "string",
-                    "description": "What kind of entity is this emotion felt towards?",
-                },
-            }
-        }
-    }},
-    system_message=("Analyze the emotional nuance from the text "
-                    f"and populate the emotions array for the store_emotions tool."),
-    tool_name="store_emotions",
-    tool_description="Store generated emotion classifications.",
-    tool_parameter_description="Emotion classifications to be stored.",
     frequency_penalty=1,
 )
 

@@ -33,7 +33,7 @@ def match_reference_classification(test_sentence, reference_classification):
     assert new_classification["uses_jargon"] in reference_classification["uses_jargon"]
 
 
-def test_extract_openai_sentence_type_features_case_1():
+def test_classify_sentence_using_openai_case_1():
     """
     Simple declarative.
 
@@ -52,7 +52,7 @@ def test_extract_openai_sentence_type_features_case_1():
         })
 
 
-def test_extract_openai_sentence_type_features_case_2():
+def test_classify_sentence_using_openai_case_2():
     """
     Interrogative.
 
@@ -71,7 +71,7 @@ def test_extract_openai_sentence_type_features_case_2():
         })
 
 
-def test_extract_openai_sentence_type_features_case_3():
+def test_classify_sentence_using_openai_case_3():
     """
     Imperative.
 
@@ -90,7 +90,7 @@ def test_extract_openai_sentence_type_features_case_3():
         })
 
 
-def test_extract_openai_sentence_type_features_case_4():
+def test_classify_sentence_using_openai_case_4():
     """
     Exclamatory.
 
@@ -109,7 +109,7 @@ def test_extract_openai_sentence_type_features_case_4():
         })
 
 
-def test_extract_openai_sentence_type_features_case_5():
+def test_classify_sentence_using_openai_case_5():
     """
     Conditional.
 
@@ -128,7 +128,7 @@ def test_extract_openai_sentence_type_features_case_5():
         })
 
 
-def test_extract_openai_sentence_type_features_case_6():
+def test_classify_sentence_using_openai_case_6():
     """
     Compound and/or complex.
 
@@ -158,7 +158,7 @@ def test_extract_openai_sentence_type_features_case_6():
         })
 
 
-def test_extract_openai_sentence_type_features_case_7():
+def test_classify_sentence_using_openai_case_7():
     """
     Changes of state
 
@@ -188,7 +188,7 @@ def test_extract_openai_sentence_type_features_case_7():
         })
 
 
-def test_extract_openai_sentence_type_features_case_8():
+def test_classify_sentence_using_openai_case_8():
     """
     Non-neutral emotions.
 
@@ -218,7 +218,7 @@ def test_extract_openai_sentence_type_features_case_8():
         })
 
 
-def test_extract_openai_sentence_type_features_case_9():
+def test_classify_sentence_using_openai_case_9():
     """
     Reports speech.
 
@@ -248,7 +248,7 @@ def test_extract_openai_sentence_type_features_case_9():
         })
 
 
-def test_extract_openai_sentence_type_features_case_10():
+def test_classify_sentence_using_openai_case_10():
     """
     Spatial changes
 
@@ -278,7 +278,7 @@ def test_extract_openai_sentence_type_features_case_10():
         })
 
 
-def test_extract_openai_sentence_type_features_case_11():
+def test_classify_sentence_using_openai_case_11():
     """
     Temporal relationships
 
@@ -319,7 +319,7 @@ def test_extract_openai_sentence_type_features_case_11():
         })
 
 
-def test_extract_openai_sentence_type_features_case_12():
+def test_classify_sentence_using_openai_case_12():
     """
     Jargon and slang.
 
@@ -353,15 +353,15 @@ if __name__ == "__main__":
     from observability.logging import setup_logging
     setup_logging()
 
-    #test_extract_openai_sentence_type_features_case_1()
-    #test_extract_openai_sentence_type_features_case_2()
-    #test_extract_openai_sentence_type_features_case_3()
-    #test_extract_openai_sentence_type_features_case_4()
-    #test_extract_openai_sentence_type_features_case_5()
-    #test_extract_openai_sentence_type_features_case_6()
-    #test_extract_openai_sentence_type_features_case_7()
-    #test_extract_openai_sentence_type_features_case_8()
-    #test_extract_openai_sentence_type_features_case_9()
-    #test_extract_openai_sentence_type_features_case_10()
-    #test_extract_openai_sentence_type_features_case_11()
-    test_extract_openai_sentence_type_features_case_12()
+    #test_classify_sentence_using_openai_case_1()
+    #test_classify_sentence_using_openai_case_2()
+    #test_classify_sentence_using_openai_case_3()
+    #test_classify_sentence_using_openai_case_4()
+    #test_classify_sentence_using_openai_case_5()
+    #test_classify_sentence_using_openai_case_6()
+    #test_classify_sentence_using_openai_case_7()
+    #test_classify_sentence_using_openai_case_8()
+    #test_classify_sentence_using_openai_case_9()
+    #test_classify_sentence_using_openai_case_10()
+    #test_classify_sentence_using_openai_case_11()
+    test_classify_sentence_using_openai_case_12()

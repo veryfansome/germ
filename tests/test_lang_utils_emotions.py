@@ -38,7 +38,7 @@ def match_reference_emotions(test_sentence, emotion_map, reference_classificatio
             assert emotion_name in emotions_found
 
 
-def test_extract_openai_emotion_features_case_1():
+def test_emotion_to_entity_classifier_case_1():
     """
     Basic emotion.
 
@@ -68,7 +68,7 @@ def test_extract_openai_emotion_features_case_1():
         })
 
 
-def test_extract_openai_emotion_features_case_2():
+def test_emotion_to_entity_classifier_case_2():
     """
     Complex emotion.
 
@@ -104,7 +104,7 @@ def test_extract_openai_emotion_features_case_2():
         })
 
 
-def test_extract_openai_emotion_features_case_3():
+def test_emotion_to_entity_classifier_case_3():
     """
     Clear source and target.
 
@@ -123,7 +123,7 @@ def test_extract_openai_emotion_features_case_3():
         })
 
 
-def test_extract_openai_emotion_features_case_4():
+def test_emotion_to_entity_classifier_case_4():
     """
     Emotions with varying intensities.
 
@@ -153,7 +153,7 @@ def test_extract_openai_emotion_features_case_4():
         })
 
 
-def test_extract_openai_emotion_features_case_5():
+def test_emotion_to_entity_classifier_case_5():
     """
     Emotions with nuance.
 
@@ -194,7 +194,7 @@ def test_extract_openai_emotion_features_case_5():
         })
 
 
-def test_extract_openai_emotion_features_case_6():
+def test_emotion_to_entity_classifier_case_6():
     """
     Emotions in context.
 
@@ -208,12 +208,12 @@ def test_extract_openai_emotion_features_case_6():
                 "felt_by": ["She", "she"],
                 "felt_by_entity_type": ["person"],
                 "felt_towards": ["test results"],
-                "felt_towards_entity_type": ["event"],
+                "felt_towards_entity_type": ["event", "outcome"],
             }
         })
 
 
-def test_extract_openai_emotion_features_case_7():
+def test_emotion_to_entity_classifier_case_7():
     """
     Emotions in dialogue.
 
@@ -232,7 +232,7 @@ def test_extract_openai_emotion_features_case_7():
         })
 
 
-def test_extract_openai_emotion_features_case_8():
+def test_emotion_to_entity_classifier_case_8():
     """
     Emotions in metaphorical language.
 
@@ -272,7 +272,7 @@ def test_extract_openai_emotion_features_case_8():
         })
 
 
-def test_extract_openai_emotion_features_case_9():
+def test_emotion_to_entity_classifier_case_9():
     """
     Emotions with ambiguity
 
@@ -306,12 +306,12 @@ if __name__ == "__main__":
     from observability.logging import setup_logging
     setup_logging()
 
-    #test_extract_openai_emotion_features_case_1()
-    #test_extract_openai_emotion_features_case_2()
-    #test_extract_openai_emotion_features_case_3()
-    #test_extract_openai_emotion_features_case_4()
-    #test_extract_openai_emotion_features_case_5()
-    #test_extract_openai_emotion_features_case_6()
-    #test_extract_openai_emotion_features_case_7()
-    #test_extract_openai_emotion_features_case_8()
-    test_extract_openai_emotion_features_case_9()
+    #test_emotion_to_entity_classifier_case_1()
+    #test_emotion_to_entity_classifier_case_2()
+    #test_emotion_to_entity_classifier_case_3()
+    #test_emotion_to_entity_classifier_case_4()
+    #test_emotion_to_entity_classifier_case_5()
+    #test_emotion_to_entity_classifier_case_6()
+    #test_emotion_to_entity_classifier_case_7()
+    #test_emotion_to_entity_classifier_case_8()
+    test_emotion_to_entity_classifier_case_9()

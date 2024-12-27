@@ -6,8 +6,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.future import select as sql_select
 from starlette.concurrency import run_in_threadpool
 
-from bot.lang.utils import (classify_sentence_using_openai,
-                            classify_emotions_using_openai, extract_openai_entity_features,
+from bot.lang.utils import (classify_sentence_using_openai, emotion_to_entity_classifier,
+                            extract_openai_entity_features,
                             extract_openai_text_features, split_to_sentences)
 from bot.lang.examples import documents as doc_examples, sentences as sentence_examples
 from db.neo4j import AsyncNeo4jDriver
@@ -198,7 +198,7 @@ class IdeaGraph:
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
                     sentence_rdb_record.sentence_openai_emotion_features = await run_in_threadpool(
-                        classify_emotions_using_openai, sentence, model="gpt-4o-mini")
+                        emotion_to_entity_classifier.classify, sentence)
                     sentence_rdb_record.sentence_openai_emotion_features_time_changed = utc_now()
                     sentence_rdb_record.sentence_openai_emotion_features_fetch_count += 1
                     await rdb_session.commit()
