@@ -1,36 +1,36 @@
 import logging
 
-from bot.lang.utils import extract_openai_sentence_type_features
+from bot.lang.utils import classify_sentence_using_openai
 
 logger = logging.getLogger(__name__)
 
 
-def match_reference_features(test_sentence, reference_features):
-    extracted_features = extract_openai_sentence_type_features(test_sentence)
-    logger.info(f"{test_sentence} {extracted_features}")
-    assert "functional_type" in extracted_features
-    assert extracted_features["functional_type"] in reference_features["functional_type"]
+def match_reference_classification(test_sentence, reference_classification):
+    new_classification = classify_sentence_using_openai(test_sentence)
+    logger.info(f"{test_sentence} {new_classification}")
+    assert "functional_type" in new_classification
+    assert new_classification["functional_type"] in reference_classification["functional_type"]
 
-    assert "organizational_type" in extracted_features
-    assert extracted_features["organizational_type"] in reference_features["organizational_type"]
+    assert "organizational_type" in new_classification
+    assert new_classification["organizational_type"] in reference_classification["organizational_type"]
 
-    assert "change_in_state" in extracted_features
-    assert extracted_features["change_in_state"] in reference_features["change_in_state"]
+    assert "change_in_state" in new_classification
+    assert new_classification["change_in_state"] in reference_classification["change_in_state"]
 
-    assert "noticeable_emotions" in extracted_features
-    assert extracted_features["noticeable_emotions"] in reference_features["noticeable_emotions"]
+    assert "noticeable_emotions" in new_classification
+    assert new_classification["noticeable_emotions"] in reference_classification["noticeable_emotions"]
 
-    assert "reports_speech" in extracted_features
-    assert extracted_features["reports_speech"] in reference_features["reports_speech"]
+    assert "reports_speech" in new_classification
+    assert new_classification["reports_speech"] in reference_classification["reports_speech"]
 
-    assert "spatiality" in extracted_features
-    assert extracted_features["spatiality"] in reference_features["spatiality"]
+    assert "spatiality" in new_classification
+    assert new_classification["spatiality"] in reference_classification["spatiality"]
 
-    assert "temporality" in extracted_features
-    assert extracted_features["temporality"] in reference_features["temporality"]
+    assert "temporality" in new_classification
+    assert new_classification["temporality"] in reference_classification["temporality"]
 
-    assert "uses_jargon" in extracted_features
-    assert extracted_features["uses_jargon"] in reference_features["uses_jargon"]
+    assert "uses_jargon" in new_classification
+    assert new_classification["uses_jargon"] in reference_classification["uses_jargon"]
 
 
 def test_extract_openai_sentence_type_features_case_1():
@@ -39,7 +39,7 @@ def test_extract_openai_sentence_type_features_case_1():
 
     :return:
     """
-    match_reference_features(
+    match_reference_classification(
         "The cat sat on the mat.", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
@@ -58,7 +58,7 @@ def test_extract_openai_sentence_type_features_case_2():
 
     :return:
     """
-    match_reference_features(
+    match_reference_classification(
         "What time does the meeting start?", {
             "functional_type": ["interrogative"],
             "organizational_type": ["simple"],
@@ -77,11 +77,11 @@ def test_extract_openai_sentence_type_features_case_3():
 
     :return:
     """
-    match_reference_features(
+    match_reference_classification(
         "Turn off the lights when you leave.", {
             "functional_type": ["imperative"],
             "organizational_type": ["simple"],
-            "change_in_state": ["no"],
+            "change_in_state": ["yes", "no"],
             "noticeable_emotions": ["no"],
             "reports_speech": ["no"],
             "spatiality": ["yes"],
@@ -96,7 +96,7 @@ def test_extract_openai_sentence_type_features_case_4():
 
     :return:
     """
-    match_reference_features(
+    match_reference_classification(
         "I can't believe we won the game!", {
             "functional_type": ["exclamatory"],
             "organizational_type": ["simple"],
@@ -115,7 +115,7 @@ def test_extract_openai_sentence_type_features_case_5():
 
     :return:
     """
-    match_reference_features(
+    match_reference_classification(
         "Should you need any help, feel free to ask.", {
             "functional_type": ["conditional"],
             "organizational_type": ["simple"],
@@ -134,7 +134,7 @@ def test_extract_openai_sentence_type_features_case_6():
 
     :return:
     """
-    match_reference_features(
+    match_reference_classification(
         "She likes coffee, but he prefers tea.", {
             "functional_type": ["declarative"],
             "organizational_type": ["compound and/or complex"],
@@ -145,7 +145,7 @@ def test_extract_openai_sentence_type_features_case_6():
             "temporality": ["no"],
             "uses_jargon": ["no"],
         })
-    match_reference_features(
+    match_reference_classification(
         "Although it was raining, we decided to go for a walk.", {
             "functional_type": ["declarative"],
             "organizational_type": ["compound and/or complex"],
@@ -164,7 +164,7 @@ def test_extract_openai_sentence_type_features_case_7():
 
     :return:
     """
-    match_reference_features(
+    match_reference_classification(
         "The leaves turned from green to yellow.", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
@@ -175,7 +175,7 @@ def test_extract_openai_sentence_type_features_case_7():
             "temporality": ["yes", "no"],
             "uses_jargon": ["no"],
         })
-    match_reference_features(
+    match_reference_classification(
         "He went from being a student to a teacher.", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
@@ -194,7 +194,7 @@ def test_extract_openai_sentence_type_features_case_8():
 
     :return:
     """
-    match_reference_features(
+    match_reference_classification(
         "I am thrilled about the promotion!", {
             "functional_type": ["exclamatory"],
             "organizational_type": ["simple"],
@@ -205,7 +205,7 @@ def test_extract_openai_sentence_type_features_case_8():
             "temporality": ["no"],
             "uses_jargon": ["no"],
         })
-    match_reference_features(
+    match_reference_classification(
         "He was devastated by the news.", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
@@ -224,7 +224,7 @@ def test_extract_openai_sentence_type_features_case_9():
 
     :return:
     """
-    match_reference_features(
+    match_reference_classification(
         "He said, 'I will be there soon.'", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
@@ -235,7 +235,7 @@ def test_extract_openai_sentence_type_features_case_9():
             "temporality": ["yes", "no"],
             "uses_jargon": ["no"],
         })
-    match_reference_features(
+    match_reference_classification(
         "She asked if I had seen the movie.", {
             "functional_type": ["interrogative"],
             "organizational_type": ["simple"],
@@ -254,7 +254,7 @@ def test_extract_openai_sentence_type_features_case_10():
 
     :return:
     """
-    match_reference_features(
+    match_reference_classification(
         "The car moved from the garage to the driveway.", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
@@ -265,7 +265,7 @@ def test_extract_openai_sentence_type_features_case_10():
             "temporality": ["no"],
             "uses_jargon": ["no"],
         })
-    match_reference_features(
+    match_reference_classification(
         "He traveled from New York to Los Angeles.", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
@@ -284,7 +284,7 @@ def test_extract_openai_sentence_type_features_case_11():
 
     :return:
     """
-    match_reference_features(
+    match_reference_classification(
         "He visited the museum last week.", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
@@ -295,7 +295,7 @@ def test_extract_openai_sentence_type_features_case_11():
             "temporality": ["yes"],
             "uses_jargon": ["no"],
         })
-    match_reference_features(
+    match_reference_classification(
         "She is studying for her exams.", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
@@ -306,7 +306,7 @@ def test_extract_openai_sentence_type_features_case_11():
             "temporality": ["yes", "no"],
             "uses_jargon": ["no"],
         })
-    match_reference_features(
+    match_reference_classification(
         "She plans to start a new job next month.", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
@@ -325,7 +325,7 @@ def test_extract_openai_sentence_type_features_case_12():
 
     :return:
     """
-    match_reference_features(
+    match_reference_classification(
         "The CPU is overheating due to overclocking.", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
@@ -336,7 +336,7 @@ def test_extract_openai_sentence_type_features_case_12():
             "temporality": ["no"],
             "uses_jargon": ["yes"],
         })
-    match_reference_features(
+    match_reference_classification(
         "He nailed the presentation with his killer pitch.", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],

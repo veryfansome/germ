@@ -1,6 +1,6 @@
 import logging
 
-from bot.lang.utils import extract_openai_emotion_features
+from bot.lang.utils import emotion_to_entity_classifier
 
 logger = logging.getLogger(__name__)
 
@@ -12,34 +12,29 @@ def have_common_element(list1, list2):
     return False
 
 
-def match_reference_emotions(test_sentence, reference_emotions, match_all=True):
-    extracted_features = extract_openai_emotion_features(test_sentence)
-    logger.info(extracted_features)
-    assert "emotions" in extracted_features
-    assert len(extracted_features["emotions"]) >= len(reference_emotions)
+def match_reference_emotions(test_sentence, emotion_map, reference_classification, match_all=True):
+    new_classification = emotion_to_entity_classifier.classify(test_sentence)
+    logger.info(new_classification)
+    assert "emotions" in new_classification
+    assert len(new_classification["emotions"]) >= len(reference_classification)
 
     emotions_found = set()
-    for extracted_emotion in extracted_features["emotions"]:
-        emotions_found.add(extracted_emotion["emotion"])
-        if not match_all and extracted_emotion["emotion"] not in reference_emotions:
+    for emotion in new_classification["emotions"]:
+        emotions_found.add(emotion["emotion"])
+        if not match_all and emotion["emotion"] not in emotion_map:
             # Some emotions are flakey, so they may not be required for testing.
             continue
 
-        # Since LLM outputs vary, we need to tolerate a range of answers.
-        assert extracted_emotion["emotion_source"] in reference_emotions[extracted_emotion["emotion"]]["emotion_source"]
-        assert extracted_emotion["emotion_source_entity_type"] in reference_emotions[extracted_emotion["emotion"]]["emotion_source_entity_type"]
-        assert extracted_emotion["emotion_target"] in reference_emotions[extracted_emotion["emotion"]]["emotion_target"]
-        assert extracted_emotion["emotion_target_entity_type"] in reference_emotions[extracted_emotion["emotion"]]["emotion_target_entity_type"]
-        assert extracted_emotion["intensity"] in reference_emotions[extracted_emotion["emotion"]]["intensity"]
-        assert extracted_emotion["nuance"] in reference_emotions[extracted_emotion["emotion"]]["nuance"]
-        # Same ballpark is good.
-        assert len(extracted_emotion["synonymous_emotions"]) >= 2
-        assert have_common_element(extracted_emotion["synonymous_emotions"], reference_emotions[extracted_emotion["emotion"]]["synonymous_emotions"])
-        assert len(extracted_emotion["opposite_emotions"]) >= 2
-        assert have_common_element(extracted_emotion["opposite_emotions"], reference_emotions[extracted_emotion["emotion"]]["opposite_emotions"])
+        # Since LLM outputs vary, we need to tolerate a range of answers. Same ballpark is good.
+        ref_key = emotion_map[emotion["emotion"]]
+        emotions_found.add(ref_key)
+        assert emotion["felt_by"] in reference_classification[ref_key]["felt_by"], emotion["emotion"]
+        assert emotion["felt_by_entity_type"] in reference_classification[ref_key]["felt_by_entity_type"], emotion["emotion"]
+        assert emotion["felt_towards"] in reference_classification[ref_key]["felt_towards"], emotion["emotion"]
+        assert emotion["felt_towards_entity_type"] in reference_classification[ref_key]["felt_towards_entity_type"], emotion["emotion"]
     if not match_all:
         # If not enforcing match all, make sure all enforced references are found.
-        for emotion_name in reference_emotions:
+        for emotion_name in reference_classification:
             assert emotion_name in emotions_found
 
 
@@ -50,25 +45,27 @@ def test_extract_openai_emotion_features_case_1():
     :return:
     """
     match_reference_emotions(
-        "I am so happy today!", {"happiness": {
-            "emotion_source": ["speaker"],
-            "emotion_source_entity_type": ["human", "person"],
-            "emotion_target": ["day", "today"],
-            "emotion_target_entity_type": ["time"],
-            "intensity": ["high"],
-            "nuance": ["simple"],
-            "synonymous_emotions": ["joy", "contentment", "delight"],
-            "opposite_emotions": ["sadness", "discontent"]}})
+        "I am so happy today!",
+        {"happiness": "happy", "happy": "happy"},
+        {
+            "happy": {
+                "felt_by": ["speaker", "the speaker", "user"],
+                "felt_by_entity_type": ["human", "person"],
+                "felt_towards": ["day", "the day", "today", "", None],
+                "felt_towards_entity_type": ["time", "", None],
+            }
+        })
     match_reference_emotions(
-        "He was angry when he saw the mess.", {"anger": {
-            "emotion_source": ["He"],
-            "emotion_source_entity_type": ["person"],
-            "emotion_target": ["the mess"],
-            "emotion_target_entity_type": ["situation"],
-            "intensity": ["high"],
-            "nuance": ["simple"],
-            "synonymous_emotions": ["rage", "fury", "irritation"],
-            "opposite_emotions": ["calm", "contentment"]}})
+        "He was angry when he saw the mess.",
+        {"anger": "anger", "angry": "anger"},
+        {
+            "anger": {
+                "felt_by": ["He"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["the mess"],
+                "felt_towards_entity_type": ["object", "situation"],
+            }
+        })
 
 
 def test_extract_openai_emotion_features_case_2():
@@ -78,36 +75,31 @@ def test_extract_openai_emotion_features_case_2():
     :return:
     """
     match_reference_emotions(
-        "Despite the chaos, she felt a strange sense of calm.", {"calm": {
-            "emotion_source": ["she"],
-            "emotion_source_entity_type": ["person"],
-            "emotion_target": ["chaos"],
-            "emotion_target_entity_type": ["situation"],
-            "intensity": ["medium"],
-            "nuance": ["complex"],
-            "synonymous_emotions": ["serenity", "peace"],
-            "opposite_emotions": ["anxiety", "tension"]}})
+        "Despite the chaos, she felt a strange sense of calm.",
+        {"calm": "calm"},
+        {
+            "calm": {
+                "felt_by": ["she"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["chaos"],
+                "felt_towards_entity_type": ["situation"],
+            }
+        })
     match_reference_emotions(
-        "He was both excited and nervous about the presentation.", {
+        "He was both excited and nervous about the presentation.",
+        {"excited": "excited", "nervous": "nervous"},
+        {
             "excited": {
-                "emotion_source": ["He"],
-                "emotion_source_entity_type": ["person"],
-                "emotion_target": ["the presentation"],
-                "emotion_target_entity_type": ["event"],
-                "intensity": ["medium"],
-                "nuance": ["complex"],
-                "synonymous_emotions": ["enthusiastic", "eager"],
-                "opposite_emotions": ["bored", "disinterested"]
+                "felt_by": ["He"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["presentation", "the presentation"],
+                "felt_towards_entity_type": ["event"],
             },
             "nervous": {
-                "emotion_source": ["He"],
-                "emotion_source_entity_type": ["person"],
-                "emotion_target": ["the presentation"],
-                "emotion_target_entity_type": ["event"],
-                "intensity": ["medium"],
-                "nuance": ["complex"],
-                "synonymous_emotions": ["anxious", "apprehensive"],
-                "opposite_emotions": ["calm", "confident"]
+                "felt_by": ["He"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["presentation", "the presentation"],
+                "felt_towards_entity_type": ["event"],
             },
         })
 
@@ -119,15 +111,16 @@ def test_extract_openai_emotion_features_case_3():
     :return:
     """
     match_reference_emotions(
-        "John was jealous of his brother's success.", {"jealousy": {
-            "emotion_source": ["John"],
-            "emotion_source_entity_type": ["person"],
-            "emotion_target": ["brother's success"],
-            "emotion_target_entity_type": ["achievement"],
-            "intensity": ["medium"],
-            "nuance": ["simple"],
-            "synonymous_emotions": ["envy", "resentment"],
-            "opposite_emotions": ["admiration", "contentment"]}})
+        "John was jealous of his brother's success.",
+        {"jealousy": "jealousy"},
+        {
+            "jealousy": {
+                "felt_by": ["John"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["brother's success", "his brother's success"],
+                "felt_towards_entity_type": ["achievement", "person", "success"],
+            }
+        })
 
 
 def test_extract_openai_emotion_features_case_4():
@@ -137,25 +130,27 @@ def test_extract_openai_emotion_features_case_4():
     :return:
     """
     match_reference_emotions(
-        "I am slightly annoyed by the noise.", {"annoyance": {
-            "emotion_source": ["speaker"],
-            "emotion_source_entity_type": ["human", "person"],
-            "emotion_target": ["noise"],
-            "emotion_target_entity_type": ["environment"],
-            "intensity": ["low"],
-            "nuance": ["simple"],
-            "synonymous_emotions": ["irritation", "displeasure"],
-            "opposite_emotions": ["calm", "contentment"]}})
+        "I am slightly annoyed by the noise.",
+        {"annoyance": "annoyance", "annoyed": "annoyance"},
+        {
+            "annoyance": {
+                "felt_by": ["speaker", "the speaker"],
+                "felt_by_entity_type": ["human", "person"],
+                "felt_towards": ["noise", "the noise"],
+                "felt_towards_entity_type": ["environment", "sound"],
+            }
+        })
     match_reference_emotions(
-        "She was extremely furious when she found out.", {"furious": {
-            "emotion_source": ["She"],
-            "emotion_source_entity_type": ["person"],
-            "emotion_target": ["the situation"],
-            "emotion_target_entity_type": ["event", "situation"],
-            "intensity": ["high"],
-            "nuance": ["simple"],
-            "synonymous_emotions": ["angry", "irate", "enraged"],
-            "opposite_emotions": ["calm", "content", "pleased"]}})
+        "She was extremely furious when she found out.",
+        {"furious": "furious"},
+        {
+            "furious": {
+                "felt_by": ["She", "she"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["the situation", "the situation of finding out something unexpected"],
+                "felt_towards_entity_type": ["event", "situation"],
+            }
+        })
 
 
 def test_extract_openai_emotion_features_case_5():
@@ -165,49 +160,36 @@ def test_extract_openai_emotion_features_case_5():
     :return:
     """
     match_reference_emotions(
-        "He felt a bittersweet nostalgia looking at old photos.", {
-            "bittersweet": {
-                "emotion_source": ["He"],
-                "emotion_source_entity_type": ["person"],
-                "emotion_target": ["old photos"],
-                "emotion_target_entity_type": ["object"],
-                "intensity": ["medium"],
-                "nuance": ["complex"],
-                "synonymous_emotions": ["mixed feelings", "poignant"],
-                "opposite_emotions": ["joy", "joyful", "happiness", "happy"]
-            },
-            "nostalgia": {
-                "emotion_source": ["He"],
-                "emotion_source_entity_type": ["person"],
-                "emotion_target": ["old photos"],
-                "emotion_target_entity_type": ["object"],
-                "intensity": ["medium"],
-                "nuance": ["complex"],
-                "synonymous_emotions": ["longing", "yearning"],
-                "opposite_emotions": ["indifference", "apathy"]
+        "He felt a bittersweet nostalgia looking at old photos.",
+        {
+            "bittersweet": "bittersweet nostalgia",
+            "bittersweet nostalgia": "bittersweet nostalgia",
+            "nostalgia": "bittersweet nostalgia"
+        },
+        {
+            "bittersweet nostalgia": {
+                "felt_by": ["He"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["old photos"],
+                "felt_towards_entity_type": ["object"],
             },
         })
     match_reference_emotions(
-        "Her joy was tinged with a hint of regret.", {
+        "Her joy was tinged with a hint of regret.",
+        {"joy": "joy", "regret": "regret"},
+        {
             "joy": {
-                "emotion_source": ["her"],
-                "emotion_source_entity_type": ["person"],
-                "emotion_target": ["her experience"],
-                "emotion_target_entity_type": ["abstract", "emotion"],
-                "intensity": ["medium"],
-                "nuance": ["complex"],
-                "synonymous_emotions": ["happiness", "delight"],
-                "opposite_emotions": ["sadness", "regret"]
+                "felt_by": ["Her", "her"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["joy", "regret", "the moment"],
+                "felt_towards_entity_type": ["abstract concept", "emotion", "event", "situation"],
             },
             "regret": {
-                "emotion_source": ["her"],
-                "emotion_source_entity_type": ["person"],
-                "emotion_target": ["her past actions"],
-                "emotion_target_entity_type": ["abstract", "emotion", "event"],
-                "intensity": ["medium"],
-                "nuance": ["complex"],
-                "synonymous_emotions": ["sorrow", "remorse"],
-                "opposite_emotions": ["contentment", "satisfaction"]
+                "felt_by": ["Her", "her"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["joy", "the moment", "the moment or past actions", "the past or a decision made",
+                                 "the past or decision made", "the situation", "the situation or past actions", None],
+                "felt_towards_entity_type": ["abstract concept", "concept", "emotion", "event", "situation", None],
             },
         })
 
@@ -219,15 +201,16 @@ def test_extract_openai_emotion_features_case_6():
     :return:
     """
     match_reference_emotions(
-        "She was relieved when the test results came back negative.", {"relief": {
-            "emotion_source": ["She"],
-            "emotion_source_entity_type": ["person"],
-            "emotion_target": ["test results"],
-            "emotion_target_entity_type": ["event"],
-            "intensity": ["medium", "high"],
-            "nuance": ["simple"],
-            "synonymous_emotions": ["comfort", "ease", "satisfaction"],
-            "opposite_emotions": ["anxiety", "worry", "fear"]}})
+        "She was relieved when the test results came back negative.",
+        {"relief": "relief"},
+        {
+            "relief": {
+                "felt_by": ["She", "she"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["test results"],
+                "felt_towards_entity_type": ["event"],
+            }
+        })
 
 
 def test_extract_openai_emotion_features_case_7():
@@ -237,15 +220,16 @@ def test_extract_openai_emotion_features_case_7():
     :return:
     """
     match_reference_emotions(
-        "‘I can't believe you did this,’ she said, her voice filled with disappointment.", {"disappointment": {
-            "emotion_source": ["she"],
-            "emotion_source_entity_type": ["person"],
-            "emotion_target": ["the action"],
-            "emotion_target_entity_type": ["event"],
-            "intensity": ["high"],
-            "nuance": ["simple"],
-            "synonymous_emotions": ["dismay", "displeasure"],
-            "opposite_emotions": ["satisfaction", "joy"]}})
+        "‘I can't believe you did this,’ she said, her voice filled with disappointment.",
+        {"disappointment": "disappointment"},
+        {
+            "disappointment": {
+                "felt_by": ["she"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["the action", "the action of the other person", "you"],
+                "felt_towards_entity_type": ["action", "person"],
+            }
+        })
 
 
 def test_extract_openai_emotion_features_case_8():
@@ -255,39 +239,35 @@ def test_extract_openai_emotion_features_case_8():
     :return:
     """
     match_reference_emotions(
-        "Her heart was a storm of conflicting emotions.", {
+        "Her heart was a storm of conflicting emotions.",
+        {"conflicted": "conflicted"},
+        {
             "conflicted": {
-                "emotion_source": ["her", "her heart"],
-                "emotion_source_entity_type": ["emotion", "emotional state", "metaphor", "person"],
-                "emotion_target": ["emotions", "her heart", "her emotions", "her feelings"],
-                "emotion_target_entity_type": ["abstract", "abstract concept", "emotion", "emotions", "metaphor"],
-                "intensity": ["high"],
-                "nuance": ["complex"],
-                "synonymous_emotions": ["torn", "ambivalent", "uncertain"],
-                "opposite_emotions": ["resolved", "certain", "clear"]
+                "felt_by": ["her", "her heart"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["emotions", "her own emotions", "her own feelings"],
+                "felt_towards_entity_type": ["abstract", "abstract concept", "abstract emotion", "emotions"],
             },
         }, match_all=False)  # Stormy is sometimes included but not consistently.
     match_reference_emotions(
-        "He felt like a leaf in the wind, lost and directionless.", {
-            "confusion": {
-                "emotion_source": ["He"],
-                "emotion_source_entity_type": ["person"],
-                "emotion_target": ["his situation"],
-                "emotion_target_entity_type": ["abstract concept"],
-                "intensity": ["high"],
-                "nuance": ["complex"],
-                "synonymous_emotions": ["disorientation", "bewilderment", "uncertain"],
-                "opposite_emotions": ["clarity", "certainty"]
-            },
+        "He felt like a leaf in the wind, lost and directionless.",
+        {
+            "confusion": "lost",
+            "directionless": "lost",
+            "lost": "lost",
+            "vulnerability": "vulnerability"},
+        {
             "vulnerability": {
-                "emotion_source": ["He"],
-                "emotion_source_entity_type": ["person"],
-                "emotion_target": ["his state", "his state of being"],
-                "emotion_target_entity_type": ["abstract concept"],
-                "intensity": ["medium"],
-                "nuance": ["complex"],
-                "synonymous_emotions": ["fragility", "exposure"],
-                "opposite_emotions": ["strength", "security"]
+                "felt_by": ["He"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["his life", "his state", "his state of being"],
+                "felt_towards_entity_type": ["abstract concept", "situation"],
+            },
+            "lost": {
+                "felt_by": ["He"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["his life", "his life path", "his situation"],
+                "felt_towards_entity_type": ["abstract concept", "concept", "life", "life path", "situation", "state"],
             },
         })
 
@@ -299,29 +279,25 @@ def test_extract_openai_emotion_features_case_9():
     :return:
     """
     match_reference_emotions(
-        "He smiled, but it was hard to tell if it was genuine.", {
+        "He smiled, but it was hard to tell if it was genuine.",
+        {"uncertainty": "uncertainty"},
+        {
             "uncertainty": {
-                "emotion_source": ["he", "the observer"],
-                "emotion_source_entity_type": ["person"],
-                "emotion_target": ["the smile"],
-                "emotion_target_entity_type": ["expression", "gesture"],
-                "intensity": ["medium"],
-                "nuance": ["complex"],
-                "synonymous_emotions": ["doubt", "skepticism"],
-                "opposite_emotions": ["confidence", "trust"]
+                "felt_by": ["he", "the observer"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["his smile", "the smile"],
+                "felt_towards_entity_type": ["expression", "facial expression", "gesture"],
             },
         }, match_all=False)  # Curiosity appears sometimes
     match_reference_emotions(
-        "Her expression was unreadable, a mix of emotions.", {
+        "Her expression was unreadable, a mix of emotions.",
+        {"confusion": "confusion"},
+        {
             "confusion": {
-                "emotion_source": ["her"],
-                "emotion_source_entity_type": ["person"],
-                "emotion_target": ["her expression"],
-                "emotion_target_entity_type": ["expression"],
-                "intensity": ["medium"],
-                "nuance": ["complex"],
-                "synonymous_emotions": ["uncertainty", "bewilderment"],
-                "opposite_emotions": ["clarity", "certainty"]
+                "felt_by": ["her"],
+                "felt_by_entity_type": ["person"],
+                "felt_towards": ["her expression", "the situation"],
+                "felt_towards_entity_type": ["expression", "facial expression", "situation"],
             },
         }, match_all=False)  # Intrigue, curiosity, anxiety, ambivalence app appear sometimes.
 

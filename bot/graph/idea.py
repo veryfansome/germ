@@ -6,8 +6,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.future import select as sql_select
 from starlette.concurrency import run_in_threadpool
 
-from bot.lang.utils import (extract_openai_sentence_type_features,
-                            extract_openai_emotion_features, extract_openai_entity_features,
+from bot.lang.utils import (classify_sentence_using_openai,
+                            classify_emotions_using_openai, extract_openai_entity_features,
                             extract_openai_text_features, split_to_sentences)
 from bot.lang.examples import documents as doc_examples, sentences as sentence_examples
 from db.neo4j import AsyncNeo4jDriver
@@ -150,7 +150,7 @@ class IdeaGraph:
                 openai_sentence_type = (
                     openai_sentence_type
                     if openai_sentence_type is not None else await run_in_threadpool(
-                        extract_openai_sentence_type_features, sentence, model="gpt-4o-mini"))
+                        classify_sentence_using_openai, sentence, model="gpt-4o-mini"))
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
                     sentence_rdb_record.sentence_node_type = SENTENCE_NODE_TYPE[openai_sentence_type["functional_type"]]
@@ -198,7 +198,7 @@ class IdeaGraph:
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
                     sentence_rdb_record.sentence_openai_emotion_features = await run_in_threadpool(
-                        extract_openai_emotion_features, sentence, model="gpt-4o-mini")
+                        classify_emotions_using_openai, sentence, model="gpt-4o-mini")
                     sentence_rdb_record.sentence_openai_emotion_features_time_changed = utc_now()
                     sentence_rdb_record.sentence_openai_emotion_features_fetch_count += 1
                     await rdb_session.commit()
@@ -212,46 +212,43 @@ class IdeaGraph:
 
                 await self.add_emotion(emotion["emotion"])
                 await self.link_emotion_to_sentence(
-                    emotion["emotion"], sentence_rdb_record.sentence_id, sentence_node_type,
-                    intensity=emotion["intensity"], nuance=emotion["nuance"])
+                    emotion["emotion"], sentence_rdb_record.sentence_id, sentence_node_type)
 
                 # Add emotion source to entities
-                emotion_source = remove_leading_the(emotion["emotion_source"])
-                entity_set.add(emotion_source)
-                for token in emotion_source.split():
+                felt_by = remove_leading_the(emotion["felt_by"])
+                entity_set.add(felt_by)
+                for token in felt_by.split():
                     entity_token_set.add(token)
-                await self.add_entity(emotion_source)
+                await self.add_entity(felt_by)
                 await self.link_emotion_to_entity(
-                    emotion["emotion"], emotion_source, sentence_rdb_record.sentence_id, "FELT",
-                    intensity=emotion["intensity"], nuance=emotion["nuance"])
+                    emotion["emotion"], felt_by, sentence_rdb_record.sentence_id, "FELT")
                 await self.link_entity_to_sentence(
-                    emotion_source, sentence_rdb_record.sentence_id, sentence_node_type)
-                await self.add_entity_type(emotion["emotion_source_entity_type"])
-                await self.link_entity_type_to_entity(emotion_source, emotion["emotion_source_entity_type"])
+                    felt_by, sentence_rdb_record.sentence_id, sentence_node_type)
+                await self.add_entity_type(emotion["felt_by_entity_type"])
+                await self.link_entity_type_to_entity(felt_by, emotion["felt_by_entity_type"])
 
                 # Add emotion target to entities
-                emotion_target = remove_leading_the(emotion["emotion_target"])
-                entity_set.add(emotion_target)
-                for token in emotion_target.split():
+                felt_towards = remove_leading_the(emotion["felt_towards"])
+                entity_set.add(felt_towards)
+                for token in felt_towards.split():
                     entity_token_set.add(token)
-                await self.add_entity(emotion_target)
+                await self.add_entity(felt_towards)
                 await self.link_emotion_to_entity(
-                    emotion["emotion"], emotion_target, sentence_rdb_record.sentence_id, "EVOKED",
-                    intensity=emotion["intensity"], nuance=emotion["nuance"])
+                    emotion["emotion"], felt_towards, sentence_rdb_record.sentence_id, "EVOKED")
                 await self.link_entity_to_sentence(
-                    emotion_target, sentence_rdb_record.sentence_id, sentence_node_type)
-                await self.add_entity_type(emotion["emotion_target_entity_type"])
-                await self.link_entity_type_to_entity(emotion_target, emotion["emotion_target_entity_type"])
+                    felt_towards, sentence_rdb_record.sentence_id, sentence_node_type)
+                await self.add_entity_type(emotion["felt_towards_entity_type"])
+                await self.link_entity_type_to_entity(felt_towards, emotion["felt_towards_entity_type"])
 
                 # Add and link similar emotions
-                for synonymous_emotion in emotion["synonymous_emotions"]:
-                    await self.add_emotion(synonymous_emotion)
-                    await self.link_emotion_to_emotion(emotion["emotion"], synonymous_emotion, "SYNONYMOUS")
+                #for synonymous_emotion in emotion["synonymous_emotions"]:
+                #    await self.add_emotion(synonymous_emotion)
+                #    await self.link_emotion_to_emotion(emotion["emotion"], synonymous_emotion, "SYNONYMOUS")
 
                 # Add and link opposite emotions
-                for opposite_emotion in emotion["opposite_emotions"]:
-                    await self.add_emotion(opposite_emotion)
-                    await self.link_emotion_to_emotion(emotion["emotion"], opposite_emotion, "OPPOSITE")
+                #for opposite_emotion in emotion["opposite_emotions"]:
+                #    await self.add_emotion(opposite_emotion)
+                #    await self.link_emotion_to_emotion(emotion["emotion"], opposite_emotion, "OPPOSITE")
 
             # Get OpenAI entity features
             if (sentence_rdb_record.sentence_openai_entity_features is None
@@ -428,29 +425,24 @@ class IdeaGraph:
         logger.info(f"emotion/emotion link: {emotion_link_record}")
         return emotion_link_record
 
-    async def link_emotion_to_entity(self, emotion: str, entity: str, sentence_id: int, link_type: str,
-                               intensity: str = "none", nuance: str = "none"):
+    async def link_emotion_to_entity(self, emotion: str, entity: str, sentence_id: int, link_type: str):
         emotion_link_record = await self.driver.query(
             "MATCH (e:EmotionLabel {text: $emotion}), (n:Entity {text: $entity}) "
             # TODO: Implement retention policy on emotion->entity link based on age.
             # The timestamp() means every time words are seen, they are "felt".
-            "MERGE (n)-[r:" + link_type + " {sentence_id: $sentence_id, intensity: $intensity, nuance: $nuance, time_evoked: timestamp()}]->(e) "
+            "MERGE (n)-[r:" + link_type + " {sentence_id: $sentence_id, time_evoked: timestamp()}]->(e) "
             "RETURN r", {
-                "emotion": emotion, "entity": entity,
-                "intensity": intensity, "nuance": nuance,
-                "sentence_id": sentence_id,
+                "emotion": emotion, "entity": entity, "sentence_id": sentence_id,
             })
         logger.info(f"emotion link: {emotion_link_record}")
         return emotion_link_record
 
-    async def link_emotion_to_sentence(self, emotion: str, sentence_id: int, sentence_node_type: str,
-                                 intensity: str = "none", nuance: str = "none"):
+    async def link_emotion_to_sentence(self, emotion: str, sentence_id: int, sentence_node_type: str):
         emotion_link_record = await self.driver.query(
             "MATCH (e:EmotionLabel {text: $emotion}), (s:" + sentence_node_type + " {sentence_id: $sentence_id}) "
-            "MERGE (s)-[r:EVOKED {sentence_id: $sentence_id, intensity: $intensity, nuance: $nuance}]->(e) "
+            "MERGE (s)-[r:EVOKED {sentence_id: $sentence_id}]->(e) "
             "RETURN r", {
                 "emotion": emotion, "sentence_id": sentence_id,
-                "intensity": intensity, "nuance": nuance,
             })
         logger.info(f"emotion link: {emotion_link_record}")
         return emotion_link_record
