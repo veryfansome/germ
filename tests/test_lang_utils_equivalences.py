@@ -90,6 +90,7 @@ def test_equivalence_classifier_case_5():
     :return:
     """
     match_reference_equivalences("The boiling point of water is 100 degrees Celsius at standard atmospheric pressure.", [
+        "boiling point of water, equivalent, 100 degrees Celsius"
         "boiling point of water, definition, 100 degrees Celsius, at standard atmospheric pressure",
         "boiling point of water, equivalent, 100 degrees Celsius, at standard atmospheric pressure",
     ])

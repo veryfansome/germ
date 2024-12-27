@@ -147,7 +147,11 @@ def test_emotion_to_entity_classifier_case_4():
             "furious": {
                 "felt_by": ["She", "she"],
                 "felt_by_entity_type": ["person"],
-                "felt_towards": ["the situation", "the situation of finding out something unexpected"],
+                "felt_towards": [
+                    "the situation",
+                    "the situation of finding out something",
+                    "the situation of finding out something unexpected",
+                ],
                 "felt_towards_entity_type": ["event", "situation"],
             }
         })
