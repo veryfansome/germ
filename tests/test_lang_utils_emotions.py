@@ -1,6 +1,6 @@
 import logging
 
-from bot.lang.utils import emotion_to_entity_classifier
+from bot.lang.classifiers import emotion_to_entity_classifier
 
 logger = logging.getLogger(__name__)
 

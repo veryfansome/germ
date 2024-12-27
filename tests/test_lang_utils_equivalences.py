@@ -1,6 +1,6 @@
 import logging
 
-from bot.lang.utils import equivalence_classifier
+from bot.lang.classifiers import equivalence_classifier
 
 logger = logging.getLogger(__name__)
 

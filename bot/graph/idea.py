@@ -6,9 +6,9 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.future import select as sql_select
 from starlette.concurrency import run_in_threadpool
 
-from bot.lang.utils import (classify_sentence_using_openai, emotion_to_entity_classifier,
-                            extract_openai_entity_features,
-                            extract_openai_text_features, split_to_sentences)
+from bot.lang.classifiers import (emotion_to_entity_classifier,
+                                  entity_classifier, extract_openai_text_features,
+                                  sentence_classifier, split_to_sentences)
 from bot.lang.examples import documents as doc_examples, sentences as sentence_examples
 from db.neo4j import AsyncNeo4jDriver
 from db.models import AsyncSessionLocal, Sentence
@@ -150,7 +150,7 @@ class IdeaGraph:
                 openai_sentence_type = (
                     openai_sentence_type
                     if openai_sentence_type is not None else await run_in_threadpool(
-                        classify_sentence_using_openai, sentence, model="gpt-4o-mini"))
+                        sentence_classifier.classify, sentence))
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
                     sentence_rdb_record.sentence_node_type = SENTENCE_NODE_TYPE[openai_sentence_type["functional_type"]]
@@ -260,7 +260,7 @@ class IdeaGraph:
                 async with rdb_session.begin():
                     await rdb_session.refresh(sentence_rdb_record)
                     sentence_rdb_record.sentence_openai_entity_features = await run_in_threadpool(
-                        extract_openai_entity_features, sentence, model="gpt-4o-mini")
+                        entity_classifier.classify, sentence)
                     sentence_rdb_record.sentence_openai_entity_features_time_changed = utc_now()
                     sentence_rdb_record.sentence_openai_entity_features_fetch_count += 1
                     await rdb_session.commit()
