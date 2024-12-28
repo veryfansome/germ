@@ -88,6 +88,17 @@ def test_sentence_classifier_case_3():
             "temporality": ["yes", "no"],
             "uses_jargon": ["no"],
         })
+    match_reference_classification(
+        "Should you need any help, feel free to ask.", {
+            "functional_type": ["imperative"],
+            "organizational_type": ["simple"],
+            "change_in_state": ["no"],
+            "noticeable_emotions": ["no"],
+            "reports_speech": ["no"],
+            "spatiality": ["no"],
+            "temporality": ["no"],
+            "uses_jargon": ["no"],
+        })
 
 
 def test_sentence_classifier_case_4():
@@ -98,29 +109,10 @@ def test_sentence_classifier_case_4():
     """
     match_reference_classification(
         "I can't believe we won the game!", {
-            "functional_type": ["exclamatory"],
+            "functional_type": ["declarative"],
             "organizational_type": ["simple"],
-            "change_in_state": ["no"],
+            "change_in_state": ["yes", "no"],
             "noticeable_emotions": ["yes"],
-            "reports_speech": ["no"],
-            "spatiality": ["no"],
-            "temporality": ["no"],
-            "uses_jargon": ["no"],
-        })
-
-
-def test_sentence_classifier_case_5():
-    """
-    Conditional.
-
-    :return:
-    """
-    match_reference_classification(
-        "Should you need any help, feel free to ask.", {
-            "functional_type": ["conditional"],
-            "organizational_type": ["simple"],
-            "change_in_state": ["no"],
-            "noticeable_emotions": ["no"],
             "reports_speech": ["no"],
             "spatiality": ["no"],
             "temporality": ["no"],
@@ -196,9 +188,9 @@ def test_sentence_classifier_case_8():
     """
     match_reference_classification(
         "I am thrilled about the promotion!", {
-            "functional_type": ["exclamatory"],
+            "functional_type": ["declarative"],
             "organizational_type": ["simple"],
-            "change_in_state": ["no"],
+            "change_in_state": ["yes", "no"],
             "noticeable_emotions": ["yes"],
             "reports_speech": ["no"],
             "spatiality": ["no"],

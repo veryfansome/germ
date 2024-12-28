@@ -129,30 +129,66 @@ entity_classifier = OpenAISentenceClassifier({
                     "type": "string",
                     "description": "What type or class of entity is this?",
                     "enum": [
-                        "event in time",
-                        "action or possible action",
-                        "concept", "creature", "currency",
-                        "geographic feature",
-                        "location",
-                        "organization",
-                        "person or personified being", "point in time", "possession object",
-                        "quantity",
-                        "structure",
+                        "animal or non-humanoid creature",
+                        "building or monument",
+                        "clothing, shoes, or jewelry",
+                        "computer, phone, book, or other recording, organization, or communication tool",
+                        "crime, terror, or paramilitary organization", "currency",
+                        "economic idea",
+                        "fictional character or imaginary persona", "fictional location",
+                        "food, drink, or other personal consumable", "for-profit business organization",
+                        "furniture or art", "future event",
+                        "geographical location or street address", "government organization",
+                        "natural resource, artificial construction material, or other industrial input",
+                        "quantity not related to currency",
+                        "non-fictional person",
+                        "non-profit industry, trade or professional organization",
+                        "non-profit religious, cultural, or community organization",
+                        "past event", "philosophical idea", "plant or flora", "political idea", "psychological idea",
+                        "religious idea",
+                        "scientific or technological idea", "storage container",
+                        "social or cultural idea not related to economics, politics, or religion",
+                        "utensil, instrument, machinery, or other mechanical tool",
+                        "vehicle",
                     ]
                 },
                 "sentiment": {
                     "type": "string",
-                    "description": "Sentiment towards entity in text.",
+                    "description": "Text's sentiment towards entity; clearly favorable (positive), clearly negative "
+                                   "(negative), objective, lacking emotional tone (neutral), contains positive and "
+                                   "negative sentiments (mixed).",
                     "enum": ["mixed", "negative", "neutral", "positive"]
                 },
-                "semantic_role": {
-                    "type": "string",
-                    "description": "Semantic role of entity in text.",
+                "semantic_roles": {
+                    "type": "array",
+                    "description": "Semantic roles of the entity; does it perform the action (agent), is it affected "
+                                   "by the action or undergoes a state of change (patient), does it perceive or "
+                                   "experience the event or state (experiencer), is it moved by the action or whose "
+                                   "location is described (theme), is it the means by which an action is performed"
+                                   "(instrument), is it for this entity's benefit that the action is performed"
+                                   "(beneficiary), is it towards this entity which the action is directed or the "
+                                   "endpoint of a movement (goal), is it the entity from which something moves or "
+                                   "originates (source), is it the place where the action occurs (location), is it "
+                                   "the temporal context in which the action occurs (time), is it the way in which an "
+                                   "action is performed (manner), is it the reason or cause for action or state "
+                                   "(cause), does it receive something as a result of the action (recipient), is it "
+                                   "the entity that owns or possesses another entity (possessor), or is it the entity "
+                                   "accompanies or is associated with another entity in the action?",
+                    "items": {
+                        "type": "string",
+                        "description": "A semantic role.",
+                        "enum": [
+                            "accompaniment" "agent", "beneficiary", "cause", "experiencer", "goal", "instrument",
+                            "location", "manner", "patient", "possessor", "recipient", "source", "time", "theme",
+                        ]
+                    },
                 },
             }
         }
     }},
-    system_message="Analyze the entities from the text and populate the entities array for the store_entities tool.",
+    system_message=("Analyze the entities from the text, focusing on the type of entity, the sentiment towards it, "
+                    "and the contextual role it plays in the sentence, then populate the entities array for the "
+                    "store_entities tool."),
     tool_name="store_entities",
     tool_description="Store generated entity classifications.",
     tool_parameter_description="Entity classifications to be stored.",
@@ -206,8 +242,10 @@ equivalence_classifier = OpenAISentenceClassifier({
 sentence_classifier = OpenAISentenceClassifier({
     "functional_type": {
         "type": "string",
-        "description": "Type of sentence based on function",
-        "enum": ["conditional", "exclamatory", "declarative", "interrogative", "imperative"],
+        "description": ("Type of sentence based on function; is it stating facts or opinions (declarative), does it "
+                        "ask a question or seek information (interrogative), or does it give a command, request, or "
+                        "instruction (imperative)."),
+        "enum": ["declarative", "interrogative", "imperative"],
     },
     "organizational_type": {
         "type": "string",
