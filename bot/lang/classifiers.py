@@ -9,7 +9,7 @@ differ = difflib.Differ()
 logger = logging.getLogger(__name__)
 
 
-class OpenAISentenceClassifier:
+class OpenAITextClassifier:
 
     TOOL_NAME = "store_text_classifications"
 
@@ -22,7 +22,7 @@ class OpenAISentenceClassifier:
                  tool_name: str = "",
                  tool_description: str = "",
                  tool_parameter_description: str = ""):
-        tool_name = OpenAISentenceClassifier.TOOL_NAME if not tool_name else tool_name
+        tool_name = OpenAITextClassifier.TOOL_NAME if not tool_name else tool_name
         self.frequency_penalty = frequency_penalty
         self.model = model
         self.presence_penalty = presence_penalty
@@ -74,7 +74,7 @@ class OpenAISentenceClassifier:
 # TODO: description classifier
 
 
-emotion_to_entity_classifier = OpenAISentenceClassifier({
+emotion_to_entity_classifier = OpenAITextClassifier({
     "emotions": {
         "type": "array",
         "description": "List of all perceivable emotions, capturing nuanced contextual meaning.",
@@ -113,10 +113,10 @@ emotion_to_entity_classifier = OpenAISentenceClassifier({
     frequency_penalty=1,
 )
 
-entity_classifier = OpenAISentenceClassifier({
+entity_classifier = OpenAITextClassifier({
     "entities": {
         "type": "array",
-        "description": "List of all entities identified in the text.",
+        "description": "List of all entities identified in the text, fictional or non-fictional.",
         "items": {
             "type": "object",
             "description": "An entity from the text.",
@@ -129,73 +129,112 @@ entity_classifier = OpenAISentenceClassifier({
                     "type": "string",
                     "description": "What type or class of entity is this?",
                     "enum": [
+                        "abstract ability, attribute, feature, or trait",
+                        "ambiguous concept",
                         "animal or non-humanoid creature",
-                        "building or monument",
+                        "article, book, document, post, or other text-based artifact",
+                        "artistic or literary concept",
+                        "audio, image, video, or other recorded media artifact",
                         "clothing, shoes, or jewelry",
-                        "computer, phone, book, or other recording, organization, or communication tool",
-                        "crime, terror, or paramilitary organization", "currency",
-                        "economic idea",
-                        "fictional character or imaginary persona", "fictional location",
-                        "food, drink, or other personal consumable", "for-profit business organization",
-                        "furniture or art", "future event",
-                        "geographical location or street address", "government organization",
-                        "natural resource, artificial construction material, or other industrial input",
+                        "comment, message, letter or other communication artifact",
+                        "computer, phone, or personal electronic device",
+                        "construction or industrial input",
+                        "crime, terror, or paramilitary organization",
+                        "currency",
+                        "economic concept",
+                        "ethical, existential, moral, philosophical, or social concept",
+                        "executive, operational, or managerial concept",
+                        "food, drink, or other perishable consumable",
+                        "for-profit business organization",
+                        "furniture or art",
+                        "future date or time",
+                        "future event, non-recurring",
+                        "game or playful activity",
+                        "geographical location or street address",
+                        "government program",
+                        "government, religious, industry, trade, professional, community, or cultural organization",
+                        "humanoid person or individual persona",
+                        "interpersonal or relational concept",
+                        "job, trade, career, or profession",
+                        "musical instrument",
+                        "natural or artificial terrain feature",
+                        "natural resource",
+                        "past date or time",
+                        "past event, non-recurring",
+                        "people group",
+                        "permanent building or monument",
+                        "physical ability, attribute, feature, or trait",
+                        "plant or flora",
+                        "political concept",
+                        "psychological concept",
                         "quantity not related to currency",
-                        "non-fictional person",
-                        "non-profit industry, trade or professional organization",
-                        "non-profit religious, cultural, or community organization",
-                        "past event", "philosophical idea", "plant or flora", "political idea", "psychological idea",
-                        "religious idea",
-                        "scientific or technological idea", "storage container",
-                        "social or cultural idea not related to economics, politics, or religion",
+                        "recurring event",
+                        "religious concept",
+                        "ritual or tradition",
+                        "scientific or technological concept",
+                        "storage container or organizational tool",
+                        "temporary structure",
                         "utensil, instrument, machinery, or other mechanical tool",
                         "vehicle",
                     ]
                 },
-                "sentiment": {
-                    "type": "string",
-                    "description": "Text's sentiment towards entity; clearly favorable (positive), clearly negative "
-                                   "(negative), objective, lacking emotional tone (neutral), contains positive and "
-                                   "negative sentiments (mixed).",
-                    "enum": ["mixed", "negative", "neutral", "positive"]
-                },
-                "semantic_roles": {
-                    "type": "array",
-                    "description": "Semantic roles of the entity; does it perform the action (agent), is it affected "
-                                   "by the action or undergoes a state of change (patient), does it perceive or "
-                                   "experience the event or state (experiencer), is it moved by the action or whose "
-                                   "location is described (theme), is it the means by which an action is performed"
-                                   "(instrument), is it for this entity's benefit that the action is performed"
-                                   "(beneficiary), is it towards this entity which the action is directed or the "
-                                   "endpoint of a movement (goal), is it the entity from which something moves or "
-                                   "originates (source), is it the place where the action occurs (location), is it "
-                                   "the temporal context in which the action occurs (time), is it the way in which an "
-                                   "action is performed (manner), is it the reason or cause for action or state "
-                                   "(cause), does it receive something as a result of the action (recipient), is it "
-                                   "the entity that owns or possesses another entity (possessor), or is it the entity "
-                                   "accompanies or is associated with another entity in the action?",
-                    "items": {
-                        "type": "string",
-                        "description": "A semantic role.",
-                        "enum": [
-                            "accompaniment" "agent", "beneficiary", "cause", "experiencer", "goal", "instrument",
-                            "location", "manner", "patient", "possessor", "recipient", "source", "time", "theme",
-                        ]
-                    },
-                },
             }
         }
     }},
-    system_message=("Analyze the entities from the text, focusing on the type of entity, the sentiment towards it, "
-                    "and the contextual role it plays in the sentence, then populate the entities array for the "
-                    "store_entities tool."),
+    system_message=("Analyze the entities from the text, focusing on entity type based on usage, then populate the "
+                    "entities array for the store_entities tool."),
     tool_name="store_entities",
     tool_description="Store generated entity classifications.",
     tool_parameter_description="Entity classifications to be stored.",
     frequency_penalty=1,
 )
 
-equivalence_classifier = OpenAISentenceClassifier({
+entity_role_classifier = OpenAITextClassifier({
+    "semantic_role": {
+        "type": "string",
+        "description": "Semantic role of the entity; does it perform the action (agent), is it affected "
+                       "by the action or undergoes a state of change (patient), does it perceive or "
+                       "experience the event or state (experiencer), is it moved by the action or whose "
+                       "location is described (theme), is it the means by which an action is performed"
+                       "(instrument), is it for this entity's benefit that the action is performed"
+                       "(beneficiary), is it towards this entity which the action is directed or the "
+                       "endpoint of a movement (goal), is it the entity from which something moves or "
+                       "originates (source), is it the place where the action occurs (location), is it "
+                       "the temporal context in which the action occurs (time), is it the way in which an "
+                       "action is performed (manner), is it the reason or cause for action or state "
+                       "(cause), does it receive something as a result of the action (recipient), is it "
+                       "the entity that owns or possesses another entity (possessor), or is it the entity "
+                       "that accompanies or is associated with another entity in the action (accompaniment)?",
+        "enum": [
+            "accompaniment" "agent", "beneficiary", "cause", "experiencer", "goal", "instrument",
+            "location", "manner", "patient", "possessor", "recipient", "source", "time", "theme",
+        ],
+    }},
+    system_message=("Analyze the entity's semantic role in the sentence, then generate the semantic_role parameter for "
+                    "the store_semantic_role tool."),
+    tool_name="store_semantic_role",
+    tool_description="Store entity semantic role.",
+    tool_parameter_description="Entity semantic role to be stored.",
+    frequency_penalty=1,
+)
+
+entity_sentiment_classifier = OpenAITextClassifier({
+    "sentiment_towards_entity": {
+        "type": "string",
+        "description": "Text's sentiment towards entity; clearly favorable (positive), clearly negative "
+                       "(negative), objective, lacking emotional tone (neutral), contains positive and "
+                       "negative sentiments (mixed).",
+        "enum": ["mixed", "negative", "neutral", "positive"]
+    }},
+    system_message=("Analyze text's sentiment towards the entity, then generate the sentiment_towards_entity parameter "
+                    "for the store_entity_sentiment tool."),
+    tool_name="store_entity_sentiment",
+    tool_description="Store entity sentiment.",
+    tool_parameter_description="Entity sentiment to be stored.",
+    frequency_penalty=1,
+)
+
+equivalence_classifier = OpenAITextClassifier({
     "equivalences": {
         "type": "array",
         "description": ("List of all equivalences, or X *is* Y type relationships, in the text, "
@@ -239,7 +278,7 @@ equivalence_classifier = OpenAISentenceClassifier({
     frequency_penalty=1,
 )
 
-sentence_classifier = OpenAISentenceClassifier({
+sentence_classifier = OpenAITextClassifier({
     "functional_type": {
         "type": "string",
         "description": ("Type of sentence based on function; is it stating facts or opinions (declarative), does it "
