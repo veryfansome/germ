@@ -51,16 +51,16 @@ def test_entity_classifier_case_animal_or_non_humanoid():
     match_reference_entities(
         "The elephant wandered through the savannah, searching for water.", [
             "elephant, animal or non-humanoid creature",
-            "savannah, natural or artificial terrain feature",
+            "savannah, terrain feature, natural or artificial",
             "water, food, drink, or other perishable consumable",
             "water, natural resource",
         ])
     match_reference_entities(
         "In the dense jungle, a jaguar prowled silently through the underbrush.", [
-            "dense jungle, natural or artificial terrain feature",
+            "dense jungle, terrain feature, natural or artificial",
             "jaguar, animal or non-humanoid creature",
-            "jungle, natural or artificial terrain feature",
-            "underbrush, natural or artificial terrain feature",
+            "jungle, terrain feature, natural or artificial",
+            "underbrush, terrain feature, natural or artificial",
         ])
 
 
@@ -75,21 +75,6 @@ def test_entity_classifier_case_article_book_document_or_other_text():
             "artificial intelligence, scientific or technological concept",
             "book, article, book, document, post, or other text-based artifact",
             "photographs, ",
-        ])
-    match_reference_entities(
-        "Right as the riot police began controlling the crowd, she shot off a tweet to her followers.", [
-            "crowd, interpersonal or relational concept",
-            "crowd, people group",
-            "followers, interpersonal or relational concept",
-            "followers, people group",
-            "riot police, crime, terror, or paramilitary organization",
-            "riot police, government, religious, industry, trade, professional, community, or cultural organization",
-            "tweet, comment, message, letter or other communication artifact",
-        ])
-    match_reference_entities(
-        "Right before she disappeared, she sent me three messages", [
-            "she, humanoid person or individual persona",
-            "three messages, comment, message, letter or other communication artifact",
         ])
     match_reference_entities(
         "The research paper provided new insights into climate change.", [
@@ -112,9 +97,11 @@ def test_entity_classifier_case_artistic_or_literary_concept():
             "imagination, ambiguous concept",
         ])
     match_reference_entities(
-        "The theme of redemption is prevalent throughout the novel.", [
-            "novel, article, book, document, post, or other text-based artifact",
-            "redemption, ethical, existential, moral, philosophical, or social concept",
+        "The works in this period of the painter's life is filled with remorse and repentance related imagery.", [
+            "painter, humanoid person or individual persona",
+            "remorse and repentance related imagery, artistic or literary concept",
+            "remorse, ethical, existential, moral, philosophical, or social concept",
+            "repentance, ethical, existential, moral, philosophical, or social concept",
         ])
 
 
@@ -125,15 +112,12 @@ def test_entity_classifier_case_audio_image_video_or_other_media():
     :return:
     """
     match_reference_entities(
-        "She used an audio recorder to interview the cartel member about his connections and activities.", [
-            "activities, abstract ability, attribute, feature, or trait",
-            "activities, ambiguous concept",
-            "activities, interpersonal or relational concept",
+        ("She used an audio recorder to tape the interview with the cartel member, "
+         "after being taken to an unspecified location."), [
             "audio recorder, computer, phone, or personal electronic device",
             "cartel member, humanoid person or individual persona",
-            "connections and activities, interpersonal or relational concept",
-            "connections, ambiguous concept",
-            "connections, interpersonal or relational concept",
+            "interview, comment, message, letter or other communication artifact",
+            "unspecified location, unspecified spatial location or spatial concept",
         ])
     match_reference_entities(
         "The podcast episode explored the history of jazz music.", [
@@ -172,9 +156,24 @@ def test_entity_classifier_case_comment_message_letter_or_communication_artifact
     :return:
     """
     match_reference_entities(
+        "Right before she disappeared, she sent me three messages", [
+            "she, humanoid person or individual persona",
+            "three messages, comment, message, letter or other communication artifact",
+        ])
+    match_reference_entities(
         "The email contained important updates about the project.", [
             "email, comment, message, letter or other communication artifact",
             "project, abstract ability, attribute, feature, or trait",
+            "project, ambiguous concept",
+        ])
+    match_reference_entities(
+        "Right as the riot police began controlling the crowd, she shot off a tweet to her followers.", [
+            "crowd, interpersonal or relational concept",
+            "crowd, people group",
+            "followers, interpersonal or relational concept",
+            "followers, people group",
+            "riot police, organization",
+            "tweet, comment, message, letter or other communication artifact",
         ])
 
 
@@ -191,10 +190,10 @@ def test_entity_classifier_case_computer_phone_or_electronic_device():
         ])
     match_reference_entities(
         "His laptop fell down three flights of stairs and crashed against a concrete surface.", [
-            "concrete surface, natural or artificial terrain feature",
+            "concrete surface, terrain feature, natural or artificial",
             "laptop, computer, phone, or personal electronic device",
-            "stairs, natural or artificial terrain feature",
-            "three flights of stairs, natural or artificial terrain feature",
+            "stairs, terrain feature, natural or artificial",
+            "three flights of stairs, terrain feature, natural or artificial",
         ])
     match_reference_entities(
         "He had been very excited about his Google glasses but he stopped wearing them after the backlash.", [
@@ -235,12 +234,13 @@ def test_entity_classifier_case_crime_terror_or_paramilitary():
     """
     match_reference_entities(
         "The investigation revealed links to the notorious street gang.", [
-            "street gang, crime, terror, or paramilitary organization",
+            "street gang, organization",
+            "street gang, people group",
         ])
     match_reference_entities(
         "Having pushed Asad out of Syria, Hayat Tahrir al-Sham now must form a new legitimate government.", [
             "Asad, humanoid person or individual persona",
-            "Hayat Tahrir al-Sham, crime, terror, or paramilitary organization",
+            "Hayat Tahrir al-Sham, organization",
             "Syria, geographical location or street address",
         ])
 
@@ -259,6 +259,7 @@ def test_entity_classifier_case_currency():
     match_reference_entities(
         "The transaction was completed in pesos.", [
             "pesos, currency",
+            "transaction, economic concept",
         ])
     match_reference_entities(
         "If you want that, it's two bucks", [
@@ -274,7 +275,7 @@ def test_entity_classifier_case_economic_concept():
     """
     match_reference_entities(
         "I don't get how you can be in business without understanding basic supply and demand.", [
-            "business, for-profit business organization",
+            "business, organization",
             "supply and demand, economic concept",
         ])
     match_reference_entities(
@@ -310,6 +311,11 @@ def test_entity_classifier_case_ethical_existential_philosophical_or_social_conc
             "contemporary political discourse, ethical, existential, moral, philosophical, or social concept",
             "contemporary political discourse, political concept",
         ])
+    match_reference_entities(
+        "The theme of redemption is prevalent throughout the novel.", [
+            "novel, article, book, document, post, or other text-based artifact",
+            "redemption, ethical, existential, moral, philosophical, or social concept",
+        ])
 
 
 def test_entity_classifier_case_executive_operational_or_managerial_concept():
@@ -321,21 +327,23 @@ def test_entity_classifier_case_executive_operational_or_managerial_concept():
     match_reference_entities(
         "Effective leadership is crucial for the success of any organization.", [
             "leadership, ethical, existential, moral, philosophical, or social concept",
-            "organization, for-profit business organization",
-            "organization, government, religious, industry, trade, professional, community, or cultural organization",
+            "leadership, executive, operational, or managerial concept",
+            "organization, organization",
         ])
     match_reference_entities(
         "Operational metrics are important for streamlining inefficient processes.", [
+            "inefficient processes, abstract ability, attribute, feature, or trait",
             "inefficient processes, ethical, existential, moral, philosophical, or social concept",
+            "inefficient processes, executive, operational, or managerial concept",
             "operational metrics, executive, operational, or managerial concept",
         ])
     match_reference_entities(
         "Corporate leaders want to measure things in the name of efficiency but every measurement incurs a cost.", [
             "Corporate leaders, humanoid person or individual persona",
             "cost, economic concept",
-            "cost, quantity not related to currency",
             "efficiency, economic concept",
             "measurement, abstract ability, attribute, feature, or trait",
+            "measurement, scientific or technological concept",
         ])
 
 
@@ -354,10 +362,8 @@ def test_entity_classifier_case_food_drink_or_other_perishable():
     match_reference_entities(
         "She enjoyed a refreshing glass of lemonade on a hot summer day.", [
             "lemonade, food, drink, or other perishable consumable",
-            "summer day, abstract ability, attribute, feature, or trait",
-            "summer day, ambiguous concept",
             "summer day, future date or time",
-            "summer day, natural or artificial terrain feature",
+            "summer day, temporal event",
         ])
 
 
@@ -369,8 +375,9 @@ def test_entity_classifier_case_for_profit_business():
     """
     match_reference_entities(
         "Apple Inc. announced its latest product launch during the annual conference.", [
-            "Apple Inc., for-profit business organization",
-            "annual conference, recurring event"
+            "Apple Inc., organization",
+            "annual conference, temporal event",
+            "latest product launch, temporal event",
         ])
 
 
@@ -391,15 +398,16 @@ def test_entity_classifier_case_furniture_or_art():
             "La-Z-boy, furniture or art"
         ])
     match_reference_entities(
-        "The art gallery displayed some exquisite Frida Kahlos.", [
+        "The art gallery displayed some exquisite Frida Kahlo pieces.", [
             "Frida Kahlo, humanoid person or individual persona",
             "art gallery, permanent building or monument",
+            "pieces, artistic or literary concept",
         ])
     match_reference_entities(
         "Hide the painting under the stairs.", [
             "painting, furniture or art",
             "stairs, permanent building or monument",
-            "stairs, natural or artificial terrain feature",
+            "stairs, terrain feature, natural or artificial",
         ])
 
 
@@ -419,19 +427,6 @@ def test_entity_classifier_case_future_date_or_time():
         ])
 
 
-def test_entity_classifier_case_future_event():
-    """
-    Geographical location or street address
-
-    :return:
-    """
-    match_reference_entities(
-        "The solar eclipse will occur next month.", [
-            "solar eclipse, future event, non-recurring",
-            "next month, future date or time",
-        ])
-
-
 def test_entity_classifier_case_geographical_location_or_street_address():
     """
     Geographical location or street address
@@ -439,8 +434,18 @@ def test_entity_classifier_case_geographical_location_or_street_address():
     :return:
     """
     match_reference_entities(
+        "She lives at 123 Maple Street.", [
+            "123 Maple Street, geographical location or street address",
+        ])
+    match_reference_entities(
+        "Make sure they see this at 10 Downing.", [
+            "10 Downing, geographical location or street address",
+            "10 Downing, permanent building or monument",
+        ])
+    match_reference_entities(
         "Hogwarts School of Witchcraft and Wizardry is located in Scotland.", [
             "Hogwarts School of Witchcraft and Wizardry, permanent building or monument",
+            "Hogwarts School of Witchcraft and Wizardry, organization",
             "Scotland, geographical location or street address",
         ])
     match_reference_entities(
@@ -458,8 +463,38 @@ def test_entity_classifier_case_government_organization():
     """
     match_reference_entities(
         "NASA is responsible for the U.S. space program.", [
-            "NASA, government, religious, industry, trade, professional, community, or cultural organization",
+            "NASA, organization",
             "U.S. space program, government program",
+        ])
+    match_reference_entities(
+        "After the hurricane, FEMA was onsite to help with the recovery.", [
+            "FEMA, organization",
+            "hurricane, natural phenomenon",
+        ])
+
+
+def test_entity_classifier_case_government_program():
+    """
+    Government organization
+
+    :return:
+    """
+    match_reference_entities(
+        "Meals on wheels is critical for the seniors who depend on it.", [
+            "Meals on Wheels, organization",
+            "seniors, people group",
+        ])
+    match_reference_entities(
+        "Social Security is an important component of America's social safety net", [
+            "America, geographical location or street address",
+            "Social Security, government program",
+            "social safety net, ethical, existential, moral, philosophical, or social concept",
+        ])
+    match_reference_entities(
+        "Many eduction reforms have been controversial, No Child Left Behind and Whole Reading are examples.", [
+            "No Child Left Behind, educational concept",
+            "No Child Left Behind, government program",
+            "Whole Reading, educational concept",
         ])
 
 
@@ -483,6 +518,79 @@ def test_entity_classifier_case_humanoid_person_or_personal():
         ])
 
 
+def test_entity_classifier_case_interpersonal_or_relational_concept():
+    """
+    Interpersonal or relational concept
+
+    :return:
+    """
+    match_reference_entities(
+        "Trust is the foundation of a strong relationship and effective communication is how we build it.", [
+            "Trust, ethical, existential, moral, philosophical, or social concept",
+            "communication, ethical, existential, moral, philosophical, or social concept",
+            "relationship, interpersonal or relational concept",
+        ])
+
+
+def test_entity_classifier_case_job_trade_or_profession():
+    """
+    Job, trade, career, or profession
+
+    :return:
+    """
+    match_reference_entities(
+        "With the shift towards high-tech, traditional trades like carpentry have become comparatively rare.", [
+            "carpentry, job, trade, career, or profession",
+            "high-tech, scientific or technological concept",
+        ])
+    match_reference_entities(
+        "Although his father got started in the Marines, he wouldn't be allowed follow the same path.", [
+            "Marines, military concept",
+            "father, humanoid person or individual persona",
+        ])
+
+
+def test_entity_classifier_case_musical_instrument():
+    """
+    Musical instrument
+
+    :return:
+    """
+    match_reference_entities(
+        "On the piano, he was like da Vinci with a paint brush.", [
+            "da Vinci, humanoid person or individual persona",
+            "paint brush, utensil, instrument, machinery, or other mechanical tool",
+            "piano, musical instrument",
+        ])
+    match_reference_entities(
+        "You should have seen how he made those people dance, playing that hacksaw like Yo-Yo Ma on the cello.", [
+            "Yo-Yo Ma, humanoid person or individual persona",
+            "cello, musical instrument",
+            "hacksaw, musical instrument",
+            "hacksaw, utensil, instrument, machinery, or other mechanical tool",
+        ])
+
+
+def test_entity_classifier_case_natural_or_artificial_terrain():
+    """
+    Natural or artificial terrain feature
+
+    :return:
+    """
+    match_reference_entities(
+        "They were massacred after the cavalry chased them into a box canyon and rained death from above.", [
+            "box canyon, terrain feature, natural or artificial",
+            "cavalry, military concept",
+            "death, abstract ability, attribute, feature, or trait",
+        ])
+    match_reference_entities(
+        "The lake created a natural barrier for the men in the castle, who relied on it's remoteness for protection.", [
+            "castle, permanent building or monument",
+            "lake, terrain feature, natural or artificial",
+            "men, people group",
+        ])
+
+
 def test_entity_classifier_case_natural_resource():
     """
     Natural resource
@@ -495,7 +603,26 @@ def test_entity_classifier_case_natural_resource():
             "economies, economic concept",
             "renewables, economic concept",
             "renewables, ethical, existential, moral, philosophical, or social concept",
+            "renewables, natural phenomenon",
             "renewables, scientific or technological concept",
+        ])
+    match_reference_entities(
+        "The lithium deposits in the ancient lake bed could fuel a revolution in battery technology.", [
+            "ancient lake bed, geographical location or street address",
+            "ancient lake bed, terrain feature, natural or artificial",
+            "battery technology, scientific or technological concept",
+            "lithium deposits, natural resource",
+        ])
+    match_reference_entities(
+        ("Having used fertilizer containing sewage sludge, Bill was for forced to sell his family's land, "
+         "which is now contaminated and longer useful for agriculture."), [
+            "Bill, humanoid person or individual persona",
+            "agriculture, economic concept",
+            "agriculture, job, trade, career, or profession",
+            "contaminated land, terrain feature, natural or artificial",
+            "family's land, geographical location or street address",
+            "fertilizer containing sewage sludge, construction or industrial input",
+            "fertilizer containing sewage sludge, food, drink, or other perishable consumable",
         ])
 
 
@@ -507,15 +634,18 @@ def test_entity_classifier_case_non_profit_industry_trace_or_professional_organi
     """
     match_reference_entities(
         "The American Medical Association sets standards for medical professionals.", [
-            "American Medical Association, government, religious, industry, trade, professional, community, or cultural organization"
+            "American Medical Association, organization",
+            "medical professionals, humanoid person or individual persona",
+            "medical professionals, job, trade, career, or profession",
+            "medical professionals, people group",
         ])
     match_reference_entities(
         "The Teamsters are for politicians that support American workers.", [
             "American workers, people group",
-            "Teamsters, government, religious, industry, trade, professional, community, or cultural organization",
-            "The Teamsters, crime, terror, or paramilitary organization",
-            "The Teamsters, government, religious, industry, trade, professional, community, or cultural organization",
+            "Teamsters, organization",
+            "The Teamsters, organization",
             "The Teamsters, political concept",
+            "politicians, humanoid person or individual persona",
         ])
 
 
@@ -527,23 +657,51 @@ def test_entity_classifier_case_non_profit_religious_cultural_or_community_organ
     """
     match_reference_entities(
         "The Red Cross provides humanitarian aid worldwide.", [
-            "Red Cross, government, religious, industry, trade, professional, community, or cultural organization",
+            "Red Cross, organization",
             "humanitarian aid, ethical, existential, moral, philosophical, or social concept",
             "worldwide, geographical location or street address",
+            "worldwide, unspecified spatial location or spatial concept",
         ])
 
 
-def test_entity_classifier_case_past_event_non_recurring():
+def test_entity_classifier_case_past_date_or_time():
     """
-    Past event, non-recurring
+    Past date or time
 
     :return:
     """
     match_reference_entities(
-        "The signing of the Declaration of Independence was a pivotal moment in history.", [
-            "Declaration of Independence, article, book, document, post, or other text-based artifact",
-            "history, ambiguous concept",
-            "signing, past event, non-recurring",
+        "She says she'll remember that day in the summer of 1969 till her dying breath.", [
+            "summer of 1969, past date or time",
+        ])
+
+
+def test_entity_classifier_case_people_group():
+    """
+    People group
+
+    :return:
+    """
+    match_reference_entities(
+        ("The Norwegian King gave the order to advance, sending first, the shield wall, archers, and "
+         "skirmishers from the Sámi tribes, followed by light spears on Scottish border horses "
+         "and conscripts from nearby towns."), [
+            "Norwegian King, humanoid person or individual persona",
+            "Scottish border horses, animal or non-humanoid creature",
+            "Sámi tribes, people group",
+            "light spears, utensil, instrument, machinery, or other mechanical tool",
+        ])
+    match_reference_entities(
+        ("The band vibed with the audience and with each song, amped up the energy, which you could see "
+         "as the mosh pit circled with ever increasing ferocity."), [
+            "audience, people group",
+            "band, organization",
+            "mosh pit, game or playful activity",
+            "song, artistic or literary concept",
+
+            # TODO: probably due to interpretation as a hole in the ground
+            "mosh pit, temporary structure",
+            "mosh pit, terrain feature, natural or artificial",
         ])
 
 
@@ -626,19 +784,7 @@ def test_entity_classifier_case_quantity_not_related_to_currency():
     match_reference_entities(
         "The recipe calls for two cups of flour.", [
             "flour, food, drink, or other perishable consumable",
-            "two cups, quantity not related to currency",
-        ])
-
-
-def test_entity_classifier_case_recurring_event():
-    """
-    Recurring event
-
-    :return:
-    """
-    match_reference_entities(
-        "The Olympics are held every four years.", [
-            "Olympics, recurring event",
+            "two cups, quantity not related to currency or time",
         ])
 
 
@@ -658,20 +804,23 @@ def test_entity_classifier_case_religious_concept():
 
 def test_entity_classifier_case_scientific_or_technological_concept():
     """
-    Religious concept
+    Scientific or technological concept
 
     :return:
     """
     match_reference_entities(
         "Quantum mechanics describes the behavior of particles at the atomic level.", [
             "Quantum mechanics, scientific or technological concept",
+            "atomic level, abstract ability, attribute, feature, or trait",
+            "atomic level, natural phenomenon",
+            "atomic level, scientific or technological concept",
             "particles, abstract ability, attribute, feature, or trait",
-            "atomic level, natural or artificial terrain feature",
+            "particles, subatomic to atomic scale phenomenon",
         ])
     match_reference_entities(
         "Tesla bet big on self-driving without LiDAR.", [
             "LiDAR, scientific or technological concept",
-            "Tesla, for-profit business organization",
+            "Tesla, organization",
             "self-driving, scientific or technological concept",
         ])
 
@@ -686,6 +835,7 @@ def test_entity_classifier_case_social_or_cultural_concept():
         "Cultural diversity and the free flow of people enriches societies.", [
             "Cultural diversity, ethical, existential, moral, philosophical, or social concept",
             "free flow of people, ethical, existential, moral, philosophical, or social concept",
+            "societies, ambiguous concept",
             "societies, people group",
         ])
 
@@ -714,6 +864,38 @@ def test_entity_classifier_case_storage_container():
         ])
 
 
+def test_entity_classifier_case_temporal_event():
+    """
+    Temporal event.
+
+    :return:
+    """
+    match_reference_entities(
+        "The solar eclipse will occur next month.", [
+            "solar eclipse, temporal event",
+            "next month, future date or time",
+        ])
+    match_reference_entities(
+        "The grand opening of the new museum is in a year.", [
+            "a year, future date or time",
+            "a year, time duration",
+            "grand opening, temporal event",
+            "museum, permanent building or monument",
+            "new museum, permanent building or monument",
+        ])
+    match_reference_entities(
+        "The signing of the Declaration of Independence was a pivotal moment in history.", [
+            "Declaration of Independence, article, book, document, post, or other text-based artifact",
+            "history, ambiguous concept",
+            "signing, temporal event",
+        ])
+    match_reference_entities(
+        "The Olympics are held every four years.", [
+            "Olympics, temporal event",
+            "four years, time duration",
+        ])
+
+
 def test_entity_classifier_case_utensil_instrument_or_machinery():
     """
     Utensil, instrument, machinery, or other mechanical tool.
@@ -723,6 +905,7 @@ def test_entity_classifier_case_utensil_instrument_or_machinery():
     match_reference_entities(
         "The can opener is in the top drawer.", [
             "can opener, utensil, instrument, machinery, or other mechanical tool",
+            "top drawer, furniture or art",
             "top drawer, storage container or organizational tool",
         ])
     match_reference_entities(
@@ -739,7 +922,7 @@ def test_entity_classifier_case_utensil_instrument_or_machinery():
 
 def test_entity_classifier_case_vehicle():
     """
-    Utensil, instrument, machinery, or other mechanical tool.
+    Vehicle
 
     :return:
     """
@@ -750,7 +933,7 @@ def test_entity_classifier_case_vehicle():
         ])
     match_reference_entities(
         "Tesla's Model Y is now their top seller.", [
-            "Tesla, for-profit business organization",
+            "Tesla, organization",
             "Model Y, vehicle",
         ])
 
