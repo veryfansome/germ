@@ -354,6 +354,7 @@ def test_entity_classifier_case_food_drink_or_other_perishable():
     match_reference_entities(
         "She enjoyed a refreshing glass of lemonade on a hot summer day.", [
             "lemonade, food, drink, or other perishable consumable",
+            "summer day, abstract ability, attribute, feature, or trait",
             "summer day, ambiguous concept",
             "summer day, future date or time",
             "summer day, natural or artificial terrain feature",
