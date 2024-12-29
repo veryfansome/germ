@@ -306,6 +306,8 @@ def test_entity_classifier_case_ethical_existential_philosophical_or_social_conc
     match_reference_entities(
         "Social justice is a key issue in contemporary political discourse.", [
             "Social justice, ethical, existential, moral, philosophical, or social concept",
+            "Social justice, political concept",
+            "contemporary political discourse, ethical, existential, moral, philosophical, or social concept",
             "contemporary political discourse, political concept",
         ])
 
