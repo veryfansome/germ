@@ -63,6 +63,12 @@ def test_entity_classifier_case_animal_or_non_humanoid():
             "jungle, terrain feature, natural or artificial",
             "underbrush, terrain feature, natural or artificial",
         ])
+    match_reference_entities(
+        "Dolphins are known for their intelligence and playful behavior.", [
+            "Dolphins, animal or non-humanoid creature",
+            "intelligence, abstract ability or attribute",
+            "playful behavior, abstract ability or attribute",
+        ])
 
 
 def test_entity_classifier_case_article_book_document_or_other_text():
@@ -84,6 +90,10 @@ def test_entity_classifier_case_article_book_document_or_other_text():
             "climate change, scientific or technological concept",
             "research paper, article, book, document, post, or other text-based artifact",
         ])
+    match_reference_entities(
+        "I just finished reading the assigned chapter from \"To Kill a Mockingbird\".", [
+            "To Kill a Mockingbird, article, book, document, post, or other text-based artifact",
+        ])
 
 
 def test_entity_classifier_case_artistic_or_literary_concept():
@@ -102,6 +112,7 @@ def test_entity_classifier_case_artistic_or_literary_concept():
         "The works in this period of the painter's life is filled with remorse and repentance related imagery.", [
             "painter, humanoid person or individual persona",
             "remorse and repentance related imagery, artistic or literary concept",
+            "remorse and repentance, ethical, existential, moral, philosophical, or social concept",
             "remorse, ethical, existential, moral, philosophical, or social concept",
             "repentance, ethical, existential, moral, philosophical, or social concept",
         ])
@@ -231,6 +242,19 @@ def test_entity_classifier_case_construction_or_industrial_input():
         ])
 
 
+def test_entity_classifier_case_city_county_and_other_localities():
+    """
+    Cities and other localities.
+
+    :return:
+    """
+    match_reference_entities(
+        "He used to live in Alameda County but moved further south along the 880.", [
+            "Alameda County, county",
+            "880, geographical concept",
+        ])
+
+
 def test_entity_classifier_case_crime_terror_or_paramilitary():
     """
     Crime, terror, or paramilitary organization.
@@ -313,6 +337,7 @@ def test_entity_classifier_case_ethical_existential_philosophical_or_social_conc
         "Social justice is a key issue in contemporary political discourse.", [
             "Social justice, ethical, existential, moral, philosophical, or social concept",
             "Social justice, political concept",
+            "contemporary political discourse, ambiguous or highly abstract concept",
             "contemporary political discourse, ethical, existential, moral, philosophical, or social concept",
             "contemporary political discourse, political concept",
             "political discourse, political concept",
@@ -346,6 +371,7 @@ def test_entity_classifier_case_executive_operational_or_managerial_concept():
         "Corporate leaders want to measure things in the name of efficiency but every measurement incurs a cost.", [
             "Corporate leaders, humanoid person or individual persona",
             "cost, economic concept",
+            "efficiency, ambiguous or highly abstract concept",
             "efficiency, economic concept",
             "efficiency, ethical, existential, moral, philosophical, or social concept",
             "measurement, abstract ability or attribute",
@@ -430,6 +456,7 @@ def test_entity_classifier_case_future_date_or_time():
         "She plans to retire after March 15th next year.", [
             "March 15th next year, future date or time",
             "March 15th, future date or time",
+            "next year, future date or time",
         ])
     match_reference_entities(
         "The train comes at 3 PM.", [
@@ -736,7 +763,7 @@ def test_entity_classifier_case_permanent_building_or_monument():
     match_reference_entities(
         "The Eiffel Tower is one of the most recognizable landmarks in Paris.", [
             "Eiffel Tower, permanent building or monument",
-            "Paris, city",
+            "Paris, city, county, district, or other municipality",
         ])
 
 
@@ -807,6 +834,7 @@ def test_entity_classifier_case_quantity_not_related_to_currency():
     match_reference_entities(
         "The recipe calls for two cups of flour.", [
             "flour, food, drink, or other perishable consumable",
+            "flour, material or substance",
             "two cups, quantity not related to currency or time",
         ])
 
@@ -837,6 +865,7 @@ def test_entity_classifier_case_scientific_or_technological_concept():
             "atomic level, abstract ability or attribute",
             "atomic level, natural phenomenon",
             "atomic level, scientific or technological concept",
+            "particles, abstract ability or attribute",
             "particles, natural phenomenon",
             "particles, subatomic to atomic scale phenomenon",
 
@@ -919,6 +948,26 @@ def test_entity_classifier_case_temporal_event():
         "The Olympics are held every four years.", [
             "Olympics, event",
             "four years, time duration",
+        ])
+
+
+def test_entity_classifier_case_temporary_structure():
+    """
+    Storage container.
+
+    :return:
+    """
+    match_reference_entities(
+        "The circus tent will set up in the outer field for the next three weeks.", [
+            "circus tent, temporary structure",
+            "outer field, unspecified spatial location or spatial concept",
+            "three weeks, time duration",
+        ])
+    match_reference_entities(
+        "The construction crew erected scaffolding around the building.", [
+            "building, permanent building or monument",
+            "construction crew, organization",
+            "scaffolding, temporary structure",
         ])
 
 

@@ -150,8 +150,9 @@ entity_classifier = OpenAITextClassifier({
                         "game or playful activity",
 
                         "geographical concept",
-                        "city",
-                        "state or province",
+                        "city, county, district, or other municipality",
+                        "state, province, or region",
+                        "park or nature preserve",
                         "country",
                         "postal code or street address",
 
