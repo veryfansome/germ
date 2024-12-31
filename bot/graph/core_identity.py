@@ -1,11 +1,10 @@
 import asyncio
 
-from bot.graph.idea import get_idea_graph, IdeaGraph
+from bot.graph.idea import idea_graph
 from bot.lang.examples import sentences as sentence_examples
 from observability.logging import logging, setup_logging
 
 logger = logging.getLogger(__name__)
-idea_graph: IdeaGraph = get_idea_graph(__name__)
 
 
 async def main():

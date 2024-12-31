@@ -3,6 +3,7 @@ import json
 from nltk.tokenize import sent_tokenize
 from openai import OpenAI
 
+from bot.graph.entities import default_entity_types
 from observability.logging import logging
 
 differ = difflib.Differ()
@@ -67,7 +68,7 @@ class OpenAITextClassifier:
                 tools=[tool_spec])
             new_json = completion.choices[0].message.tool_calls[0].function.arguments
             if review and not _review_json:
-                self.classify(text, review=True, _review_json=new_json)
+                return self.classify(text, review=True, _review_json=new_json)
             return json.loads(new_json)
 
 
@@ -113,92 +114,38 @@ emotion_to_entity_classifier = OpenAITextClassifier({
     frequency_penalty=1,
 )
 
-entity_classifier = OpenAITextClassifier({
-    "entities": {
-        "type": "array",
-        "description": "List of all entities identified in the text, fictional or non-fictional.",
-        "items": {
-            "type": "object",
-            "description": "An entity from the text.",
-            "properties": {
-                "entity": {
-                    "type": "string",
-                    "description": "Entity name."
-                },
-                "entity_type": {
-                    "type": "string",
-                    "description": "What type or class of entity is this?",
-                    "enum": [
-                        "abstract ability or attribute",
-                        "ambiguous or highly abstract concept",
-                        "animal or non-humanoid creature",
-                        "article, book, document, post, or other text-based artifact",
-                        "artistic or literary concept",
-                        "audio, image, video, or other recorded media artifact",
-                        "clothing, shoes, or jewelry",
-                        "comment, message, letter or other communication artifact",
-                        "computer, phone, or personal electronic device",
-                        "material or substance",
-                        "currency",
-                        "economic concept",
-                        "educational concept",
-                        "ethical, existential, moral, philosophical, or social concept",
-                        "executive, operational, or managerial concept",
-                        "food, drink, or other perishable consumable",
-                        "furniture or art",
-                        "future date or time",
-                        "game or playful activity",
 
-                        "geographical concept",
-                        "city, county, district, or other municipality",
-                        "state, province, or region",
-                        "park or nature preserve",
-                        "country",
-                        "postal code or street address",
-
-                        "government program",
-                        "humanoid person or individual persona",
-                        "initiative or objective",
-                        "interpersonal or relational concept",
-                        "job, trade, career, or profession",
-                        "military concept",
-                        "musical instrument",
-                        "natural phenomenon",
-                        "natural resource",
-                        "organization",
-                        "past date or time",
-                        "people group",
-                        "permanent building or monument",
-                        "physical ability, attribute, feature, or trait",
-                        "plant or flora",
-                        "political concept",
-                        "psychological concept",
-                        "quantity not related to currency or time",
-                        "religious concept",
-                        "ritual or tradition",
-                        "scientific or technological concept",
-                        "stellar to galactic scale phenomenon",
-                        "storage container or organizational tool",
-                        "subatomic to atomic scale phenomenon",
-                        "event",
-                        "temporary structure",
-                        "terrain feature, natural or artificial",
-                        "time duration",
-                        "unspecified spatial location or spatial concept",
-                        "utensil, instrument, machinery, or other mechanical tool",
-                        "vehicle",
-                    ]
-                },
+def get_entity_type_classifier(entity_types: list[str] = default_entity_types) -> OpenAITextClassifier:
+    return OpenAITextClassifier({
+        "entities": {
+            "type": "array",
+            "description": "List of all entities identified in the text.",
+            "items": {
+                "type": "object",
+                "description": "An entity from the text.",
+                "properties": {
+                    "entity": {
+                        "type": "string",
+                        "description": "Entity name."
+                    },
+                    "plurality": {
+                        "type": "string",
+                        "enum": ["singular", "plural"],
+                    },
+                    "entity_type": {
+                        "type": "string",
+                        "description": "What type or class of entity is this?",
+                        "enum": entity_types
+                    },
+                }
             }
-        }
-    }},
-    system_message=("Analyze the entities from the text, focusing on entity type based on usage, then populate the "
-                    "entities array for the store_entities tool."),
-    tool_name="store_entities",
-    tool_description="Store generated entity classifications.",
-    tool_parameter_description="Entity classifications to be stored.",
-    frequency_penalty=1,
-)
+        }},
+        system_message=("Analyze the entities from the text, focusing on entity type based on meaning and intention, "
+                        "then populate the entities parameter array for the store_entities tool."),
+        tool_name="store_entities",
+        tool_description="Store generated entity classifications.",
+        tool_parameter_description="Entity classifications to be stored.",
+    )
 
 entity_role_classifier = OpenAITextClassifier({
     "semantic_role": {

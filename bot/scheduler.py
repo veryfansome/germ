@@ -4,15 +4,13 @@ import signal
 import traceback
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from bot.graph.idea import get_idea_graph
+from bot.graph.idea import idea_graph
 from bot.graph import core_identity, idea_deduper, inconsistency_finder
 from db.utils import db_stats_job
 from observability.logging import logging, setup_logging
 
 setup_logging()
 logger = logging.getLogger(__name__)
-
-idea_graph = get_idea_graph(__name__)
 
 
 async def main():
