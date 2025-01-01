@@ -27,6 +27,7 @@ from bot.websocket import (WebSocketConnectionManager,
                            get_chat_session_messages, get_chat_session_summaries,
                            update_chat_session_is_hidden)
 from bot.chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
+from bot.controllers.entity import entity_controller
 from db.models import (DATABASE_URL, SessionLocal, engine)
 from db.utils import db_stats_job
 from observability.logging import logging, setup_logging
@@ -70,6 +71,7 @@ websocket_manager = WebSocketConnectionManager()
 
 router = ChatRoutingEventHandler()
 user_profiler = UserProfilingHandler()
+user_profiler.add_consumer(entity_controller)
 
 websocket_manager.add_ws_event_handler(router)
 websocket_manager.add_ws_event_handler(user_profiler)

@@ -59,6 +59,7 @@ def test_entity_classifier_case_animal_or_non_humanoid():
             "jaguar, fauna",
             "jungle, area",
             "jungle, terrain",
+            "underbrush, flora",
             "underbrush, terrain",
         ])
     match_reference_entities(
@@ -186,6 +187,7 @@ def test_entity_classifier_case_comment_message_letter_or_communication_artifact
             "messages, media",
             "she, person",
             "three messages, communication",
+            "three messages, concept",
             "three messages, event",
             "three messages, media",
             "three messages, quantity",
@@ -806,6 +808,7 @@ def test_entity_classifier_case_natural_or_artificial_terrain():
             "box canyon, place",
             "cavalry, organization",
             "death, concept",
+            "death, phenomenon",
         ])
     match_reference_entities(
         "The lake created a natural barrier for the men in the castle, who relied on it's remoteness for protection.", [
@@ -950,6 +953,7 @@ def test_entity_classifier_case_people_group():
          "and conscripts from nearby towns."), [
             "Norwegian King, person",
             "Scottish border horses, animal",
+            "Scottish border horses, fauna",
             "Scottish border horses, vehicle",
             "Sámi tribes, organization",
             "archers, job or profession",
@@ -1116,6 +1120,7 @@ def test_entity_classifier_case_smell_or_sensation():
     match_reference_entities(
         ("The aroma of freshly baked bread filled the whole kitchen, briefly transporting her back to a time and "
          "place long forgotten, back to her childhood home, to those summer afternoons, baking with her father."), [
+            "aroma, sensation",
             "bread, food",
             "childhood home, place",
             "father, person",
@@ -1135,6 +1140,7 @@ def test_entity_classifier_case_smell_or_sensation():
         ("The warm water sent a feeling of relief throughout her body, washing away the aches accumulated over many "
          "uncomfortable nights, sleeping in the wilderness."), [
             "aches, sensation",
+            "feeling of relief, concept",
             "feeling of relief, sensation",
             "uncomfortable nights, duration",
             "warm water, sensation",

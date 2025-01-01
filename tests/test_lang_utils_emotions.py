@@ -250,7 +250,7 @@ def test_emotion_to_entity_classifier_case_8():
                 "felt_by": ["her", "her heart"],
                 "felt_by_entity_type": ["person"],
                 "felt_towards": ["emotions", "her own emotions", "her own feelings"],
-                "felt_towards_entity_type": ["abstract", "abstract concept", "abstract emotion", "emotions"],
+                "felt_towards_entity_type": ["abstract", "abstract concept", "abstract emotion", "emotion", "emotions"],
             },
         }, match_all=False)  # Stormy is sometimes included but not consistently.
     match_reference_emotions(

@@ -1,5 +1,4 @@
 import asyncio
-import json
 import re
 import signal
 import uuid
@@ -22,25 +21,22 @@ from settings.germ_settings import UUID5_NS
 logger = logging.getLogger(__name__)
 
 SENTENCE_NODE_TYPE = {
-    "complex": "ComplexSentence",
-    "conditional": "ConditionalSentence",
     "declarative": "DeclarativeSentence",
-    "exclamatory": "ExclamatorySentence",
     "imperative": "ImperativeSentence",
     "interrogative": "InterrogativeSentence",
 }
 
 
-class DeclarativeSentenceMergeEventHandler(ABC):
+class SentenceMergeEventHandler(ABC):
     @abstractmethod
-    async def on_merge(self, node_type: str, sentence_id: int, openai_parameters):
+    async def on_sentence_merge(self, node_type: str, sentence_id: int, openai_parameters):
         pass
 
 
 class IdeaGraph:
     def __init__(self, driver: AsyncNeo4jDriver):
         self.driver = driver
-        self.declarative_sentence_merge_event_handlers: list[DeclarativeSentenceMergeEventHandler] = []
+        self.sentence_merge_event_handlers: list[SentenceMergeEventHandler] = []
 
     async def add_default_entity_types(self) -> list[Task]:
         async_tasks = []
@@ -166,9 +162,10 @@ class IdeaGraph:
                 })
             logger.info(f"sentence: {graph_record}")
         async_tasks = []
-        for handler in self.declarative_sentence_merge_event_handlers:
+        for handler in self.sentence_merge_event_handlers:
             async_tasks.append(asyncio.create_task(
-                handler.on_merge(sentence_node_type, rdb_record.sentence_id, rdb_record.sentence_openai_parameters)))
+                handler.on_sentence_merge(
+                    sentence_node_type, rdb_record.sentence_id, rdb_record.sentence_openai_parameters)))
         return graph_record, sentence_node_type, rdb_record.sentence_id, async_tasks
 
     async def add_sentence_subject(self, subject: str):

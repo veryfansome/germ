@@ -11,10 +11,10 @@ DATABASE_URL = "{name}:{password}@{host}/germ".format(
     name=germ_settings.POSTGRES_USER,
     password=germ_settings.POSTGRES_PASSWORD,
 )
-async_engine = create_async_engine(f"postgresql+asyncpg://{DATABASE_URL}", echo=True)
+async_engine = create_async_engine(f"postgresql+asyncpg://{DATABASE_URL}", echo=False)
 AsyncSessionLocal = async_sessionmaker(bind=async_engine, class_=AsyncSession, expire_on_commit=False)
 
-engine = create_engine(f"postgresql+psycopg2://{DATABASE_URL}", echo=True)
+engine = create_engine(f"postgresql+psycopg2://{DATABASE_URL}", echo=False)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
@@ -32,10 +32,6 @@ class ChatSession(Base):
     time_started = Column(DateTime(timezone=True))
     time_stopped = Column(DateTime(timezone=True))
 
-    # Relationship to ChatUser through the link table
-    chat_users = relationship(
-        "ChatUser",
-        secondary="chat_session_chat_user_link", back_populates="chat_sessions")
     # Relationship to ChatUserProfile through the link table
     chat_user_profiles = relationship(
         "ChatUserProfile",
@@ -63,26 +59,6 @@ class ChatResponseSent(Base):
         # Since we look up responses by session for bookmarks.
         Index("idx_chat_response_sent_chat_session_id", "chat_session_id"),
     )
-
-
-class ChatUser(Base):
-    __tablename__ = "chat_user"
-    chat_user_id = Column(Integer, primary_key=True, autoincrement=True)
-    chat_user_first_name = Column(String)
-    chat_user_last_name = Column(String)
-    chat_user_middle_name_or_initials = Column(String)
-
-    # Relationship to ChatSession through the link table
-    chat_sessions = relationship(
-        "ChatSession",
-        secondary="chat_session_chat_user_link",
-        back_populates="chat_users")
-
-
-class ChatSessionChatUserLink(Base):
-    __tablename__ = "chat_session_chat_user_link"
-    chat_session_id = Column(Integer, ForeignKey('chat_session.chat_session_id'), primary_key=True)
-    chat_user_id = Column(Integer, ForeignKey('chat_user.chat_user_id'), primary_key=True)
 
 
 class ChatUserProfile(Base):

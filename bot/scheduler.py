@@ -4,8 +4,8 @@ import signal
 import traceback
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from bot.controllers.entity import entity_controller
 from bot.graph.idea import idea_graph
-from bot.graph import inconsistency_finder
 from db.utils import db_stats_job
 from observability.logging import logging, setup_logging
 
@@ -18,7 +18,7 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     scheduler.start()
-
+    idea_graph.sentence_merge_event_handlers.append(entity_controller)
     while True:
         await asyncio.sleep(10)
 
@@ -31,15 +31,15 @@ def signal_handler(sig, frame):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Build a graph of ideas.')
-    parser.add_argument("--inconsistency-finder", help='Enable idea distillation runs.',
+    parser.add_argument("--entity-controller", help='Enable entity controller.',
                         action="store_true", default=False)
     args = parser.parse_args()
     scheduler = AsyncIOScheduler()
     scheduler.add_job(db_stats_job, "interval", minutes=15, name="PostgreSQL stats")
 
-    if args.inconsistency_finder:
-        #scheduler.add_job(inconsistency_finder.main, "interval", minutes=1, name="Inconsistency finder")
-        pass
+    if args.entity_controller:
+        scheduler.add_job(entity_controller.on_periodic_run, "interval",
+                          seconds=entity_controller.interval_seconds, name="EntityController")
 
     try:
         asyncio.run(main())

@@ -32,7 +32,7 @@ def setup_logging(global_level: str = germ_settings.LOG_LEVEL):
                     "level": "ERROR",
                     "handlers": ["console"],
                 },
-                "sqlalchemy.engine.Engine": {
+                "sqlalchemy": {
                     "level": "ERROR",
                     "handlers": ["console"],
                 },

@@ -62,7 +62,7 @@ services:
     command: [
       "python",
       "-m", "bot.scheduler",
-      "--inconsistency-finder",
+      "--entity-controller",
     ]
 
   bot-init:
