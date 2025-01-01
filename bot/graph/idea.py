@@ -1,11 +1,15 @@
 import asyncio
+import json
 import re
 import signal
 import uuid
+from abc import ABC, abstractmethod
+from asyncio import Task
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.future import select as sql_select
 from starlette.concurrency import run_in_threadpool
 
+from bot.graph.entities import default_entity_types
 from bot.lang.classifiers import (emotion_to_entity_classifier,
                                   extract_openai_text_features, get_entity_type_classifier,
                                   sentence_classifier, split_to_sentences)
@@ -17,7 +21,6 @@ from settings.germ_settings import UUID5_NS
 
 logger = logging.getLogger(__name__)
 
-INSTANCE_MANIFEST = {}
 SENTENCE_NODE_TYPE = {
     "complex": "ComplexSentence",
     "conditional": "ConditionalSentence",
@@ -28,9 +31,22 @@ SENTENCE_NODE_TYPE = {
 }
 
 
+class DeclarativeSentenceMergeEventHandler(ABC):
+    @abstractmethod
+    async def on_merge(self, node_type: str, sentence_id: int, openai_parameters):
+        pass
+
+
 class IdeaGraph:
     def __init__(self, driver: AsyncNeo4jDriver):
         self.driver = driver
+        self.declarative_sentence_merge_event_handlers: list[DeclarativeSentenceMergeEventHandler] = []
+
+    async def add_default_entity_types(self) -> list[Task]:
+        async_tasks = []
+        for entity_type in default_entity_types:
+            async_tasks.append(asyncio.create_task(self.add_entity_type(entity_type)))
+        return async_tasks
 
     async def add_document(self, name: str, body: str):
         """
@@ -40,21 +56,14 @@ class IdeaGraph:
         :param body:
         :return:
         """
-        current_rounded_time, _, _ = await self.add_time()
         document_record = await self.driver.query(
             "MERGE (d:Document {name: $name}) RETURN d", {"name": name})
         logger.info(f"document: {document_record}")
-        time_record_link = await self.driver.query(
-            "MATCH (t:Time {text: $time}), (d:Document {name: $name}) "
-            "MERGE (d)-[r:OCCURRED]->(t) "
-            "RETURN r", {"time": str(current_rounded_time), "name": name})
-        logger.debug(f"document/time link: {time_record_link}")
 
         last_sentence_id = None
         last_sentence_node_type = None
         for body_sentence in split_to_sentences(body):
-            _, this_sentence_node_type, this_sentence_id = await self.add_sentence(
-                body_sentence, current_rounded_time=current_rounded_time)
+            _, this_sentence_node_type, this_sentence_id, async_tasks = await self.add_sentence(body_sentence)
 
             sentence_do_document_link_record = await self.driver.query(
                 "MATCH (d:Document {name: $document}), (s:" + this_sentence_node_type + " {sentence_id: $sentence_id}) "
@@ -69,6 +78,7 @@ class IdeaGraph:
                     "RETURN r", {
                         "last_sentence_id": last_sentence_id, "this_sentence_id": this_sentence_id,
                     })
+                logger.info(f"sentence/sentence link: {sentence_to_sentence_link}")
 
             logger.info(f"sentence link: {sentence_do_document_link_record}")
             last_sentence_id = this_sentence_id
@@ -99,20 +109,6 @@ class IdeaGraph:
         logger.info(f"entity_type: {entity_type_record}")
         return entity_type_record
 
-    async def add_idea(self, idea: str, sentence_id: int, current_rounded_time=None):
-        if current_rounded_time is None:
-            current_rounded_time, _, _ = await self.add_time()
-        idea_record = await self.driver.query(
-            "MERGE (i:Idea {text: $idea, sentence_id: $sentence_id}) RETURN i",
-            {"idea": idea, "sentence_id": sentence_id})
-        logger.info(f"idea: {idea_record}")
-        time_record_link = await self.driver.query(
-            "MATCH (t:Time {text: $time}), (i:Idea {text: $idea}) "
-            "MERGE (i)-[r:OCCURRED {sentence_id: $sentence_id}]->(t) RETURN r",
-            {"time": str(current_rounded_time), "idea": idea, "sentence_id": sentence_id})
-        logger.debug(f"idea/time link: {time_record_link}")
-        return idea_record
-
     async def add_knowledge_category(self, knowledge_category: str):
         knowledge_category_record = await self.driver.query(
             "MERGE (k:KnowledgeCategory {text: $knowledge_category}) RETURN k",
@@ -120,11 +116,8 @@ class IdeaGraph:
         logger.info(f"knowledge_category: {knowledge_category_record}")
         return knowledge_category_record
 
-    async def add_sentence(self, sentence: str,
-                           current_rounded_time=None, openai_features=None, openai_sentence_type=None):
+    async def add_sentence(self, sentence: str):
         sentence = sentence.strip()
-        if current_rounded_time is None:
-            current_rounded_time, _, _ = await self.add_time()
 
         # Generate signature for lookup in PostgreSQL
         sentence_signature = uuid.uuid5(UUID5_NS, sentence)
@@ -132,206 +125,51 @@ class IdeaGraph:
             async with rdb_session.begin():
                 sentence_select_stmt = sql_select(Sentence).where(Sentence.sentence_signature == sentence_signature)
                 sentence_select_result = await rdb_session.execute(sentence_select_stmt)
-                sentence_rdb_record = sentence_select_result.scalars().first()
+                rdb_record = sentence_select_result.scalars().first()
 
                 # Create record if not found
-                if not sentence_rdb_record:
-                    sentence_rdb_record = Sentence(text=sentence, sentence_signature=sentence_signature)
-                    rdb_session.add(sentence_rdb_record)
+                if not rdb_record:
+                    rdb_record = Sentence(text=sentence, sentence_signature=sentence_signature)
+                    rdb_session.add(rdb_record)
                     await rdb_session.commit()
 
             # Get sentence type if not set
-            if (sentence_rdb_record.sentence_node_type is None
-                    or is_stale(
-                        sentence_rdb_record.sentence_openai_sentence_features_time_changed,
-                        sentence_rdb_record.sentence_openai_sentence_features_fetch_count,
+            if (rdb_record.sentence_node_type is None
+                    or is_stale_or_over_fetch_count_threshold(
+                        rdb_record.sentence_openai_parameters_time_changed,
+                        rdb_record.sentence_openai_parameters_fetch_count,
                         hours=24
                     )):
-                openai_sentence_type = (
-                    openai_sentence_type
-                    if openai_sentence_type is not None else await run_in_threadpool(
-                        sentence_classifier.classify, sentence))
+                openai_parameters = await run_in_threadpool(sentence_classifier.classify, sentence)
                 async with rdb_session.begin():
-                    await rdb_session.refresh(sentence_rdb_record)
-                    sentence_rdb_record.sentence_node_type = SENTENCE_NODE_TYPE[openai_sentence_type["functional_type"]]
-                    sentence_rdb_record.sentence_openai_sentence_features = openai_sentence_type
-                    sentence_rdb_record.sentence_openai_sentence_features_time_changed = utc_now()
-                    sentence_rdb_record.sentence_openai_sentence_features_fetch_count += 1
+                    await rdb_session.refresh(rdb_record)
+                    rdb_record.sentence_node_type = SENTENCE_NODE_TYPE[openai_parameters["functional_type"]]
+                    rdb_record.sentence_openai_parameters = openai_parameters
+                    rdb_record.sentence_openai_parameters_time_changed = utc_now()
+                    rdb_record.sentence_openai_parameters_fetch_count += 1
                     await rdb_session.commit()
-            logger.info(f"openai_sentence_features: {sentence_rdb_record.sentence_openai_sentence_features}")
+            logger.info(f"openai_sentence_features: {rdb_record.sentence_openai_parameters}")
 
-            # Create sentence node and link to current time node
-            sentence_node_type = sentence_rdb_record.sentence_node_type
-            sentence_graph_record = await self.driver.query(
-                "MERGE (s:" + sentence_node_type + " {text: $text, sentence_id: $sentence_id}) RETURN s",
-                {"text": sentence, "sentence_id": sentence_rdb_record.sentence_id})
-            logger.info(f"sentence: {sentence_graph_record}")
-            time_record_link = await self.driver.query(
-                "MATCH (t:Time {text: $time}), (s:" + sentence_node_type + " {text: $sentence}) "
-                "MERGE (s)-[r:OCCURRED {sentence_id: $sentence_id}]->(t) "
-                "RETURN r", {
-                    "time": str(current_rounded_time), "sentence": sentence,
-                    "sentence_id": sentence_rdb_record.sentence_id})
-            logger.debug(f"sentence/time link: {time_record_link}")
-
-            # Create a linked idea because every sentence expresses at least one idea.
-            await self.add_idea(sentence, sentence_rdb_record.sentence_id, current_rounded_time=current_rounded_time)
-            idea_link_record = await self.driver.query(
-                "MATCH (i:Idea {text: $idea}), (s:" + sentence_node_type + " {text: $sentence}) "
-                "MERGE (s)-[r:EXPRESSES {sentence_id: $sentence_id}]->(i) "
-                "RETURN r", {
-                    "idea": sentence, "sentence": sentence,
-                    "sentence_id": sentence_rdb_record.sentence_id})
-            logger.info(f"idea link: {idea_link_record}")
-
-            entity_set = set()
-            entity_token_set = set()
-            knowledge_category_set = set()
-
-            # Get emotion features
-            if (sentence_rdb_record.sentence_openai_emotion_features is None
-                    or is_stale(
-                        sentence_rdb_record.sentence_openai_emotion_features_time_changed,
-                        sentence_rdb_record.sentence_openai_emotion_features_fetch_count,
-                        hours=24
-                    )):
-                async with rdb_session.begin():
-                    await rdb_session.refresh(sentence_rdb_record)
-                    sentence_rdb_record.sentence_openai_emotion_features = await run_in_threadpool(
-                        emotion_to_entity_classifier.classify, sentence)
-                    sentence_rdb_record.sentence_openai_emotion_features_time_changed = utc_now()
-                    sentence_rdb_record.sentence_openai_emotion_features_fetch_count += 1
-                    await rdb_session.commit()
-
-            # Emotion
-            openai_emotions_features = sentence_rdb_record.sentence_openai_emotion_features
-            for emotion in openai_emotions_features["emotions"]:
-                logger.info(f"emotion: {emotion}")
-                if emotion["emotion"] == "neutral":
-                    continue  # Skip neutral to focus on the not neutral
-
-                await self.add_emotion(emotion["emotion"])
-                await self.link_emotion_to_sentence(
-                    emotion["emotion"], sentence_rdb_record.sentence_id, sentence_node_type)
-
-                # Add emotion source to entities
-                felt_by = remove_leading_the(emotion["felt_by"])
-                entity_set.add(felt_by)
-                for token in felt_by.split():
-                    entity_token_set.add(token)
-                await self.add_entity(felt_by)
-                await self.link_emotion_to_entity(
-                    emotion["emotion"], felt_by, sentence_rdb_record.sentence_id, "FELT")
-                await self.link_entity_to_sentence(
-                    felt_by, sentence_rdb_record.sentence_id, sentence_node_type)
-                await self.add_entity_type(emotion["felt_by_entity_type"])
-                await self.link_entity_type_to_entity(felt_by, emotion["felt_by_entity_type"])
-
-                # Add emotion target to entities
-                felt_towards = remove_leading_the(emotion["felt_towards"])
-                entity_set.add(felt_towards)
-                for token in felt_towards.split():
-                    entity_token_set.add(token)
-                await self.add_entity(felt_towards)
-                await self.link_emotion_to_entity(
-                    emotion["emotion"], felt_towards, sentence_rdb_record.sentence_id, "EVOKED")
-                await self.link_entity_to_sentence(
-                    felt_towards, sentence_rdb_record.sentence_id, sentence_node_type)
-                await self.add_entity_type(emotion["felt_towards_entity_type"])
-                await self.link_entity_type_to_entity(felt_towards, emotion["felt_towards_entity_type"])
-
-                # Add and link similar emotions
-                #for synonymous_emotion in emotion["synonymous_emotions"]:
-                #    await self.add_emotion(synonymous_emotion)
-                #    await self.link_emotion_to_emotion(emotion["emotion"], synonymous_emotion, "SYNONYMOUS")
-
-                # Add and link opposite emotions
-                #for opposite_emotion in emotion["opposite_emotions"]:
-                #    await self.add_emotion(opposite_emotion)
-                #    await self.link_emotion_to_emotion(emotion["emotion"], opposite_emotion, "OPPOSITE")
-
-            # Get OpenAI entity features
-            if (sentence_rdb_record.sentence_openai_entity_features is None
-                    or is_stale(
-                        sentence_rdb_record.sentence_openai_entity_features_time_changed,
-                        sentence_rdb_record.sentence_openai_entity_features_fetch_count,
-                        hours=24
-                    )):
-                async with rdb_session.begin():
-                    await rdb_session.refresh(sentence_rdb_record)
-                    sentence_rdb_record.sentence_openai_entity_features = await run_in_threadpool(
-                        get_entity_type_classifier().classify, sentence, review=False, _review_json=None)
-                    sentence_rdb_record.sentence_openai_entity_features_time_changed = utc_now()
-                    sentence_rdb_record.sentence_openai_entity_features_fetch_count += 1
-                    await rdb_session.commit()
-
-            # Entities
-            for entity in sentence_rdb_record.sentence_openai_entity_features["entities"]:
-                logger.info(f"entity: {entity}")
-
-                # Add entity and link to sentence.
-                entity_name = remove_leading_the(entity["entity"])
-                entity_set.add(entity_name)
-                for token in entity_name.split():
-                    entity_token_set.add(token)
-                await self.add_entity(entity_name)
-                await self.link_entity_to_sentence(entity_name, sentence_rdb_record.sentence_id, sentence_node_type)
-
-                # Add entity type and link entity to is type
-                await self.add_entity_type(entity["entity_type"])
-                await self.link_entity_type_to_entity(entity_name, entity["entity_type"])
-
-                if "semantic_role" in entity:
-                    await self.add_entity_role(entity["semantic_role"])
-                    await self.link_entity_role_to_entity(entity_name, entity["semantic_role"],
-                                                          sentence_rdb_record.sentence_id)
-
-                # Link entity to a sentiment based on context.
-                if "sentiment" in entity and entity["sentiment"] != "neutral":
-                    await self.add_sentiment_label(entity["sentiment"])
-                    await self.link_entity_to_sentiment(entity_name, entity["sentiment"],
-                                                        sentence_rdb_record.sentence_id)
-
-            if (sentence_rdb_record.sentence_openai_text_features is None
-                    or is_stale(
-                        sentence_rdb_record.sentence_openai_text_features_time_changed,
-                        sentence_rdb_record.sentence_openai_text_features_fetch_count,
-                        hours=24
-                    )):
-                async with rdb_session.begin():
-                    await rdb_session.refresh(sentence_rdb_record)
-                    sentence_rdb_record.sentence_openai_text_features = await run_in_threadpool(
-                        extract_openai_text_features, sentence, model="gpt-4o-mini")
-                    sentence_rdb_record.sentence_openai_text_features_time_changed = utc_now()
-                    sentence_rdb_record.sentence_openai_text_features_fetch_count += 1
-                    await rdb_session.commit()
-
-            # Knowledge category
-            for knowledge_category in sentence_rdb_record.sentence_openai_text_features["knowledge"]:
-                await self.add_knowledge_category(knowledge_category)
-                await self.link_knowledge_category_to_sentence(knowledge_category, sentence, sentence_node_type)
-
-            # Sentiment
-            sentiment = sentence_rdb_record.sentence_openai_text_features["sentiment"]
-            if sentiment != "neutral":  # Skip neutral to focus on the not neutral
-                await self.add_sentiment_label(sentiment)
-                await self.link_sentiment_to_sentence(sentiment, sentence, sentence_node_type)
-
-            # Sentence subject
-            for subject in sentence_rdb_record.sentence_openai_text_features["subjects"]:
-                await self.add_sentence_subject(subject)
-                await self.link_sentence_subject_to_sentence(subject, sentence, sentence_node_type)
-                if subject in entity_set:
-                    await self.link_sentence_subject_to_entity(subject, subject)
-
-            # Topic
-            for topic in sentence_rdb_record.sentence_openai_text_features["topics"]:
-                await self.add_topic_label(topic)
-                await self.link_topic_label_to_sentence(topic, sentence, sentence_node_type)
-                if topic in knowledge_category_set:
-                    await self.link_topic_label_to_knowledge_category(topic, topic)
-
-        return sentence_graph_record, sentence_node_type, sentence_rdb_record.sentence_id
+            # Merge sentence node
+            parameter_spec = sentence_classifier.tool_properties_spec
+            sentence_node_type = rdb_record.sentence_node_type
+            graph_record = await self.driver.query(
+                ("MERGE (s:"
+                 + rdb_record.sentence_node_type
+                 + " {text: $text, sentence_id: $sentence_id, "
+                 + ", ".join([f"{k}: ${k}" for k in parameter_spec.keys()])
+                 + "}) RETURN s"),
+                {
+                    "text": sentence,
+                    "sentence_id": rdb_record.sentence_id,
+                    **{k: rdb_record.sentence_openai_parameters[k] for k in parameter_spec.keys()},
+                })
+            logger.info(f"sentence: {graph_record}")
+        async_tasks = []
+        for handler in self.declarative_sentence_merge_event_handlers:
+            async_tasks.append(asyncio.create_task(
+                handler.on_merge(sentence_node_type, rdb_record.sentence_id, rdb_record.sentence_openai_parameters)))
+        return graph_record, sentence_node_type, rdb_record.sentence_id, async_tasks
 
     async def add_sentence_subject(self, subject: str):
         subject_record = await self.driver.query("MERGE (n:SentenceSubject {text: $subject}) RETURN n",
@@ -554,15 +392,7 @@ RETURN idea_to_keep
         asyncio.run(self.close())
 
 
-def get_idea_graph(name: str):
-    if name not in INSTANCE_MANIFEST:
-        new_instance = IdeaGraph(AsyncNeo4jDriver())
-        signal.signal(signal.SIGINT, new_instance.signal_handler)
-        INSTANCE_MANIFEST[name] = new_instance
-    return INSTANCE_MANIFEST[name]
-
-
-def is_stale(dt, fetch_count: int, hours: int, max_fetch_count: int = 5):
+def is_stale_or_over_fetch_count_threshold(dt, fetch_count: int, hours: int, max_fetch_count: int = 25):
     """
 
     :param dt:  Time changed Datetime object
@@ -597,8 +427,7 @@ signal.signal(signal.SIGINT, idea_graph.signal_handler)
 
 
 async def main(args):
-    await idea_graph.add_entity_type("")
-
+    await idea_graph.add_default_entity_types()
 
     if args.load_examples:
         for doc_title, doc_body in doc_examples.all_examples:

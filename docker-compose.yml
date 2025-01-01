@@ -62,8 +62,6 @@ services:
     command: [
       "python",
       "-m", "bot.scheduler",
-      "--core-identity",
-      "--idea-deduper",
       "--inconsistency-finder",
     ]
 

@@ -34,7 +34,7 @@ class OpenAITextClassifier:
         self.tool_parameter_description = "Classifications to be stored." if not tool_parameter_description else tool_parameter_description
         self.tool_properties_spec = tool_properties_spec
 
-    def classify(self, text: str, review: bool = False, _review_json: str = None):
+    def classify(self, text: str, review: bool = False, review_json: str = None):
         tool_spec = {
             "type": "function",
             "function": {
@@ -52,7 +52,7 @@ class OpenAITextClassifier:
         messages = [{"role": "system", "content": self.system_message}]
         if review:
             messages.append({"role": "user", "content": (
-                f"Review this classification and make correction as needed: {_review_json}\n"
+                f"Review this classification and make correction as needed: {review_json}\n"
                 f"Text: {text}"
             )})
         else:
@@ -67,8 +67,8 @@ class OpenAITextClassifier:
                 tool_choice={"type": "function", "function": {"name": self.tool_name}},
                 tools=[tool_spec])
             new_json = completion.choices[0].message.tool_calls[0].function.arguments
-            if review and not _review_json:
-                return self.classify(text, review=True, _review_json=new_json)
+            if review and not review_json:
+                return json.loads(self.classify(text, review=True, review_json=new_json))
             return json.loads(new_json)
 
 
@@ -249,11 +249,6 @@ sentence_classifier = OpenAITextClassifier({
         "description": "Type of sentence based on organization.",
         "enum": ["simple", "compound and/or complex"],
     },
-    "change_in_state": {
-        "type": "string",
-        "description": "Does this sentence describe state changes?",
-        "enum": ["yes", "no"],
-    },
     "noticeable_emotions": {
         "type": "string",
         "description": "Does the sentence include non-neutral emotions?",
@@ -264,22 +259,11 @@ sentence_classifier = OpenAITextClassifier({
         "description": "Does the sentence report direct or paraphrased speech?",
         "enum": ["yes", "no"],
     },
-    "spatiality": {
-        "type": "string",
-        "description": "Does the sentence describe spatial relationships?",
-        "enum": ["yes", "no"],
-    },
-    "temporality": {
-        "type": "string",
-        "description": "Does the sentence describe temporal relationships?",
-        "enum": ["yes", "no"],
-    },
     "uses_jargon": {
         "type": "string",
         "description": "Does the sentence use jargon or slang?",
         "enum": ["yes", "no"],
     }},
-    frequency_penalty=1,
 )
 
 

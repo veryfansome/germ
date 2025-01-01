@@ -108,21 +108,9 @@ class Sentence(Base):
     sentence_id = Column(Integer, primary_key=True, autoincrement=True)
     sentence_node_type = Column(String)
 
-    sentence_openai_emotion_features = Column(JSON)
-    sentence_openai_emotion_features_time_changed = Column(DateTime(timezone=True))
-    sentence_openai_emotion_features_fetch_count = Column(Integer, default=0)
-
-    sentence_openai_entity_features = Column(JSON)
-    sentence_openai_entity_features_time_changed = Column(DateTime(timezone=True))
-    sentence_openai_entity_features_fetch_count = Column(Integer, default=0)
-
-    sentence_openai_sentence_features = Column(JSON)
-    sentence_openai_sentence_features_time_changed = Column(DateTime(timezone=True))
-    sentence_openai_sentence_features_fetch_count = Column(Integer, default=0)
-
-    sentence_openai_text_features = Column(JSON)
-    sentence_openai_text_features_time_changed = Column(DateTime(timezone=True))
-    sentence_openai_text_features_fetch_count = Column(Integer, default=0)
+    sentence_openai_parameters = Column(JSON)
+    sentence_openai_parameters_time_changed = Column(DateTime(timezone=True))
+    sentence_openai_parameters_fetch_count = Column(Integer, default=0)
 
     sentence_signature = Column(UUID)
     text = Column(String)

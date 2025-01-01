@@ -1,10 +1,8 @@
 import logging
-from prometheus_client import Counter
 
 from bot.lang.classifiers import get_entity_type_classifier
 
 logger = logging.getLogger(__name__)
-entity_counter = Counter('entity_count', 'Total number of classifications.', ["entity", "entity_type"])
 
 
 def match_reference_entities(test_sentence, reference_classification):
@@ -14,7 +12,6 @@ def match_reference_entities(test_sentence, reference_classification):
     for entity in new_classification["entities"]:
         assert "entity" in entity
         assert "entity_type" in entity
-        entity_counter.labels(entity=entity["entity"], entity_type=["entity_type"]).inc()
         signature_parts = [
             str(entity["entity"]),
             str(entity["entity_type"]),
