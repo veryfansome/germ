@@ -24,17 +24,25 @@ def setup_logging(global_level: str = germ_settings.LOG_LEVEL):
                     "level": global_level,
                     "handlers": ["console"],
                 },
+                "apscheduler": {
+                    "level": "ERROR",
+                    "handlers": ["console"],
+                    "propagate": False,
+                },
                 "httpx": {
                     "level": "ERROR",
                     "handlers": ["console"],
+                    "propagate": False,
                 },
                 "neo4j.notifications": {
                     "level": "ERROR",
                     "handlers": ["console"],
+                    "propagate": False,
                 },
                 "sqlalchemy": {
                     "level": "ERROR",
                     "handlers": ["console"],
+                    "propagate": False,
                 },
                 "uvicorn.error": {
                     "level": "ERROR",

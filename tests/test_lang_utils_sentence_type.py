@@ -1,12 +1,28 @@
 import logging
 
-from bot.lang.classifiers import sentence_classifier
+from bot.lang.classifiers import get_sentence_classifier
 
 logger = logging.getLogger(__name__)
 
 
 def match_reference_classification(test_sentence, reference_classification):
-    new_classification = sentence_classifier.classify(test_sentence)
+    new_classification = get_sentence_classifier({
+        "contains_code": {
+            "type": "string",
+            "description": "Does the sentence include log or error messages or snippets of computer code?",
+            "enum": ["yes", "no"],
+        },
+        "contains_emotion": {
+            "type": "string",
+            "description": "Does the sentence include non-neutral emotions?",
+            "enum": ["yes", "no"],
+        },
+        "contains_speech": {
+            "type": "string",
+            "description": "Does the sentence report direct or paraphrased speech?",
+            "enum": ["yes", "no"],
+        },
+    }).classify(test_sentence)
     logger.info(f"{test_sentence} {new_classification}")
     assert "functional_type" in new_classification
     assert new_classification["functional_type"] in reference_classification["functional_type"]
@@ -14,14 +30,14 @@ def match_reference_classification(test_sentence, reference_classification):
     assert "organizational_type" in new_classification
     assert new_classification["organizational_type"] in reference_classification["organizational_type"]
 
-    assert "noticeable_emotions" in new_classification
-    assert new_classification["noticeable_emotions"] in reference_classification["noticeable_emotions"]
+    assert "contains_code" in new_classification
+    assert new_classification["contains_code"] in reference_classification["contains_code"]
 
-    assert "reports_speech" in new_classification
-    assert new_classification["reports_speech"] in reference_classification["reports_speech"]
+    assert "contains_emotion" in new_classification
+    assert new_classification["contains_emotion"] in reference_classification["contains_emotion"]
 
-    assert "uses_jargon" in new_classification
-    assert new_classification["uses_jargon"] in reference_classification["uses_jargon"]
+    assert "contains_speech" in new_classification
+    assert new_classification["contains_speech"] in reference_classification["contains_speech"]
 
 
 def test_sentence_classifier_case_declarative():
@@ -34,9 +50,9 @@ def test_sentence_classifier_case_declarative():
         "The cat sat on the mat.", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
-            "noticeable_emotions": ["no"],
-            "reports_speech": ["no"],
-            "uses_jargon": ["no"],
+            "contains_code": ["no"],
+            "contains_emotion": ["no"],
+            "contains_speech": ["no"],
         })
 
 
@@ -50,9 +66,9 @@ def test_sentence_classifier_case_interrogative():
         "What time does the meeting start?", {
             "functional_type": ["interrogative"],
             "organizational_type": ["simple"],
-            "noticeable_emotions": ["no"],
-            "reports_speech": ["no"],
-            "uses_jargon": ["no"],
+            "contains_code": ["no"],
+            "contains_emotion": ["no"],
+            "contains_speech": ["no"],
         })
 
 
@@ -66,17 +82,17 @@ def test_sentence_classifier_case_imperative():
         "Turn off the lights when you leave.", {
             "functional_type": ["imperative"],
             "organizational_type": ["simple"],
-            "noticeable_emotions": ["no"],
-            "reports_speech": ["no"],
-            "uses_jargon": ["no"],
+            "contains_code": ["no"],
+            "contains_emotion": ["no"],
+            "contains_speech": ["no"],
         })
     match_reference_classification(
         "Should you need any help, feel free to ask.", {
             "functional_type": ["imperative"],
             "organizational_type": ["simple"],
-            "noticeable_emotions": ["no"],
-            "reports_speech": ["no"],
-            "uses_jargon": ["no"],
+            "contains_code": ["no"],
+            "contains_emotion": ["no"],
+            "contains_speech": ["no"],
         })
 
 
@@ -90,9 +106,9 @@ def test_sentence_classifier_case_exclamatory():
         "I can't believe we won the game!", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
-            "noticeable_emotions": ["yes"],
-            "reports_speech": ["no"],
-            "uses_jargon": ["no"],
+            "contains_code": ["no"],
+            "contains_emotion": ["yes"],
+            "contains_speech": ["no"],
         })
 
 
@@ -106,21 +122,37 @@ def test_sentence_classifier_case_compound_and_or_complex():
         "She likes coffee, but he prefers tea.", {
             "functional_type": ["declarative"],
             "organizational_type": ["compound and/or complex"],
-            "noticeable_emotions": ["no"],
-            "reports_speech": ["no"],
-            "uses_jargon": ["no"],
+            "contains_code": ["no"],
+            "contains_emotion": ["no"],
+            "contains_speech": ["no"],
         })
     match_reference_classification(
         "Although it was raining, we decided to go for a walk.", {
             "functional_type": ["declarative"],
             "organizational_type": ["compound and/or complex"],
-            "noticeable_emotions": ["no"],
-            "reports_speech": ["no"],
-            "uses_jargon": ["no"],
+            "contains_code": ["no"],
+            "contains_emotion": ["no"],
+            "contains_speech": ["no"],
         })
 
 
-def test_sentence_classifier_case_non_neutral_emotions():
+def test_sentence_classifier_case_contains_code():
+    """
+    Contains code
+
+    :return:
+    """
+    match_reference_classification(
+        "I tried your suggestion but I got an error, `RuntimeError: Failed to open database`.", {
+            "functional_type": ["declarative"],
+            "organizational_type": ["simple"],
+            "contains_code": ["yes"],
+            "contains_emotion": ["no"],
+            "contains_speech": ["no"],
+        })
+
+
+def test_sentence_classifier_case_contains_emotion():
     """
     Non-neutral emotions.
 
@@ -130,21 +162,21 @@ def test_sentence_classifier_case_non_neutral_emotions():
         "I am thrilled about the promotion!", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
-            "noticeable_emotions": ["yes"],
-            "reports_speech": ["no"],
-            "uses_jargon": ["no"],
+            "contains_code": ["no"],
+            "contains_emotion": ["yes"],
+            "contains_speech": ["no"],
         })
     match_reference_classification(
         "He was devastated by the news.", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
-            "noticeable_emotions": ["yes"],
-            "reports_speech": ["no"],
-            "uses_jargon": ["no"],
+            "contains_code": ["no"],
+            "contains_emotion": ["yes"],
+            "contains_speech": ["no"],
         })
 
 
-def test_sentence_classifier_case_reports_speech():
+def test_sentence_classifier_case_contains_speech():
     """
     Reports speech.
 
@@ -154,44 +186,22 @@ def test_sentence_classifier_case_reports_speech():
         "He said, 'I will be there soon.'", {
             "functional_type": ["declarative"],
             "organizational_type": ["simple"],
-            "noticeable_emotions": ["no"],
-            "reports_speech": ["yes"],
-            "uses_jargon": ["no"],
+            "contains_code": ["no"],
+            "contains_emotion": ["no"],
+            "contains_speech": ["yes"],
         })
     match_reference_classification(
         "She asked if I had seen the movie.", {
             "functional_type": ["interrogative"],
             "organizational_type": ["simple"],
-            "noticeable_emotions": ["no"],
-            "reports_speech": ["yes"],
-            "uses_jargon": ["no"],
-        })
-
-
-def test_sentence_classifier_case_jargon():
-    """
-    Jargon and slang.
-
-    :return:
-    """
-    match_reference_classification(
-        "The CPU is overheating due to overclocking.", {
-            "functional_type": ["declarative"],
-            "organizational_type": ["simple"],
-            "noticeable_emotions": ["no"],
-            "reports_speech": ["no"],
-            "uses_jargon": ["yes"],
-        })
-    match_reference_classification(
-        "He nailed the presentation with his killer pitch.", {
-            "functional_type": ["declarative"],
-            "organizational_type": ["simple"],
-            "noticeable_emotions": ["yes"],
-            "reports_speech": ["no"],
-            "uses_jargon": ["yes"],
+            "contains_code": ["no"],
+            "contains_emotion": ["no"],
+            "contains_speech": ["yes"],
         })
 
 
 if __name__ == "__main__":
     from observability.logging import setup_logging
     setup_logging()
+
+    test_sentence_classifier_case_contains_code()

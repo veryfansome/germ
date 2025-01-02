@@ -11,7 +11,7 @@ from starlette.concurrency import run_in_threadpool
 from bot.graph.entities import default_entity_types
 from bot.lang.classifiers import (emotion_to_entity_classifier,
                                   extract_openai_text_features, get_entity_type_classifier,
-                                  sentence_classifier, split_to_sentences)
+                                  get_sentence_classifier, split_to_sentences)
 from bot.lang.examples import documents as doc_examples, sentences as sentence_examples
 from db.neo4j import AsyncNeo4jDriver
 from db.models import AsyncSessionLocal, Sentence
@@ -29,7 +29,7 @@ SENTENCE_NODE_TYPE = {
 
 class SentenceMergeEventHandler(ABC):
     @abstractmethod
-    async def on_sentence_merge(self, node_type: str, sentence_id: int, openai_parameters):
+    async def on_sentence_merge(self, sentence: str, node_type: str, sentence_id: int, sentence_parameters):
         pass
 
 
@@ -101,7 +101,8 @@ class IdeaGraph:
 
     async def add_entity_type(self, entity_type: str):
         entity_type_record = await self.driver.query(
-            "MERGE (e:EntityType {text: $entity_type}) RETURN e", {"entity_type": entity_type})
+            "MERGE (entity_type:EntityType {text: $entity_type}) RETURN entity_type",
+            {"entity_type": entity_type})
         logger.info(f"entity_type: {entity_type_record}")
         return entity_type_record
 
@@ -136,6 +137,7 @@ class IdeaGraph:
                         rdb_record.sentence_openai_parameters_fetch_count,
                         hours=24
                     )):
+                sentence_classifier = get_sentence_classifier()
                 openai_parameters = await run_in_threadpool(sentence_classifier.classify, sentence)
                 async with rdb_session.begin():
                     await rdb_session.refresh(rdb_record)
@@ -144,29 +146,32 @@ class IdeaGraph:
                     rdb_record.sentence_openai_parameters_time_changed = utc_now()
                     rdb_record.sentence_openai_parameters_fetch_count += 1
                     await rdb_session.commit()
-            logger.info(f"openai_sentence_features: {rdb_record.sentence_openai_parameters}")
+            logger.debug(f"sentence openai_parameters: {rdb_record.sentence_openai_parameters}")
 
             # Merge sentence node
             parameter_spec = sentence_classifier.tool_properties_spec
             sentence_node_type = rdb_record.sentence_node_type
             graph_record = await self.driver.query(
-                ("MERGE (s:"
+                ("MERGE (sentence:"
                  + rdb_record.sentence_node_type
                  + " {text: $text, sentence_id: $sentence_id, "
                  + ", ".join([f"{k}: ${k}" for k in parameter_spec.keys()])
-                 + "}) RETURN s"),
+                 + "}) RETURN sentence"),
                 {
                     "text": sentence,
                     "sentence_id": rdb_record.sentence_id,
                     **{k: rdb_record.sentence_openai_parameters[k] for k in parameter_spec.keys()},
                 })
-            logger.info(f"sentence: {graph_record}")
+            logger.info(f"sentence node: {graph_record}")
         async_tasks = []
         for handler in self.sentence_merge_event_handlers:
             async_tasks.append(asyncio.create_task(
                 handler.on_sentence_merge(
-                    sentence_node_type, rdb_record.sentence_id, rdb_record.sentence_openai_parameters)))
+                    sentence, sentence_node_type, rdb_record.sentence_id, rdb_record.sentence_openai_parameters)))
         return graph_record, sentence_node_type, rdb_record.sentence_id, async_tasks
+
+    def add_sentence_merge_event_handler(self, handler: SentenceMergeEventHandler):
+        self.sentence_merge_event_handlers.append(handler)
 
     async def add_sentence_subject(self, subject: str):
         subject_record = await self.driver.query("MERGE (n:SentenceSubject {text: $subject}) RETURN n",
@@ -220,37 +225,15 @@ class IdeaGraph:
     async def delete_all_data(self):
         await self.driver.delete_all_data()
 
-    async def get_similar_but_disconnected_ideas_by_random_topic(self):
+    async def get_entity_type_desc_by_connections(self):
         # Get a random topic that is linked to two ideas that are not the same and not connected
-        topic_results = await self.driver.query(
-            "MATCH (idea1:Idea)-[:EXPRESSES]->(s1:DeclarativeSentence)<-[:CONTAINS]-(topic:TopicLabel) "
-            "MATCH (idea2:Idea)-[:EXPRESSES]->(s2:DeclarativeSentence)<-[:CONTAINS]-(topic) "
-            "WHERE idea1 <> idea2 "
-            "AND NOT (idea1)-[:RELATED]-(idea2) "
-            "ORDER BY rand() "
-            f"LIMIT 1 "
-            "RETURN topic")
-        # Get ideas that are linked by this topic
-        if topic_results:
-            logger.info(f"random topic: {topic_results[0]['topic']['text']}")
-            idea_results = await self.driver.query(
-                "MATCH (idea1:Idea)-[:EXPRESSES]->(s1:DeclarativeSentence)<-[:CONTAINS]-(t:TopicLabel {text: $topic}) "
-                "MATCH (idea2:Idea)-[:EXPRESSES]->(s2:DeclarativeSentence)<-[:CONTAINS]-(t) "
-                "WHERE idea1 <> idea2 "
-                "AND NOT (idea1)-[:RELATED]-(idea2) "
-                "AND idea1.text < idea2.text "  # Sorting ensures unique combo
-                "RETURN DISTINCT idea1, idea2", {"topic": topic_results[0]["topic"]["text"]})
-            return topic_results, idea_results
-        return topic_results, []
-
-    async def get_random_ideas(self, count: int = 2):
-        results = await self.driver.query(
-            "MATCH (idea:Idea) "
-            "WITH idea "
-            "ORDER BY rand() "
-            f"LIMIT {count} "
-            "RETURN idea")
-        return results
+        entity_type_results = await self.driver.query("""
+            MATCH (entity_type:EntityType)
+            OPTIONAL MATCH ()-[r]->(entity_type)
+            RETURN entity_type, count(r) AS connections
+            ORDER by connections DESC
+            """)
+        return entity_type_results
 
     async def link_emotion_to_emotion(self, emotion: str, synonymous_emotion: int, link_type: str):
         emotion_link_record = await self.driver.query(
@@ -306,7 +289,7 @@ class IdeaGraph:
         logger.info(f"entity role link: {entity_role_link_record}")
         return entity_role_link_record
 
-    async def link_entity_type_to_entity(self, entity: str, entity_type: str):
+    async def link_entity_to_entity_type(self, entity: str, entity_type: str):
         entity_type_link_record = await self.driver.query(
             "MATCH (e:Entity {text: $entity}), (t:EntityType {text: $entity_type}) "
             "MERGE (e)-[r:TYPE_OF]->(t) "

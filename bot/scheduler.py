@@ -18,7 +18,10 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     scheduler.start()
-    idea_graph.sentence_merge_event_handlers.append(entity_controller)
+
+    await idea_graph.add_default_entity_types()
+    idea_graph.add_sentence_merge_event_handler(entity_controller)
+
     while True:
         await asyncio.sleep(10)
 

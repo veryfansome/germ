@@ -3,6 +3,7 @@ asyncpg
 fastapi
 gunicorn
 httpx
+inflect
 neo4j
 nltk
 openai

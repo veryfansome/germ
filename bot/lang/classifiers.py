@@ -27,8 +27,13 @@ class OpenAITextClassifier:
         self.frequency_penalty = frequency_penalty
         self.model = model
         self.presence_penalty = presence_penalty
-        self.system_message = f"Classify this text based on the parameters for the {tool_name} tool." if not system_message else system_message
         self.temperature = temperature
+
+        self.system_message = (
+            "Analyze the text, paying attention to word use and grammatical cues, "
+            f"then generate classifications for the {tool_name} tool."
+        ) if not system_message else system_message
+
         self.tool_description = "Store generated text classifications." if not tool_description else tool_description
         self.tool_name = tool_name
         self.tool_parameter_description = "Classifications to be stored." if not tool_parameter_description else tool_parameter_description
@@ -147,6 +152,26 @@ def get_entity_type_classifier(entity_types: list[str] = default_entity_types) -
         tool_parameter_description="Entity classifications to be stored.",
     )
 
+
+def get_sentence_classifier(additional_parameters=None):
+    return OpenAITextClassifier({
+        "functional_type": {
+            "type": "string",
+            "description": ("Type of sentence based on function; is it stating facts or opinions, sometimes with "
+                            "exclamations (declarative), does it ask a question or seek information, often ending in a "
+                            "question mark (interrogative), or does it give a command, request, or instruction "
+                            "(imperative)?"),
+            "enum": ["declarative", "interrogative", "imperative"],
+        },
+        "organizational_type": {
+            "type": "string",
+            "description": "Type of sentence based on organization.",
+            "enum": ["simple", "conditional", "compound and/or complex"],
+        },
+        **(additional_parameters if additional_parameters else {}),
+    })
+
+
 entity_role_classifier = OpenAITextClassifier({
     "semantic_role": {
         "type": "string",
@@ -234,36 +259,6 @@ equivalence_classifier = OpenAITextClassifier({
     tool_description="Store generated equivalence classifications.",
     tool_parameter_description="Equivalences classifications to be stored.",
     frequency_penalty=1,
-)
-
-sentence_classifier = OpenAITextClassifier({
-    "functional_type": {
-        "type": "string",
-        "description": ("Type of sentence based on function; is it stating facts or opinions (declarative), does it "
-                        "ask a question or seek information (interrogative), or does it give a command, request, or "
-                        "instruction (imperative)."),
-        "enum": ["declarative", "interrogative", "imperative"],
-    },
-    "organizational_type": {
-        "type": "string",
-        "description": "Type of sentence based on organization.",
-        "enum": ["simple", "compound and/or complex"],
-    },
-    "noticeable_emotions": {
-        "type": "string",
-        "description": "Does the sentence include non-neutral emotions?",
-        "enum": ["yes", "no"],
-    },
-    "reports_speech": {
-        "type": "string",
-        "description": "Does the sentence report direct or paraphrased speech?",
-        "enum": ["yes", "no"],
-    },
-    "uses_jargon": {
-        "type": "string",
-        "description": "Does the sentence use jargon or slang?",
-        "enum": ["yes", "no"],
-    }},
 )
 
 

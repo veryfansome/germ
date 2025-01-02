@@ -8,6 +8,7 @@ from starlette.concurrency import run_in_threadpool
 from typing import Optional
 
 from api.models import ChatRequest, ChatResponse
+from bot.graph.idea import idea_graph
 from bot.websocket import WebSocketEventHandler, WebSocketSender
 from db.models import (ChatSessionChatUserProfileLink, ChatUserProfile, SessionLocal)
 from observability.annotations import measure_exec_seconds
@@ -261,7 +262,8 @@ class UserProfilingHandler(WebSocketEventHandler):
     tool_properties_spec = {
         "intent": {
             "type": "string",
-            "description": "A simple declarative sentence, starting with, \"User\", describing what the user wants.",
+            "description": ("A simple declarative sentence, starting with, \"The user\", "
+                            "describing what the user wants."),
         },
         "sentiment": {
             "type": "number",
@@ -294,7 +296,7 @@ class UserProfilingHandler(WebSocketEventHandler):
     async def on_receive(self, chat_session_id: int, chat_request_received_id: id,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         user_profile = await run_in_threadpool(self.process_chat_request, chat_session_id, chat_request)
-        logger.info(f"user_profile: {user_profile}")
+        await idea_graph.add_sentence(user_profile["profile"]["intent"])
         for consumer in self.consumers:
             task = asyncio.create_task(
                 consumer.on_new_user_profile(
@@ -312,8 +314,9 @@ class UserProfilingHandler(WebSocketEventHandler):
                 },
                 tools=[UserProfilingHandler.tool],
                 timeout=HTTPX_TIMEOUT)
+            profile_parameters = json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
             user_profile = {
-                "profile": completion.choices[0].message.tool_calls[0].function.arguments,
+                "profile": profile_parameters,
                 "system_messages": [
                     message.model_dump() for message in chat_request.messages if message.role == "system"]
             }

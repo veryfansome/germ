@@ -154,6 +154,64 @@ def test_entity_classifier_case_audio_image_video_or_other_media():
         ])
 
 
+def test_entity_classifier_case_city_county_and_other_localities():
+    """
+    Cities and other localities.
+
+    :return:
+    """
+    match_reference_entities(
+        "He used to live in Alameda County but moved further south along the 880.", [
+            "880, area",
+            "880, road",
+            "Alameda County, area",
+        ])
+    match_reference_entities(
+        "His family has a pig farm in Yorkshire, surrounded by stunning landscape.", [
+            "Yorkshire, area",
+            "Yorkshire, place",
+            "landscape, phenomenon",
+            "pig farm, activity",
+            "pig farm, area",
+            "pig farm, organization",
+            "pig farm, structure",
+            "stunning landscape, area",
+            "stunning landscape, phenomenon",
+            "stunning landscape, terrain",
+        ])
+    match_reference_entities(
+        "In Quebec, they speak French.", [
+            "French, language",
+            "Quebec, place",
+        ])
+    match_reference_entities(
+        ("The staged explosion on the South Manchurian Railway in Liaoning Province was, famously, the pretext for "
+         "the invasion of Manchuria by Imperial Japan."), [
+            "Imperial Japan, organization",
+            "Liaoning Province, area",
+            "Liaoning Province, place",
+            "Manchuria, area",
+            "Manchuria, place",
+            "South Manchurian Railway, place",
+            "South Manchurian Railway, structure",
+            "invasion, activity",
+            "invasion, event",
+            "invasion of Manchuria, event",
+            "staged explosion, event",
+        ])
+    match_reference_entities(
+        ("On June 30, 1908, in a remote area near the Tunguska River in Siberia, a massive blast flattened "
+         "an estimated 2,000 square kilometers (about 770 square miles) of forest, knocking down "
+         "around 80 million trees."), [
+            "2,000 square kilometers, measurement",
+            "770 square miles, measurement",
+            "80 million trees, quantity",
+            "June 30, 1908, date or time",
+            "Siberia, area",
+            "Tunguska River, place",
+        ])
+
+
 def test_entity_classifier_case_clothing_shoes_or_jewelry():
     """
     Clothing, Shoes, or Jewelry.
@@ -241,7 +299,7 @@ def test_entity_classifier_case_computer_phone_or_electronic_device():
 
 def test_entity_classifier_case_construction_or_industrial_input():
     """
-    Construction or industrial input.
+    Construction or industrial input
 
     :return:
     """
@@ -263,61 +321,18 @@ def test_entity_classifier_case_construction_or_industrial_input():
         ])
 
 
-def test_entity_classifier_case_city_county_and_other_localities():
+def test_entity_classifier_case_contains_code():
     """
-    Cities and other localities.
+    Contains code
 
     :return:
     """
     match_reference_entities(
-        "He used to live in Alameda County but moved further south along the 880.", [
-            "880, area",
-            "880, road",
-            "Alameda County, area",
-        ])
-    match_reference_entities(
-        "His family has a pig farm in Yorkshire, surrounded by stunning landscape.", [
-            "Yorkshire, area",
-            "Yorkshire, place",
-            "landscape, phenomenon",
-            "pig farm, activity",
-            "pig farm, area",
-            "pig farm, organization",
-            "pig farm, structure",
-            "stunning landscape, area",
-            "stunning landscape, phenomenon",
-            "stunning landscape, terrain",
-        ])
-    match_reference_entities(
-        "In Quebec, they speak French.", [
-            "French, language",
-            "Quebec, place",
-        ])
-    match_reference_entities(
-        ("The staged explosion on the South Manchurian Railway in Liaoning Province was, famously, the pretext for "
-         "the invasion of Manchuria by Imperial Japan."), [
-            "Imperial Japan, organization",
-            "Liaoning Province, area",
-            "Liaoning Province, place",
-            "Manchuria, area",
-            "Manchuria, place",
-            "South Manchurian Railway, place",
-            "South Manchurian Railway, structure",
-            "invasion, activity",
-            "invasion, event",
-            "invasion of Manchuria, event",
-            "staged explosion, event",
-        ])
-    match_reference_entities(
-        ("On June 30, 1908, in a remote area near the Tunguska River in Siberia, a massive blast flattened "
-         "an estimated 2,000 square kilometers (about 770 square miles) of forest, knocking down "
-         "around 80 million trees."), [
-            "2,000 square kilometers, measurement",
-            "770 square miles, measurement",
-            "80 million trees, quantity",
-            "June 30, 1908, date or time",
-            "Siberia, area",
-            "Tunguska River, place",
+        "I tried your suggestion but I got and error, `RuntimeError: Failed to open database`.", [
+            "RuntimeError, concept",
+            "database, container",
+            "error, concept",
+            "suggestion, concept",
         ])
 
 
@@ -969,6 +984,7 @@ def test_entity_classifier_case_people_group():
         ("The band vibed with the audience and with each song, amped up the energy, which you could see "
          "as the mosh pit circled with ever increasing ferocity."), [
             "audience, group",  # TODO: how do we connect a type like this the concept of a group?
+            "audience, organization",
             "audience, person",
             "band, organization",
             "energy, concept",
@@ -1325,6 +1341,7 @@ if __name__ == "__main__":
     #test_entity_classifier_case_comment_message_letter_or_communication_artifact()
     #test_entity_classifier_case_computer_phone_or_electronic_device()
     #test_entity_classifier_case_construction_or_industrial_input()
+    test_entity_classifier_case_contains_code()
     #test_entity_classifier_case_crime_terror_or_paramilitary()
     #test_entity_classifier_case_currency()
     #test_entity_classifier_case_economic_concept()
@@ -1365,5 +1382,5 @@ if __name__ == "__main__":
     #test_entity_classifier_case_temporal_event()
     #test_entity_classifier_case_temporary_structure()
     #test_entity_classifier_case_utensil_or_machinery()
-    test_entity_classifier_case_vehicle()
+    #test_entity_classifier_case_vehicle()
 
