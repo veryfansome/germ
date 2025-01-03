@@ -93,12 +93,6 @@ class IdeaGraph:
         logger.info(f"entity: {entity_record}")
         return entity_record
 
-    async def add_entity(self, entity: str):
-        entity_record = await self.driver.query(
-            "MERGE (entity:Entity {text: $entity}) RETURN entity", {"entity": entity})
-        logger.info(f"entity: {entity_record}")
-        return entity_record
-
     async def add_entity_role(self, entity_role: str):
         entity_role_record = await self.driver.query(
             "MERGE (e:EntityRole {text: $entity_role}) RETURN e",
