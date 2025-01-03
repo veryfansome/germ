@@ -76,6 +76,8 @@ class OpenAITextClassifier:
                 return json.loads(self.classify(text, review=True, review_json=new_json))
             return json.loads(new_json)
 
+    def get_tool_properties_spec(self):
+        return self.tool_properties_spec
 
 # TODO: description classifier
 
@@ -120,6 +122,37 @@ emotion_to_entity_classifier = OpenAITextClassifier({
 )
 
 
+def get_entity_modifier_classifier(entity_types: list[str] = default_entity_types) -> OpenAITextClassifier:
+    return OpenAITextClassifier({
+        "modifiers": {
+            "type": "array",
+            "description": ("List of all modifier words in the the entity string, "
+                            f"given that entity type categories include: {entity_types}."),
+            "items": {
+                "type": "object",
+                "description": "A modifier word from the entity string.",
+                "properties": {
+                    "modifier": {
+                        "type": "string",
+                        "description": "Modifier word."
+                    },
+                    "modifies": {
+                        "type": "string",
+                        "description": "What word does this modifier modify?"
+                    },
+                }
+            }
+        }},
+        system_message=("Analyze the provided entity string as it appears in the text and look for the underlying "
+                        "words being modified. Focus how modifier words in the entity string affects the text's "
+                        "meaning and intention, then populate the modifiers parameter array for the "
+                        "store_modifiers tool."),
+        tool_name="store_modifiers",
+        tool_description="Store generated modifier classifications.",
+        tool_parameter_description="Modifier classifications to be stored.",
+    )
+
+
 def get_entity_type_classifier(entity_types: list[str] = default_entity_types) -> OpenAITextClassifier:
     return OpenAITextClassifier({
         "entities": {
@@ -145,7 +178,7 @@ def get_entity_type_classifier(entity_types: list[str] = default_entity_types) -
                 }
             }
         }},
-        system_message=("Analyze the entities from the text, focusing on entity type based on meaning and intention, "
+        system_message=("Analyze the entities from the text, focusing on how each affects meaning and intention, "
                         "then populate the entities parameter array for the store_entities tool."),
         tool_name="store_entities",
         tool_description="Store generated entity classifications.",
@@ -170,6 +203,26 @@ def get_sentence_classifier(additional_parameters=None):
         },
         **(additional_parameters if additional_parameters else {}),
     })
+
+
+def get_single_entity_type_classifier(entity_types: list[str] = default_entity_types) -> OpenAITextClassifier:
+    return OpenAITextClassifier({
+        "plurality": {
+            "type": "string",
+            "enum": ["singular", "plural"],
+        },
+        "entity_type": {
+            "type": "string",
+            "description": "What type or class of entity is this?",
+            "enum": entity_types
+        }},
+        system_message=("Analyze the provided entity's use in the text, focusing on how it affects meaning and "
+                        "intention, then populate the plurality and entity_type parameters for the store_entity_type "
+                        "tool."),
+        tool_name="store_entity_type",
+        tool_description="Store generated entity type classifications.",
+        tool_parameter_description="Entity type classifications to be stored.",
+    )
 
 
 entity_role_classifier = OpenAITextClassifier({

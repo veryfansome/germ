@@ -94,8 +94,9 @@ class IdeaGraph:
         return entity_record
 
     async def add_entity_role(self, entity_role: str):
-        entity_role_record = await self.driver.query("MERGE (e:EntityRole {text: $entity_role}) RETURN e",
-                                                     {"entity_role": entity_role})
+        entity_role_record = await self.driver.query(
+            "MERGE (e:EntityRole {text: $entity_role}) RETURN e",
+            {"entity_role": entity_role})
         logger.info(f"entity_role: {entity_role_record}")
         return entity_role_record
 
@@ -112,6 +113,12 @@ class IdeaGraph:
             {"knowledge_category": knowledge_category})
         logger.info(f"knowledge_category: {knowledge_category_record}")
         return knowledge_category_record
+
+    async def add_modifier(self, modifier: str):
+        modifier_record = await self.driver.query(
+            "MERGE (modifier:Modifier {text: $modifier}) RETURN modifier", {"modifier": modifier})
+        logger.info(f"modifier: {modifier_record}")
+        return modifier_record
 
     async def add_sentence(self, sentence: str):
         sentence = sentence.strip()
@@ -131,13 +138,13 @@ class IdeaGraph:
                     await rdb_session.commit()
 
             # Get sentence type if not set
+            sentence_classifier = get_sentence_classifier()
             if (rdb_record.sentence_node_type is None
                     or is_stale_or_over_fetch_count_threshold(
                         rdb_record.sentence_openai_parameters_time_changed,
                         rdb_record.sentence_openai_parameters_fetch_count,
                         hours=24
                     )):
-                sentence_classifier = get_sentence_classifier()
                 openai_parameters = await run_in_threadpool(sentence_classifier.classify, sentence)
                 async with rdb_session.begin():
                     await rdb_session.refresh(rdb_record)
@@ -193,8 +200,7 @@ class IdeaGraph:
 
         :return:
         """
-        now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-        current_rounded_time = round_time_now_down_to_nearst_15(now)
+        current_rounded_time = round_time_now_down_to_nearst_interval()
         current_time_record = await self.driver.query(
             "MERGE (t:Time {text: $time}) RETURN t", {"time": str(current_rounded_time)})
         logger.info(f"time: {current_time_record}")
@@ -246,11 +252,10 @@ class IdeaGraph:
     async def link_emotion_to_entity(self, emotion: str, entity: str, sentence_id: int, link_type: str):
         emotion_link_record = await self.driver.query(
             "MATCH (e:EmotionLabel {text: $emotion}), (n:Entity {text: $entity}) "
-            # TODO: Implement retention policy on emotion->entity link based on age.
-            # The timestamp() means every time words are seen, they are "felt".
-            "MERGE (n)-[r:" + link_type + " {sentence_id: $sentence_id, time_evoked: timestamp()}]->(e) "
+            "MERGE (n)-[r:" + link_type + " {sentence_id: $sentence_id, time_created: $rounded_time}]->(e) "
             "RETURN r", {
                 "emotion": emotion, "entity": entity, "sentence_id": sentence_id,
+                "rounded_time": round_time_now_down_to_nearst_interval(),
             })
         logger.info(f"emotion link: {emotion_link_record}")
         return emotion_link_record
@@ -265,19 +270,54 @@ class IdeaGraph:
         logger.info(f"emotion link: {emotion_link_record}")
         return emotion_link_record
 
+    async def link_entity_to_entity_singular(self, plural: str, singular: str, sentence_id: int):
+        link_record = await self.driver.query(
+            "MATCH (plural:Entity {text: $plural}), (singular:Entity {text: $singular}) "
+            "MERGE (plural)-[r:PLURAL_OF {sentence_id: $sentence_id}]->(singular) "
+            "RETURN r", {
+                "plural": plural, "singular": singular, "sentence_id": sentence_id,
+            })
+        logger.info(f"entity/entity link: {link_record}")
+        return link_record
+
+    async def link_entity_to_entity_type(self, entity: str, entity_type: str, sentence_id: int):
+        entity_type_link_record = await self.driver.query(
+            "MATCH (e:Entity {text: $entity}), (t:EntityType {text: $entity_type}) "
+            "MERGE (e)-[r:TYPE_OF {sentence_id: $sentence_id}]->(t) "
+            "RETURN r", {
+                "entity": entity, "entity_type": entity_type, "sentence_id": sentence_id,
+            })
+        logger.info(f"entity type link: {entity_type_link_record}")
+        return entity_type_link_record
+
     async def link_entity_to_sentence(self, entity: str, sentence_id: int, sentence_node_type: str):
         entity_link_record = await self.driver.query(
             "MATCH (e:Entity {text: $entity}), (s:" + sentence_node_type + " {sentence_id: $sentence_id}) "
             "MERGE (s)-[r:REFERENCES {sentence_id: $sentence_id}]->(e) "
-            "RETURN r", {"entity": entity, "sentence_id": sentence_id})
+            "RETURN r", {
+                "entity": entity, "sentence_id": sentence_id,
+            })
         logger.info(f"entity link: {entity_link_record}")
         return entity_link_record
+
+    async def link_entity_to_modifier(self, entity: str, modifier: str, sentence_id: int):
+        link_record = await self.driver.query(
+            "MATCH (entity:Entity {text: $entity}), (modifier:Modifier {text: $modifier}) "
+            "MERGE (modifier)-[r:MODIFIES {sentence_id: $sentence_id}]->(entity) "
+            "RETURN r", {
+                "entity": entity, "modifier": modifier, "sentence_id": sentence_id,
+            })
+        logger.info(f"entity/modifier link: {link_record}")
+        return link_record
 
     async def link_entity_to_sentiment(self, entity: str, sentiment: str, sentence_id: int):
         entity_link_record = await self.driver.query(
             "MATCH (e:Entity {text: $entity}), (s:SentimentLabel {text: $sentiment}) "
-            "MERGE (e)-[r:EVOKED {sentence_id: $sentence_id, time_evoked: timestamp()}]->(s) "
-            "RETURN r", {"entity": entity, "sentiment": sentiment, "sentence_id": sentence_id})
+            "MERGE (e)-[r:EVOKED {sentence_id: $sentence_id, time_created: $rounded_time}]->(s) "
+            "RETURN r", {
+                "entity": entity, "sentiment": sentiment, "sentence_id": sentence_id,
+                "rounded_time": round_time_now_down_to_nearst_interval()
+            })
         logger.info(f"entity/sentiment link: {entity_link_record}")
         return entity_link_record
 
@@ -288,14 +328,6 @@ class IdeaGraph:
             "RETURN r", {"entity": entity, "entity_role": entity_role, "sentence_id": sentence_id})
         logger.info(f"entity role link: {entity_role_link_record}")
         return entity_role_link_record
-
-    async def link_entity_to_entity_type(self, entity: str, entity_type: str):
-        entity_type_link_record = await self.driver.query(
-            "MATCH (e:Entity {text: $entity}), (t:EntityType {text: $entity_type}) "
-            "MERGE (e)-[r:TYPE_OF]->(t) "
-            "RETURN r", {"entity": entity, "entity_type": entity_type})
-        logger.info(f"entity type link: {entity_type_link_record}")
-        return entity_type_link_record
 
     async def link_knowledge_category_to_sentence(self, knowledge_category: str, sentence: str, sentence_node_type: str):
         knowledge_category_link_record = await self.driver.query(
@@ -391,11 +423,12 @@ def remove_leading_the(text: str):
     return re.sub(r'(?i)^the\s+', '', text)
 
 
-def round_time_now_down_to_nearst_15(dt):
-    minutes = dt.minute
-    remainder = minutes % 15  # How many 15-minute increments have passed
+def round_time_now_down_to_nearst_interval(interval_minutes: int = 5):
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    minutes = now.minute
+    remainder = minutes % interval_minutes  # How many interval_minutes increments have passed
     rounded_minutes = minutes - remainder  # Subtract to round down
-    return dt.replace(minute=rounded_minutes, second=0, microsecond=0)
+    return now.replace(minute=rounded_minutes, second=0, microsecond=0)
 
 
 def utc_now():

@@ -262,8 +262,7 @@ class UserProfilingHandler(WebSocketEventHandler):
     tool_properties_spec = {
         "intent": {
             "type": "string",
-            "description": ("A simple declarative sentence, starting with, \"The user\", "
-                            "describing what the user wants."),
+            "description": "A declarative sentence, clearly stating what the user wants.",
         },
         "sentiment": {
             "type": "number",

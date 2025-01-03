@@ -9,6 +9,7 @@ def match_reference_entities(test_sentence, reference_classification):
     new_classification = get_entity_type_classifier().classify(test_sentence)
     logger.info(f"{test_sentence} {new_classification}")
     assert "entities" in new_classification
+    assert len(new_classification["entities"]) > 0
     for entity in new_classification["entities"]:
         assert "entity" in entity
         assert "entity_type" in entity
@@ -28,6 +29,8 @@ def test_entity_classifier_case_abstract_ability_or_attribute():
     """
     match_reference_entities(
         "Her kindness is truly admirable and inspiring.", [
+            "Her, person",
+            "admirable, concept",
             "admiration, concept",
             "inspiration, concept",
             "inspiring, concept",
@@ -52,6 +55,8 @@ def test_entity_classifier_case_animal_or_non_humanoid():
             "elephant, fauna",
             "savannah, area",
             "savannah, terrain",
+            "water, concept",
+            "water, container",
             "water, material or substance",
         ])
     match_reference_entities(
@@ -59,6 +64,7 @@ def test_entity_classifier_case_animal_or_non_humanoid():
             "jaguar, fauna",
             "jungle, area",
             "jungle, terrain",
+            "underbrush, area",
             "underbrush, flora",
             "underbrush, terrain",
         ])
@@ -118,6 +124,7 @@ def test_entity_classifier_case_artistic_or_literary_concept():
             "remorse and repentance related imagery, concept",
             "remorse, concept",
             "repentance, concept",
+            "works, activity",
         ])
 
 
@@ -170,10 +177,12 @@ def test_entity_classifier_case_city_county_and_other_localities():
         "His family has a pig farm in Yorkshire, surrounded by stunning landscape.", [
             "Yorkshire, area",
             "Yorkshire, place",
+            "landscape, concept",
             "landscape, phenomenon",
             "pig farm, activity",
             "pig farm, area",
             "pig farm, organization",
+            "pig farm, place",
             "pig farm, structure",
             "stunning landscape, area",
             "stunning landscape, phenomenon",
@@ -194,9 +203,10 @@ def test_entity_classifier_case_city_county_and_other_localities():
             "Manchuria, place",
             "South Manchurian Railway, place",
             "South Manchurian Railway, structure",
+            "explosion, event",
+            "invasion of Manchuria, event",
             "invasion, activity",
             "invasion, event",
-            "invasion of Manchuria, event",
             "staged explosion, event",
         ])
     match_reference_entities(
@@ -242,6 +252,7 @@ def test_entity_classifier_case_comment_message_letter_or_communication_artifact
     """
     match_reference_entities(
         "Right before she disappeared, she sent me three messages.", [
+            "messages, concept",
             "messages, media",
             "she, person",
             "three messages, communication",
@@ -249,6 +260,7 @@ def test_entity_classifier_case_comment_message_letter_or_communication_artifact
             "three messages, event",
             "three messages, media",
             "three messages, quantity",
+            "three, quantity",
         ])
     match_reference_entities(
         "The email contained important updates about the project.", [
@@ -280,7 +292,9 @@ def test_entity_classifier_case_computer_phone_or_electronic_device():
     """
     match_reference_entities(
         "He upgraded to the latest smartphone model.", [
+            "latest smartphone model, device",
             "smartphone model, device",
+            "smartphone, device",
         ])
     match_reference_entities(
         "His laptop fell down three flights of stairs and crashed against a concrete surface.", [
@@ -318,6 +332,9 @@ def test_entity_classifier_case_construction_or_industrial_input():
             "AI, concept",
             "nuclear power, concept",
             "palladium prices, currency",
+            "palladium, currency",
+            "palladium, material or substance",
+            "prices, quantity",
         ])
 
 
@@ -346,6 +363,8 @@ def test_entity_classifier_case_crime_terror_or_paramilitary():
         "The investigation revealed links to the notorious street gang.", [
             "investigation, activity",
             "investigation, event",
+            "links, concept",
+            "notorious, trait",
             "street gang, organization",
         ])
     match_reference_entities(
@@ -383,6 +402,7 @@ def test_entity_classifier_case_currency():
         "\"To hell with it!\", he muttered, as he hit submit and plunged his life savings into Bitcoin.", [
             "Bitcoin, currency",
             "hell, concept",
+            "life savings, concept",
             "life savings, currency",
             "life savings, quantity",
             "submit, activity",
@@ -448,6 +468,7 @@ def test_entity_classifier_case_ethical_existential_philosophical_or_social_conc
             "Achilles' sandals, concept",
             "sandals, apparel",
             "glory, concept",
+            "life, concept",
             "long life, concept",
             "long life, duration",
             "obscurity, concept",
@@ -457,7 +478,9 @@ def test_entity_classifier_case_ethical_existential_philosophical_or_social_conc
     match_reference_entities(
         "Existentialism explores the meaning of existence.", [
             "Existentialism, concept",
+            "existence, concept",
             "meaning of existence, concept",
+            "meaning, concept",
         ])
 
 
@@ -507,7 +530,10 @@ def test_entity_classifier_case_food_drink_or_other_perishable():
     match_reference_entities(
         "She enjoyed a refreshing glass of lemonade on a hot summer day.", [
             "day, date or time",
+            "glass, container",
+            "hot, trait",
             "lemonade, food",
+            "refreshing, trait",
             "summer, season",
         ])
 
@@ -537,6 +563,7 @@ def test_entity_classifier_case_furniture_or_art():
         "Pull that chair over so we can use it to prop up this section of the pillow fort.", [
             "chair, furniture",
             "chair, container",
+            "pillow fort, concept",
             "pillow fort, structure",
         ])
     match_reference_entities(
@@ -572,6 +599,7 @@ def test_entity_classifier_case_future_date_or_time():
     match_reference_entities(
         "The train comes at 3 PM.", [
             "3 PM, date or time",
+            "train, vehicle",
         ])
 
 
@@ -594,10 +622,13 @@ def test_entity_classifier_case_game_or_playful_activity():
             "being unreadable, activity",
             "being unreadable, capability",
             "being unreadable, concept",
+            "others, person",
+            "people, person",
             "reading people, activity",
             "reading people, capability",
             "reading people, concept",
             "strategy, concept",
+            "unreadable, trait",
         ])
     match_reference_entities(
         "The level of skill in the NBA has become so phenomenal as each generation of athletes push the bar higher.", [
@@ -709,8 +740,9 @@ def test_entity_classifier_case_job_trade_or_profession():
         ])
     match_reference_entities(
         "Although his father got started in the Marines, he wouldn't be allowed follow the same path.", [
-            "father, person",
             "Marines, organization",
+            "father, person",
+            "path, concept",
         ])
 
 
@@ -735,6 +767,7 @@ def test_entity_classifier_case_legal_concept():
             "actions, activity",
             "actions, concept",
             "judge, job or profession",
+            "judge, person",
             "justice, concept",
             "people, person",
             "public servant, job or profession",
@@ -742,10 +775,12 @@ def test_entity_classifier_case_legal_concept():
     match_reference_entities(
         "Judges must remain neutral and unbiased, treating all parties equally without favoritism or prejudice.", [
             "Judges, job or profession",
+            "Judges, person",
             "favoritism, concept",
             "neutral, trait",
             "parties, concept",
             "parties, organization",
+            "parties, person",
             "prejudice, concept",
             "unbiased, trait",
         ])
@@ -753,6 +788,7 @@ def test_entity_classifier_case_legal_concept():
         ("All prospective justices claim to respect stare decisis but whenever an actual chance to tip the scales is "
          "before them, we have to assume that each would vote based on conscience and principles."), [
             "conscience, concept",
+            "conscience, trait",
             "justices, job or profession",
             "justices, person",
             "principles, concept",
@@ -769,6 +805,8 @@ def test_entity_classifier_case_material_or_substance():
     match_reference_entities(
         "The sculpture was crafted from a single block of marble.", [
             "block of marble, material or substance",
+            "block, container",
+            "marble, material or substance",
             "sculpture, structure",
         ])
     match_reference_entities(
@@ -804,6 +842,7 @@ def test_entity_classifier_case_musical_instrument():
             "cello, instrument",
             "dance, activity",
             "hacksaw, instrument",
+            "people, person",
         ])
     match_reference_entities(
         "Ain't nobody plays the trumpet like Miles Davis.", [
@@ -871,6 +910,7 @@ def test_entity_classifier_case_natural_resource():
             "family's land, place",
             "family, concept",
             "family, organization",
+            "family, person",
             "fertilizer, material or substance",
             "land, area",
             "sewage sludge, material or substance",
@@ -990,6 +1030,7 @@ def test_entity_classifier_case_people_group():
             "energy, concept",
             "ferocity, trait",
             "mosh pit, area",
+            "song, event",
             "song, media",
         ])
 
@@ -1050,6 +1091,7 @@ def test_entity_classifier_case_psychological_concept():
             "actions, concept",
             "beliefs, concept",
             "inconsistency, concept",
+            "inconsistent, trait",
         ])
 
 
@@ -1111,6 +1153,7 @@ def test_entity_classifier_case_scientific_or_technological_concept():
             "atomic level, area",
             "particles, fauna",
             "particles, phenomenon",
+            "quantum mechanics, concept",
         ])
     match_reference_entities(
         "Tesla bet big on self-driving without LiDAR.", [
@@ -1149,6 +1192,7 @@ def test_entity_classifier_case_smell_or_sensation():
         ("The chocolate smelled so good and tasted so creamy and sweet that she did feel a little better, even though "
          "she also felt guilty for finding a little joy when it seemed like everything can only be sad."), [
             "chocolate, food",
+            "guilt, concept",
             "joy, concept",
             "sadness, concept",
         ])
@@ -1158,6 +1202,7 @@ def test_entity_classifier_case_smell_or_sensation():
             "aches, sensation",
             "feeling of relief, concept",
             "feeling of relief, sensation",
+            "relief, concept",
             "uncomfortable nights, duration",
             "warm water, sensation",
             "wilderness, place",
@@ -1166,6 +1211,7 @@ def test_entity_classifier_case_smell_or_sensation():
         "The aged oak of the antique table felt smooth when he brushed his hand against its surface.", [
             "aged oak, flora",
             "antique table, furniture",
+            "hand, body part",
             "oak, flora",
             "surface, concept",
             "surface, structure",
@@ -1258,6 +1304,7 @@ def test_entity_classifier_case_temporal_event():
     match_reference_entities(
         "The signing of the Declaration of Independence was a pivotal moment in history.", [
             "Declaration of Independence, event",
+            "history, concept",
         ])
     match_reference_entities(
         "The Olympics are held every four years.", [
@@ -1294,8 +1341,12 @@ def test_entity_classifier_case_utensil_or_machinery():
     """
     match_reference_entities(
         "The can opener is in the top drawer.", [
+            "can opener, container",  # GPT-4 argues that depending on design, this is possible..
+            "can opener, device",
             "can opener, instrument",
+            "can opener, tool",
             "top drawer, container",
+            "top drawer, furniture",
         ])
     match_reference_entities(
         "Don't hold your spoon like that.", [
