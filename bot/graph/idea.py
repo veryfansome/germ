@@ -89,7 +89,13 @@ class IdeaGraph:
 
     async def add_entity(self, entity: str):
         entity_record = await self.driver.query(
-            "MERGE (e:Entity {text: $entity}) RETURN e", {"entity": entity})
+            "MERGE (entity:Entity {text: $entity}) RETURN entity", {"entity": entity})
+        logger.info(f"entity: {entity_record}")
+        return entity_record
+
+    async def add_entity(self, entity: str):
+        entity_record = await self.driver.query(
+            "MERGE (entity:Entity {text: $entity}) RETURN entity", {"entity": entity})
         logger.info(f"entity: {entity_record}")
         return entity_record
 
@@ -269,16 +275,6 @@ class IdeaGraph:
             })
         logger.info(f"emotion link: {emotion_link_record}")
         return emotion_link_record
-
-    async def link_entity_to_entity_singular(self, plural: str, singular: str, sentence_id: int):
-        link_record = await self.driver.query(
-            "MATCH (plural:Entity {text: $plural}), (singular:Entity {text: $singular}) "
-            "MERGE (plural)-[r:PLURAL_OF {sentence_id: $sentence_id}]->(singular) "
-            "RETURN r", {
-                "plural": plural, "singular": singular, "sentence_id": sentence_id,
-            })
-        logger.info(f"entity/entity link: {link_record}")
-        return link_record
 
     async def link_entity_to_entity_type(self, entity: str, entity_type: str, sentence_id: int):
         entity_type_link_record = await self.driver.query(

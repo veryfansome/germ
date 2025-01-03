@@ -170,11 +170,14 @@ services:
     image: neo4j:latest
     volumes:
       - neo4j-data:/data  # Persist data
+      - ./scripts/neo4j-start.sh:/neo4j-start.sh  # Persist data
+      - ./db_dump/neo4j:/dump  # Persist data
     environment:
       NEO4J_AUTH: *neo4j-auth
     ports:
       - "7474:7474" # HTTP
       - "7687:7687" # Bolt
+    command: [ "/neo4j-start.sh" ]
 
   # Has a loose dependency on jaeger - exports data to jaeger but not until bot is up.
   # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture

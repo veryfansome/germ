@@ -177,6 +177,7 @@ def test_entity_classifier_case_city_county_and_other_localities():
         "His family has a pig farm in Yorkshire, surrounded by stunning landscape.", [
             "Yorkshire, area",
             "Yorkshire, place",
+            "family, person",
             "landscape, concept",
             "landscape, phenomenon",
             "pig farm, activity",
@@ -595,6 +596,7 @@ def test_entity_classifier_case_future_date_or_time():
     match_reference_entities(
         "She plans to retire after March 15th next year.", [
             "March 15th next year, date or time",
+            "March 15th, date or time",
         ])
     match_reference_entities(
         "The train comes at 3 PM.", [

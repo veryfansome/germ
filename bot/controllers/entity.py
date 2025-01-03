@@ -44,8 +44,6 @@ class EntityController(SentenceMergeEventHandler):
             for entity in artifacts["openai_entities"]["entities"]:
                 try:
                     logger.info(f"entity_name: {entity["entity"]}")
-                    await add_entity(entity["entity"], entity["entity_type"], entity["plurality"],
-                                     node_type, sentence_id)
                     tasks_to_await.append(asyncio.create_task(modifier_peeler(
                         entity["entity"], entity["plurality"],
                         sentence, node_type, sentence_id, entity_types,
@@ -57,11 +55,6 @@ class EntityController(SentenceMergeEventHandler):
 
 async def add_entity(entity_name: str, entity_type: str, plurality: str,
                      node_type: str, sentence_id: int):
-    await asyncio.gather(*[
-        idea_graph.add_entity(entity_name),
-        idea_graph.add_entity_type(entity_type)])
-    await idea_graph.link_entity_to_entity_type(entity_name, entity_type, sentence_id)
-    await idea_graph.link_entity_to_sentence(entity_name, sentence_id, node_type)
 
     if plurality == "plural":
         singular_form = inflect_engine.singular_noun(entity_name)
@@ -69,10 +62,19 @@ async def add_entity(entity_name: str, entity_type: str, plurality: str,
             logger.warning(f"inflect and classifier don't agree: {entity_name}, classifier {plurality}")
         else:
             # Add and link singular form
-            await idea_graph.add_entity(singular_form)
+            entity_record, entity_type_record = await asyncio.gather(*[
+                idea_graph.add_entity(singular_form),
+                idea_graph.add_entity_type(entity_type)])
             await idea_graph.link_entity_to_entity_type(singular_form, entity_type, sentence_id)
-            # Link plural to singular
-            await idea_graph.link_entity_to_entity_singular(entity_name, singular_form, sentence_id)
+            await idea_graph.link_entity_to_sentence(singular_form, sentence_id, node_type)
+            return entity_record, entity_type_record
+    else:
+        entity_record, entity_type_record = await asyncio.gather(*[
+            idea_graph.add_entity(entity_name),
+            idea_graph.add_entity_type(entity_type)])
+        await idea_graph.link_entity_to_entity_type(entity_name, entity_type, sentence_id)
+        await idea_graph.link_entity_to_sentence(entity_name, sentence_id, node_type)
+        return entity_record, entity_type_record
 
 
 def get_entity_with_sentence_blob(entity: str, sentence: str):
@@ -96,8 +98,14 @@ async def modifier_peeler(entity_name: str, plurality: str,
         for modifier in modifiers["modifiers"]:
             logger.info(f"modifier: {modifier}")
             if modifier["modifies"] == entity_name:
-                logger.info(f"not doing more, modifies('{modifier["modifies"]}') == entity('{entity_name}')")
-                continue
+
+                logger.info(f"modifies('{modifier["modifies"]}') == entity('{entity_name}'), adding multi-word entity")
+                entity_record, entity_type_record = await add_entity(
+                    modifier["modifies"], entity_type, plurality, node_type, sentence_id)
+                await idea_graph.add_modifier(modifier["modifier"])
+                await idea_graph.link_entity_to_modifier(
+                    entity_record[0]["entity"]["text"], modifier["modifier"], sentence_id)
+
             elif modifier["modifies"] not in entity_name:
                 # If the thing being modified isn't in entity_name words, we're likely looking at some
                 # modifies/modifier pair the classifier found that is related to entity_name, but possibly something
@@ -109,35 +117,47 @@ async def modifier_peeler(entity_name: str, plurality: str,
                     get_entity_with_sentence_blob(modifier["modifies"], sentence),
                     review=False, review_json=None)
                 logger.info(f"entity_type: {entity_type}, new_entity_type: {new_entity_type}")
-                await add_entity(modifier["modifies"], new_entity_type["entity_type"], new_entity_type["plurality"],
-                                 node_type, sentence_id)
+                new_entity_words = modifier["modifies"].split()
+                if len(new_entity_words) > 1:
 
-                # To avoid recursing forever, we recurse only once.
-                if limit_additional_recursion:
-                    logger.info(f"'{modifier["modifies"]}' is not in {entity_name}, but not doing more")
-                    continue
+                    # If the new thing being modified is also multi-word, to avoid possibly recursing forever, we
+                    # recurse only once.
+                    if limit_additional_recursion:
+                        logger.info(f"'{modifier["modifies"]}' is not in {entity_name}, but not doing more")
+                        continue
+                    else:
+                        task = asyncio.create_task(
+                            modifier_peeler(modifier["modifies"], new_entity_type["plurality"],
+                                            sentence, node_type, sentence_id, entity_types,
+                                            entity_type=new_entity_type["entity_type"],
+                                            limit_additional_recursion=True))
                 else:
-                    task = asyncio.create_task(
-                        modifier_peeler(modifier["modifies"], new_entity_type["plurality"],
-                                        sentence, node_type, sentence_id, entity_types,
-                                        entity_type=new_entity_type["entity_type"],
-                                        limit_additional_recursion=True))
+                    entity_record, entity_type_record = await add_entity(
+                        modifier["modifies"], new_entity_type["entity_type"], new_entity_type["plurality"],
+                        node_type, sentence_id)
+                    await idea_graph.add_modifier(modifier["modifier"])
+                    await idea_graph.link_entity_to_modifier(
+                        entity_record[0]["entity"]["text"], modifier["modifier"], sentence_id)
+
             else:
+
                 logger.info(f"'{modifier["modifies"]}' is in {entity_name}")
-
-                # The thing being modified is in entity_name words, so probably root words.
-                await add_entity(modifier["modifies"], entity_type, plurality, node_type, sentence_id)
-                await idea_graph.add_modifier(modifier["modifier"])
-                await idea_graph.link_entity_to_modifier(modifier["modifies"], modifier["modifier"], sentence_id)
-
-                # If we're still dealing with a multi-word string, dig deeper.
                 root_words = modifier["modifies"].split()
                 if len(root_words) > 1:
+                    # If we're still dealing with a multi-word string, dig deeper.
                     logger.info(f"'{modifier["modifies"]}' has more than one word")
                     task = asyncio.create_task(
                         modifier_peeler(modifier["modifies"], plurality,
                                         sentence, node_type, sentence_id, entity_types,
                                         entity_type=entity_type))
+                else:
+                    entity_record, entity_type_record = await add_entity(
+                        modifier["modifies"], entity_type, plurality, node_type, sentence_id)
+                    await idea_graph.add_modifier(modifier["modifier"])
+                    await idea_graph.link_entity_to_modifier(
+                        entity_record[0]["entity"]["text"], modifier["modifier"], sentence_id)
+    else:
+        await add_entity(entity_name, entity_type, plurality, node_type, sentence_id)
 
 
 entity_controller = EntityController()
