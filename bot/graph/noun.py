@@ -1,5 +1,5 @@
 
-default_entity_types = [
+default_semantic_categories = [
     "activity",
     "apparel",  # subset of device
     "area",  # subset of measurement and quantity

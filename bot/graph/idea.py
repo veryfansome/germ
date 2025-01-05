@@ -1,5 +1,4 @@
 import asyncio
-import re
 import signal
 import uuid
 from abc import ABC, abstractmethod
@@ -8,14 +7,11 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.future import select as sql_select
 from starlette.concurrency import run_in_threadpool
 
-from bot.graph.entities import default_entity_types
-from bot.lang.classifiers import (emotion_to_entity_classifier,
-                                  extract_openai_text_features, get_entity_type_classifier,
-                                  get_sentence_classifier, split_to_sentences)
-from bot.lang.examples import documents as doc_examples, sentences as sentence_examples
+from bot.graph.noun import default_semantic_categories
+from bot.lang.classifiers import get_sentence_classifier, split_to_sentences
 from db.neo4j import AsyncNeo4jDriver
 from db.models import AsyncSessionLocal, Sentence
-from observability.logging import logging, setup_logging
+from observability.logging import logging
 from settings.germ_settings import UUID5_NS
 
 logger = logging.getLogger(__name__)
@@ -29,7 +25,7 @@ SENTENCE_NODE_TYPE = {
 
 class SentenceMergeEventHandler(ABC):
     @abstractmethod
-    async def on_sentence_merge(self, sentence: str, node_type: str, sentence_id: int, sentence_parameters):
+    async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_parameters):
         pass
 
 
@@ -38,39 +34,10 @@ class IdeaGraph:
         self.driver = driver
         self.sentence_merge_event_handlers: list[SentenceMergeEventHandler] = []
 
-    async def add_constraints_and_indexes(self):
-        constraints_map = {}
-        indexes_map = {}
-        constraints_results, indexes_results = await asyncio.gather(
-            self.driver.query("SHOW CONSTRAINTS"), self.driver.query("SHOW INDEXES"))
-        for record in constraints_results:
-            if (not record["type"] or not record["entityType"] or not record["labelsOrTypes"]
-                    or not record["properties"]):
-                continue
-            constraints_map[
-                record["type"] + "_" + record["entityType"]
-                + "_" + "_".join(record["labelsOrTypes"])
-                + "_" + "_".join(record["properties"])] = 1
-        logger.info(f"constraints_map: {constraints_map}")
-        for record in indexes_results:
-            if not record["entityType"] or not record["labelsOrTypes"] or not record["properties"]:
-                continue
-            indexes_map[
-                record["entityType"]
-                + "_" + "_".join(record["labelsOrTypes"])
-                + "_" + "_".join(record["properties"])] = 1
-        logger.info(f"indexes_map: {indexes_map}")
-
-        if "UNIQUENESS_NODE_Entity_text" not in constraints_map:
-            await self.driver.query("CREATE CONSTRAINT FOR (entity:Entity) REQUIRE entity.text IS UNIQUE")
-
-        if "NODE_Entity_plural_form" not in indexes_map:
-            await self.driver.query("CREATE INDEX FOR (entity:Entity) ON entity.plural_forms")
-
-    async def add_default_entity_types(self) -> list[Task]:
+    async def add_default_semantic_categories(self) -> list[Task]:
         async_tasks = []
-        for entity_type in default_entity_types:
-            async_tasks.append(asyncio.create_task(self.add_entity_type(entity_type)))
+        for category in default_semantic_categories:
+            async_tasks.append(asyncio.create_task(self.add_semantic_category(category)))
         return async_tasks
 
     async def add_document(self, name: str, body: str):
@@ -86,71 +53,49 @@ class IdeaGraph:
         logger.info(f"document: {document_record}")
 
         last_sentence_id = None
-        last_sentence_node_type = None
         for body_sentence in split_to_sentences(body):
-            _, this_sentence_node_type, this_sentence_id, async_tasks = await self.add_sentence(body_sentence)
+            _, this_sentence_id, async_tasks = await self.add_sentence(body_sentence)
 
             sentence_do_document_link_record = await self.driver.query(
-                "MATCH (d:Document {name: $document}), (s:" + this_sentence_node_type + " {sentence_id: $sentence_id}) "
+                "MATCH (d:Document {name: $document}), (s:Sentence {sentence_id: $sentence_id}) "
                 "MERGE (d)-[r:CONTAINS]->(s) "
                 "RETURN r", {
                     "document": name, "sentence_id": this_sentence_id
                 })
             if last_sentence_id is not None:
                 sentence_to_sentence_link = await self.driver.query(
-                    "MATCH (l:" + last_sentence_node_type + " {sentence_id: $last_sentence_id}), (t:" + this_sentence_node_type + " {sentence_id: $this_sentence_id}) "
+                    "MATCH (l:Sentence {sentence_id: $last_id}), (t:Sentence {sentence_id: $this_id}) "
                     "MERGE (l)-[r:PRECEDES]->(t) "
                     "RETURN r", {
-                        "last_sentence_id": last_sentence_id, "this_sentence_id": this_sentence_id,
+                        "last_id": last_sentence_id, "this_id": this_sentence_id,
                     })
                 logger.info(f"sentence/sentence link: {sentence_to_sentence_link}")
 
             logger.info(f"sentence link: {sentence_do_document_link_record}")
             last_sentence_id = this_sentence_id
-            last_sentence_node_type = this_sentence_node_type
         return document_record
 
-    async def add_emotion(self, emotion: str):
-        emotion_record = await self.driver.query(
-            "MERGE (emotion:EmotionLabel {text: $emotion}) RETURN emotion", {"emotion": emotion})
-        logger.info(f"emotion: {emotion_record}")
-        return emotion_record
+    async def add_noun(self, noun: str):
+        noun_record = await self.driver.query(
+            "MERGE (noun:Entity {text: $noun}) RETURN noun", {"noun": noun})
+        logger.info(f"noun: {noun_record}")
+        return noun_record
 
-    async def add_entity(self, entity: str):
-        entity_record = await self.driver.query(
-            "MERGE (entity:Entity {text: $entity}) RETURN entity", {"entity": entity})
-        logger.info(f"entity: {entity_record}")
-        return entity_record
+    async def add_noun_plural_form(self, noun: str, plural: str):
+        noun_record = await self.driver.query("""
+        MATCH (noun:Entity {text: $noun})
+        SET noun.plural_forms = coalesce(noun.plural_forms, []) + [$plural]
+        RETURN noun
+        """.strip(), {"noun": noun, plural: plural})
+        logger.info(f"noun: {noun_record}")
+        return noun_record
 
-    async def add_entity_plural_form(self, entity: str, plural: str):
-        entity_record = await self.driver.query("""
-        MATCH (entity:Entity {text: $entity})
-        SET entity.plural_forms = coalesce(entity.plural_forms, []) + [$plural]
-        RETURN entity
-        """.strip(), {"entity": entity, plural: plural})
-        logger.info(f"entity: {entity_record}")
-        return entity_record
-
-    async def add_entity_role(self, entity_role: str):
-        entity_role_record = await self.driver.query(
-            "MERGE (e:EntityRole {text: $entity_role}) RETURN e",
-            {"entity_role": entity_role})
-        logger.info(f"entity_role: {entity_role_record}")
-        return entity_role_record
-
-    async def add_entity_type(self, entity_type: str):
-        entity_type_record = await self.driver.query(
-            "MERGE (entity_type:EntityType {text: $entity_type}) RETURN entity_type",
-            {"entity_type": entity_type})
-        logger.info(f"entity_type: {entity_type_record}")
-        return entity_type_record
-
-    async def add_knowledge_category(self, knowledge_category: str):
-        knowledge_category_record = await self.driver.query(
-            "MERGE (k:KnowledgeCategory {text: $knowledge_category}) RETURN k",
-            {"knowledge_category": knowledge_category})
-        logger.info(f"knowledge_category: {knowledge_category_record}")
-        return knowledge_category_record
+    async def add_semantic_category(self, noun_type: str):
+        noun_type_record = await self.driver.query(
+            "MERGE (noun_type:EntityType {text: $noun_type}) RETURN noun_type",
+            {"noun_type": noun_type})
+        logger.info(f"noun_type: {noun_type_record}")
+        return noun_type_record
 
     async def add_modifier(self, modifier: str):
         modifier_record = await self.driver.query(
@@ -177,7 +122,7 @@ class IdeaGraph:
 
             # Get sentence type if not set
             sentence_classifier = get_sentence_classifier()
-            if (rdb_record.sentence_node_type is None
+            if (rdb_record.sentence_openai_parameters is None
                     or is_stale_or_over_fetch_count_threshold(
                         rdb_record.sentence_openai_parameters_time_changed,
                         rdb_record.sentence_openai_parameters_fetch_count,
@@ -186,7 +131,6 @@ class IdeaGraph:
                 openai_parameters = await run_in_threadpool(sentence_classifier.classify, sentence)
                 async with rdb_session.begin():
                     await rdb_session.refresh(rdb_record)
-                    rdb_record.sentence_node_type = SENTENCE_NODE_TYPE[openai_parameters["functional_type"]]
                     rdb_record.sentence_openai_parameters = openai_parameters
                     rdb_record.sentence_openai_parameters_time_changed = utc_now()
                     rdb_record.sentence_openai_parameters_fetch_count += 1
@@ -195,11 +139,9 @@ class IdeaGraph:
 
             # Merge sentence node
             parameter_spec = sentence_classifier.tool_properties_spec
-            sentence_node_type = rdb_record.sentence_node_type
             graph_record = await self.driver.query(
-                ("MERGE (sentence:"
-                 + rdb_record.sentence_node_type
-                 + " {text: $text, sentence_id: $sentence_id, "
+                ("MERGE (sentence:Sentence "
+                 + "{text: $text, sentence_id: $sentence_id, "
                  + ", ".join([f"{k}: ${k}" for k in parameter_spec.keys()])
                  + "}) RETURN sentence"),
                 {
@@ -212,23 +154,11 @@ class IdeaGraph:
         for handler in self.sentence_merge_event_handlers:
             async_tasks.append(asyncio.create_task(
                 handler.on_sentence_merge(
-                    sentence, sentence_node_type, rdb_record.sentence_id, rdb_record.sentence_openai_parameters)))
-        return graph_record, sentence_node_type, rdb_record.sentence_id, async_tasks
+                    sentence, rdb_record.sentence_id, rdb_record.sentence_openai_parameters)))
+        return graph_record, rdb_record.sentence_id, async_tasks
 
     def add_sentence_merge_event_handler(self, handler: SentenceMergeEventHandler):
         self.sentence_merge_event_handlers.append(handler)
-
-    async def add_sentence_subject(self, subject: str):
-        subject_record = await self.driver.query("MERGE (n:SentenceSubject {text: $subject}) RETURN n",
-                                           {"subject": subject})
-        logger.info(f"sentence_subject: {subject_record}")
-        return subject_record
-
-    async def add_sentiment_label(self, sentiment: str):
-        sentiment_record = await self.driver.query("MERGE (n:SentimentLabel {text: $sentiment}) RETURN n",
-                                             {"sentiment": sentiment})
-        logger.info(f"sentiment_label: {sentiment_record}")
-        return sentiment_record
 
     async def add_time(self):
         """
@@ -251,183 +181,48 @@ class IdeaGraph:
         logger.debug(f"time links: {time_record_links}")
         return current_rounded_time, current_time_record, time_record_links
 
-    async def add_topic_label(self, topic: str):
-        topic_record = await self.driver.query("MERGE (e:TopicLabel {text: $topic}) RETURN e",
-                                         {"topic": topic})
-        logger.info(f"topic_label: {topic_record}")
-        return topic_record
-
-    async def add_verb(self, verb: str):
-        verb_record = await self.driver.query("MERGE (v:Verb {text: $verb}) RETURN v",
-                                        {"verb": verb})
-        logger.info(f"verb: {verb_record}")
-        return verb_record
-
     async def close(self):
         await self.driver.close()
 
-    async def delete_all_data(self):
-        await self.driver.delete_all_data()
-
-    async def get_entity_type_desc_by_connections(self):
+    async def get_noun_type_desc_by_connections(self):
         # Get a random topic that is linked to two ideas that are not the same and not connected
-        entity_type_results = await self.driver.query("""
-            MATCH (entity_type:EntityType)
-            OPTIONAL MATCH ()-[r]->(entity_type)
-            RETURN entity_type, count(r) AS connections
+        noun_type_results = await self.driver.query("""
+            MATCH (noun_type:EntityType)
+            OPTIONAL MATCH ()-[r]->(noun_type)
+            RETURN noun_type, count(r) AS connections
             ORDER by connections DESC
             """)
-        return entity_type_results
+        return noun_type_results
 
-    async def link_emotion_to_emotion(self, emotion: str, synonymous_emotion: int, link_type: str):
-        emotion_link_record = await self.driver.query(
-            "MATCH (e1:EmotionLabel {text: $emotion}), (e2:EmotionLabel {text: $synonymous_emotion}) "
-            "MERGE (e2)-[r:" + link_type + "]->(e1) "
-            "RETURN r", {"emotion": emotion, "synonymous_emotion": synonymous_emotion})
-        logger.info(f"emotion/emotion link: {emotion_link_record}")
-        return emotion_link_record
-
-    async def link_emotion_to_entity(self, emotion: str, entity: str, sentence_id: int, link_type: str):
-        emotion_link_record = await self.driver.query(
-            "MATCH (e:EmotionLabel {text: $emotion}), (n:Entity {text: $entity}) "
-            "MERGE (n)-[r:" + link_type + " {sentence_id: $sentence_id, time_created: $rounded_time}]->(e) "
-            "RETURN r", {
-                "emotion": emotion, "entity": entity, "sentence_id": sentence_id,
-                "rounded_time": round_time_now_down_to_nearst_interval(),
-            })
-        logger.info(f"emotion link: {emotion_link_record}")
-        return emotion_link_record
-
-    async def link_emotion_to_sentence(self, emotion: str, sentence_id: int, sentence_node_type: str):
-        emotion_link_record = await self.driver.query(
-            "MATCH (e:EmotionLabel {text: $emotion}), (s:" + sentence_node_type + " {sentence_id: $sentence_id}) "
-            "MERGE (s)-[r:EVOKED {sentence_id: $sentence_id}]->(e) "
-            "RETURN r", {
-                "emotion": emotion, "sentence_id": sentence_id,
-            })
-        logger.info(f"emotion link: {emotion_link_record}")
-        return emotion_link_record
-
-    async def link_entity_to_entity_type(self, entity: str, entity_type: str, sentence_id: int):
-        entity_type_link_record = await self.driver.query(
-            "MATCH (e:Entity {text: $entity}), (t:EntityType {text: $entity_type}) "
+    async def link_noun_to_noun_type(self, noun: str, noun_type: str, sentence_id: int):
+        noun_type_link_record = await self.driver.query(
+            "MATCH (e:Entity {text: $noun}), (t:EntityType {text: $noun_type}) "
             "MERGE (e)-[r:TYPE_OF {sentence_id: $sentence_id}]->(t) "
             "RETURN r", {
-                "entity": entity, "entity_type": entity_type, "sentence_id": sentence_id,
+                "noun": noun, "noun_type": noun_type, "sentence_id": sentence_id,
             })
-        logger.info(f"entity type link: {entity_type_link_record}")
-        return entity_type_link_record
+        logger.info(f"noun type link: {noun_type_link_record}")
+        return noun_type_link_record
 
-    async def link_entity_to_sentence(self, entity: str, sentence_id: int, sentence_node_type: str,
-                                      plurality: str = "singular"):
-        entity_link_record = await self.driver.query(
-            "MATCH (e:Entity {text: $entity}), (s:" + sentence_node_type + " {sentence_id: $sentence_id}) "
+    async def link_noun_to_sentence(self, noun: str, sentence_id: int, plurality: str = "singular"):
+        noun_link_record = await self.driver.query(
+            "MATCH (e:Entity {text: $noun}), (s:Sentence {sentence_id: $sentence_id}) "
             "MERGE (s)-[r:REFERENCES {plurality: $plurality, sentence_id: $sentence_id}]->(e) "
             "RETURN r", {
-                "entity": entity, "sentence_id": sentence_id, "plurality": plurality
+                "noun": noun, "sentence_id": sentence_id, "plurality": plurality
             })
-        logger.info(f"entity link: {entity_link_record}")
-        return entity_link_record
+        logger.info(f"noun link: {noun_link_record}")
+        return noun_link_record
 
-    async def link_entity_to_modifier(self, entity: str, modifier: str, sentence_id: int):
+    async def link_noun_to_modifier(self, noun: str, modifier: str, sentence_id: int):
         link_record = await self.driver.query(
-            "MATCH (entity:Entity {text: $entity}), (modifier:Modifier {text: $modifier}) "
-            "MERGE (modifier)-[r:MODIFIES {sentence_id: $sentence_id}]->(entity) "
+            "MATCH (noun:Entity {text: $noun}), (modifier:Modifier {text: $modifier}) "
+            "MERGE (modifier)-[r:MODIFIES {sentence_id: $sentence_id}]->(noun) "
             "RETURN r", {
-                "entity": entity, "modifier": modifier, "sentence_id": sentence_id,
+                "noun": noun, "modifier": modifier, "sentence_id": sentence_id,
             })
-        logger.info(f"entity/modifier link: {link_record}")
+        logger.info(f"noun/modifier link: {link_record}")
         return link_record
-
-    async def link_entity_to_sentiment(self, entity: str, sentiment: str, sentence_id: int):
-        entity_link_record = await self.driver.query(
-            "MATCH (e:Entity {text: $entity}), (s:SentimentLabel {text: $sentiment}) "
-            "MERGE (e)-[r:EVOKED {sentence_id: $sentence_id, time_created: $rounded_time}]->(s) "
-            "RETURN r", {
-                "entity": entity, "sentiment": sentiment, "sentence_id": sentence_id,
-                "rounded_time": round_time_now_down_to_nearst_interval()
-            })
-        logger.info(f"entity/sentiment link: {entity_link_record}")
-        return entity_link_record
-
-    async def link_entity_role_to_entity(self, entity: str, entity_role: str, sentence_id: int):
-        entity_role_link_record = await self.driver.query(
-            "MATCH (e:Entity {text: $entity}), (er:EntityRole {text: $entity_role}) "
-            "MERGE (e)-[r:ROLE_OF {sentence_id: $sentence_id}]->(er) "
-            "RETURN r", {"entity": entity, "entity_role": entity_role, "sentence_id": sentence_id})
-        logger.info(f"entity role link: {entity_role_link_record}")
-        return entity_role_link_record
-
-    async def link_knowledge_category_to_sentence(self, knowledge_category: str, sentence: str, sentence_node_type: str):
-        knowledge_category_link_record = await self.driver.query(
-            "MATCH (k:KnowledgeCategory {text: $knowledge_category}), (s:" + sentence_node_type + " {text: $sentence}) "
-            "MERGE (s)-[r:CONTEXT_FROM]->(k) "
-            "RETURN r", {"knowledge_category": knowledge_category, "sentence": sentence})
-        logger.info(f"knowledge category link: {knowledge_category_link_record}")
-
-    async def link_sentiment_to_sentence(self, sentiment: str, sentence: str, sentence_node_type: str):
-        sentiment_link_record = await self.driver.query(
-            "MATCH (n:SentimentLabel {text: $sentiment}), (s:" + sentence_node_type + " {text: $sentence}) "
-            "MERGE (s)-[r:EVOKED]->(n) "
-            "RETURN r", {"sentiment": sentiment, "sentence": sentence})
-        logger.info(f"sentiment link: {sentiment_link_record}")
-        return sentiment_link_record
-
-    async def link_sentence_subject_to_entity(self, sentence_subject: str, entity: str):
-        sentence_subject_link_record = await self.driver.query(
-            "MATCH (s:SentenceSubject {text: $subject}), (e:Entity {text: $entity}) "
-            "MERGE (s)-[r:REFERS_TO]->(e) "
-            "RETURN r", {"subject": sentence_subject, "entity": entity})
-        logger.info(f"subject/entity link: {sentence_subject_link_record}")
-        return sentence_subject_link_record
-
-    async def link_sentence_subject_to_sentence(self, sentence_subject: str, sentence: str, sentence_node_type: str):
-        sentence_subject_link_record = await self.driver.query(
-            "MATCH (u:SentenceSubject {text: $sentence_subject}), (s:" + sentence_node_type + " {text: $sentence}) "
-            "MERGE (s)-[r:IS_ABOUT]->(u) "
-            "RETURN r", {"sentence_subject": sentence_subject, "sentence": sentence})
-        logger.info(f"subject link: {sentence_subject_link_record}")
-        return sentence_subject_link_record
-
-    async def link_topic_label_to_knowledge_category(self, topic_label: str, knowledge_category: str):
-        topic_label_link_record = await self.driver.query(
-            "MATCH (t:TopicLabel {text: $topic_label}), (k:KnowledgeCategory {text: $knowledge_category}) "
-            "MERGE (t)-[r:IS_ABOUT]->(k) "
-            "RETURN r", {"topic_label": topic_label, "knowledge_category": knowledge_category})
-        logger.info(f"topic_label/knowledge_category link: {topic_label_link_record}")
-        return topic_label_link_record
-
-    async def link_topic_label_to_sentence(self, topic_label: str, sentence: str, sentence_node_type: str):
-        topic_label_link_record = await self.driver.query(
-            "MATCH (t:TopicLabel {text: $topic_label}), (s:" + sentence_node_type + " {text: $sentence}) "
-            "MERGE (s)-[r:IS_ABOUT]->(t) "
-            "RETURN r", {"topic_label": topic_label, "sentence": sentence})
-        logger.info(f"topic_label link: {topic_label_link_record}")
-        return topic_label_link_record
-
-    async def link_verb_to_sentence(self, verb: str, sentence: str, sentence_node_type: str):
-        verb_link_record = await self.driver.query(
-            "MATCH (v:Verb {text: $verb}), (s:" + sentence_node_type + " {text: $sentence}) "
-            "MERGE (s)-[r:CONTAINS]->(v) "
-            "RETURN r", {"verb": verb, "sentence": sentence})
-        logger.info(f"verb link: {verb_link_record}")
-        return verb_link_record
-
-    async def merge_ideas(self, idea_to_keep: str, idea_to_merge: str):
-        results = await self.driver.query("""
-MATCH (idea_to_keep:Idea {text: $idea_to_keep}), (idea_to_merge:Idea {text: $idea_to_merge})
-WITH idea_to_keep, idea_to_merge
-MATCH (idea_to_merge)-[r:EXPRESSES]->(x)
-MERGE (idea_to_keep)-[:EXPRESSES]->(x)
-DELETE r
-WITH idea_to_keep, idea_to_merge
-MATCH (idea_to_merge)-[r:OCCURRED]->(x)
-DELETE r
-DELETE idea_to_merge
-RETURN idea_to_keep
-""".strip(), {
-                "idea_to_keep": idea_to_keep, "idea_to_merge": idea_to_merge})
-        logger.info(f"idea kept: {results}")
 
     def signal_handler(self, sig, frame):
         asyncio.run(self.close())
@@ -448,10 +243,6 @@ def is_stale_or_over_fetch_count_threshold(dt, fetch_count: int, hours: int, max
             or (utc_now() - dt) > timedelta(hours=hours))
 
 
-def remove_leading_the(text: str):
-    return re.sub(r'(?i)^the\s+', '', text)
-
-
 def round_time_now_down_to_nearst_interval(interval_minutes: int = 5):
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     minutes = now.minute
@@ -466,28 +257,3 @@ def utc_now():
 
 idea_graph = IdeaGraph(AsyncNeo4jDriver())
 signal.signal(signal.SIGINT, idea_graph.signal_handler)
-
-
-async def main(args):
-    await idea_graph.add_default_entity_types()
-
-    if args.load_examples:
-        for doc_title, doc_body in doc_examples.all_examples:
-            await idea_graph.add_document(doc_title, doc_body)
-
-        # Add sentences to the graph
-        #for exp in sentence_examples.all_examples:
-        #    await idea_graph.add_sentence(exp)
-
-    await idea_graph.close()
-
-
-if __name__ == '__main__':
-    import argparse
-
-    setup_logging(global_level="INFO")
-
-    parser = argparse.ArgumentParser(description='Build a graph of ideas.')
-    parser.add_argument("--load-examples", action="store_true", help='Load example data.',
-                        default=False)
-    asyncio.run(main(parser.parse_args()))

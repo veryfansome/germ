@@ -60,9 +60,3 @@ class AsyncNeo4jDriver:
             records = await result.data()
             self.query_cache[query_signature] = (time.time(), records)
             return records
-
-    async def delete_all_data(self):
-        async with self.driver.session() as session:
-            result = await session.run("MATCH (n) DETACH DELETE n")
-            await result.consume()
-            logger.info("Deleted all data")

@@ -11,13 +11,13 @@ services:
     networks: [bots]
     container_name: germ-bot
     depends_on:
-      bot-init:
+      db-migrate:
         condition: service_completed_successfully
       test:
         condition: service_completed_successfully
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: app.Dockerfile
     image: "germ:latest"
     volumes:
       - ./:/src:rw
@@ -47,7 +47,7 @@ services:
     networks: [bots]
     container_name: germ-bot-bg
     depends_on:
-      bot-init:
+      db-migrate:
         condition: service_completed_successfully
       test:
         condition: service_completed_successfully
@@ -59,9 +59,7 @@ services:
     environment: *local-dev
     working_dir: /src
     command: [
-      "python",
-      "-m", "bot.scheduler",
-      "--entity-controller",
+      "python", "-m", "bot.scheduler", "--noun-controller",
     ]
 
   bot-init:
@@ -106,6 +104,24 @@ services:
       WAIT_FOR_PORT: 5432
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
+
+  db-migrate:
+    networks: [ bots ]
+    container_name: germ-db-migrate
+    depends_on:
+      bot-init:
+        condition: service_completed_successfully
+    image: "germ-db-migrate:latest"
+    build:
+      context: .
+      dockerfile: db-migrate.Dockerfile
+    volumes:
+      - ./:/src
+    environment:
+      <<: *local-dev
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-Ma9icMicr0be}
+    working_dir: /src
+    command: [ "scripts/db-migrate.sh" ]
 
   grafana:
     networks: [bots]
@@ -242,7 +258,7 @@ services:
         condition: service_completed_successfully
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: app.Dockerfile
     image: "germ:latest"
     volumes:
       - ./:/src

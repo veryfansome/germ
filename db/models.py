@@ -82,7 +82,6 @@ class ChatSessionChatUserProfileLink(Base):
 class Sentence(Base):
     __tablename__ = "sentence"
     sentence_id = Column(Integer, primary_key=True, autoincrement=True)
-    sentence_node_type = Column(String)
 
     sentence_openai_parameters = Column(JSON)
     sentence_openai_parameters_time_changed = Column(DateTime(timezone=True))
