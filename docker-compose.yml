@@ -4,7 +4,6 @@ networks:
 volumes:
   flair-data: {}
   grafana-storage: {}
-  neo4j-data: {}
   nltk-data: {}
 
 services:
@@ -169,8 +168,7 @@ services:
     container_name: *neo4j-host
     image: neo4j:latest
     volumes:
-      - neo4j-data:/data  # Persist data
-      - ./scripts/neo4j-start.sh:/neo4j-start.sh  # Persist data
+      - ./scripts/neo4j-start.sh:/neo4j-start.sh
       - ./db_dump/neo4j:/dump  # Persist data
     environment:
       NEO4J_AUTH: *neo4j-auth

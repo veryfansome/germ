@@ -66,14 +66,14 @@ async def add_entity(entity_name: str, entity_type: str, plurality: str,
                 idea_graph.add_entity(singular_form),
                 idea_graph.add_entity_type(entity_type)])
             await idea_graph.link_entity_to_entity_type(singular_form, entity_type, sentence_id)
-            await idea_graph.link_entity_to_sentence(singular_form, sentence_id, node_type)
+            await idea_graph.link_entity_to_sentence(singular_form, sentence_id, node_type, plurality=plurality)
             return entity_record, entity_type_record
     else:
         entity_record, entity_type_record = await asyncio.gather(*[
             idea_graph.add_entity(entity_name),
             idea_graph.add_entity_type(entity_type)])
         await idea_graph.link_entity_to_entity_type(entity_name, entity_type, sentence_id)
-        await idea_graph.link_entity_to_sentence(entity_name, sentence_id, node_type)
+        await idea_graph.link_entity_to_sentence(entity_name, sentence_id, node_type, plurality=plurality)
         return entity_record, entity_type_record
 
 

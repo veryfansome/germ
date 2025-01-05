@@ -38,6 +38,35 @@ class IdeaGraph:
         self.driver = driver
         self.sentence_merge_event_handlers: list[SentenceMergeEventHandler] = []
 
+    async def add_constraints_and_indexes(self):
+        constraints_map = {}
+        indexes_map = {}
+        constraints_results, indexes_results = await asyncio.gather(
+            self.driver.query("SHOW CONSTRAINTS"), self.driver.query("SHOW INDEXES"))
+        for record in constraints_results:
+            if (not record["type"] or not record["entityType"] or not record["labelsOrTypes"]
+                    or not record["properties"]):
+                continue
+            constraints_map[
+                record["type"] + "_" + record["entityType"]
+                + "_" + "_".join(record["labelsOrTypes"])
+                + "_" + "_".join(record["properties"])] = 1
+        logger.info(f"constraints_map: {constraints_map}")
+        for record in indexes_results:
+            if not record["entityType"] or not record["labelsOrTypes"] or not record["properties"]:
+                continue
+            indexes_map[
+                record["entityType"]
+                + "_" + "_".join(record["labelsOrTypes"])
+                + "_" + "_".join(record["properties"])] = 1
+        logger.info(f"indexes_map: {indexes_map}")
+
+        if "UNIQUENESS_NODE_Entity_text" not in constraints_map:
+            await self.driver.query("CREATE CONSTRAINT FOR (entity:Entity) REQUIRE entity.text IS UNIQUE")
+
+        if "NODE_Entity_plural_form" not in indexes_map:
+            await self.driver.query("CREATE INDEX FOR (entity:Entity) ON entity.plural_forms")
+
     async def add_default_entity_types(self) -> list[Task]:
         async_tasks = []
         for entity_type in default_entity_types:
@@ -90,6 +119,15 @@ class IdeaGraph:
     async def add_entity(self, entity: str):
         entity_record = await self.driver.query(
             "MERGE (entity:Entity {text: $entity}) RETURN entity", {"entity": entity})
+        logger.info(f"entity: {entity_record}")
+        return entity_record
+
+    async def add_entity_plural_form(self, entity: str, plural: str):
+        entity_record = await self.driver.query("""
+        MATCH (entity:Entity {text: $entity})
+        SET entity.plural_forms = coalesce(entity.plural_forms, []) + [$plural]
+        RETURN entity
+        """.strip(), {"entity": entity, plural: plural})
         logger.info(f"entity: {entity_record}")
         return entity_record
 
@@ -280,12 +318,13 @@ class IdeaGraph:
         logger.info(f"entity type link: {entity_type_link_record}")
         return entity_type_link_record
 
-    async def link_entity_to_sentence(self, entity: str, sentence_id: int, sentence_node_type: str):
+    async def link_entity_to_sentence(self, entity: str, sentence_id: int, sentence_node_type: str,
+                                      plurality: str = "singular"):
         entity_link_record = await self.driver.query(
             "MATCH (e:Entity {text: $entity}), (s:" + sentence_node_type + " {sentence_id: $sentence_id}) "
-            "MERGE (s)-[r:REFERENCES {sentence_id: $sentence_id}]->(e) "
+            "MERGE (s)-[r:REFERENCES {plurality: $plurality, sentence_id: $sentence_id}]->(e) "
             "RETURN r", {
-                "entity": entity, "sentence_id": sentence_id,
+                "entity": entity, "sentence_id": sentence_id, "plurality": plurality
             })
         logger.info(f"entity link: {entity_link_record}")
         return entity_link_record
