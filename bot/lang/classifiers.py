@@ -84,63 +84,62 @@ def get_noun_modifier_classifier(semantic_categories: list[str] = default_semant
     return OpenAITextClassifier({
         "modifiers": {
             "type": "array",
-            "description": ("List of all modifier words in the the entity string, "
-                            f"given that entity type categories include: {semantic_categories}."),
+            "description": ("List of all modifier words in the the noun phrase, "
+                            f"given that semantic categories include: {semantic_categories}."),
             "items": {
                 "type": "object",
-                "description": "A modifier word from the entity string.",
+                "description": "A modifier word from the phrase.",
                 "properties": {
                     "modifier": {
                         "type": "string",
                         "description": "Modifier word."
                     },
-                    "modifies": {
+                    "noun": {
                         "type": "string",
-                        "description": "What word does this modifier modify?"
+                        "description": "What is the noun this modifier modify?"
                     },
                 }
             }
         }},
-        system_message=("Analyze the provided entity string as it appears in the text and look for the underlying "
-                        "words being modified. Focus how modifier words in the entity string affects the text's "
-                        "meaning and intention, then populate the modifiers parameter array for the "
-                        "store_modifiers tool."),
+        system_message=("Analyze the provided noun phrase as it appears in the text and look for the underlying "
+                        "words being modified. Focus how modifier words in the phrase affects the text's meaning and "
+                        "intention, then populate the modifiers parameter array for the store_modifiers tool."),
         tool_name="store_modifiers",
         tool_description="Store generated modifier classifications.",
         tool_parameter_description="Modifier classifications to be stored.",
     )
 
 
-def get_semantic_categories_classifier(semantic_categories: list[str] = default_semantic_categories) -> OpenAITextClassifier:
+def get_sentence_nouns_classifier(semantic_categories: list[str] = default_semantic_categories) -> OpenAITextClassifier:
     return OpenAITextClassifier({
-        "entities": {
+        "nouns": {
             "type": "array",
-            "description": "List of all entities identified in the text.",
+            "description": "List of all nouns identified in the text.",
             "items": {
                 "type": "object",
-                "description": "An entity from the text.",
+                "description": "A noun from the text.",
                 "properties": {
-                    "entity": {
+                    "noun": {
                         "type": "string",
-                        "description": "Entity name."
+                        "description": "Noun word."
                     },
                     "plurality": {
                         "type": "string",
                         "enum": ["singular", "plural"],
                     },
-                    "entity_type": {
+                    "semanticCategory": {
                         "type": "string",
-                        "description": "What type or class of entity is this?",
+                        "description": "What kind of thing is this noun?",
                         "enum": semantic_categories
                     },
                 }
             }
         }},
-        system_message=("Analyze the entities from the text, focusing on how each affects meaning and intention, "
-                        "then populate the entities parameter array for the store_entities tool."),
-        tool_name="store_entities",
-        tool_description="Store generated entity classifications.",
-        tool_parameter_description="Entity classifications to be stored.",
+        system_message=("Analyze the nouns from the text, focusing on how each affects meaning and intention, "
+                        "then populate the nouns parameter array for the store_nouns tool."),
+        tool_name="store_nouns",
+        tool_description="Store generated noun classifications.",
+        tool_parameter_description="Noun classifications to be stored.",
     )
 
 
@@ -163,23 +162,23 @@ def get_sentence_classifier(additional_parameters=None):
     })
 
 
-def get_single_semantic_category_classifier(semantic_categories: list[str] = default_semantic_categories) -> OpenAITextClassifier:
+def get_single_noun_classifier(semantic_categories: list[str] = default_semantic_categories) -> OpenAITextClassifier:
     return OpenAITextClassifier({
         "plurality": {
             "type": "string",
             "enum": ["singular", "plural"],
         },
-        "entity_type": {
+        "semanticCategory": {
             "type": "string",
-            "description": "What type or class of entity is this?",
+            "description": "What kind of thing is this noun?",
             "enum": semantic_categories
         }},
-        system_message=("Analyze the provided entity's use in the text, focusing on how it affects meaning and "
-                        "intention, then populate the plurality and entity_type parameters for the store_entity_type "
-                        "tool."),
-        tool_name="store_entity_type",
-        tool_description="Store generated entity type classifications.",
-        tool_parameter_description="Entity type classifications to be stored.",
+        system_message=("Analyze the provided noun's use in the text, focusing on how it affects meaning and "
+                        "intention, then populate the plurality and semanticCategory parameters for the "
+                        "store_noun_classification tool."),
+        tool_name="store_noun_classification",
+        tool_description="Store generated noun classifications.",
+        tool_parameter_description="Noun classifications to be stored.",
     )
 
 
