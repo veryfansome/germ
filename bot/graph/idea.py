@@ -16,12 +16,6 @@ from settings.germ_settings import UUID5_NS
 
 logger = logging.getLogger(__name__)
 
-SENTENCE_NODE_TYPE = {
-    "declarative": "DeclarativeSentence",
-    "imperative": "ImperativeSentence",
-    "interrogative": "InterrogativeSentence",
-}
-
 
 class SentenceMergeEventHandler(ABC):
     @abstractmethod
@@ -77,25 +71,25 @@ class IdeaGraph:
 
     async def add_noun(self, noun: str):
         noun_record = await self.driver.query(
-            "MERGE (noun:Entity {text: $noun}) RETURN noun", {"noun": noun})
+            "MERGE (noun:Noun {text: $noun}) RETURN noun", {"noun": noun})
         logger.info(f"noun: {noun_record}")
         return noun_record
 
     async def add_noun_plural_form(self, noun: str, plural: str):
         noun_record = await self.driver.query("""
-        MATCH (noun:Entity {text: $noun})
+        MATCH (noun:Noun {text: $noun})
         SET noun.plural_forms = coalesce(noun.plural_forms, []) + [$plural]
         RETURN noun
         """.strip(), {"noun": noun, plural: plural})
         logger.info(f"noun: {noun_record}")
         return noun_record
 
-    async def add_semantic_category(self, noun_type: str):
-        noun_type_record = await self.driver.query(
-            "MERGE (noun_type:EntityType {text: $noun_type}) RETURN noun_type",
-            {"noun_type": noun_type})
-        logger.info(f"noun_type: {noun_type_record}")
-        return noun_type_record
+    async def add_semantic_category(self, semantic_category: str):
+        semantic_category_record = await self.driver.query(
+            "MERGE (semanticCategory:SemanticCategory {text: $semanticCategory}) RETURN semanticCategory",
+            {"semanticCategory": semantic_category})
+        logger.info(f"semantic_category: {semantic_category_record}")
+        return semantic_category_record
 
     async def add_modifier(self, modifier: str):
         modifier_record = await self.driver.query(
@@ -184,30 +178,30 @@ class IdeaGraph:
     async def close(self):
         await self.driver.close()
 
-    async def get_noun_type_desc_by_connections(self):
+    async def get_semantic_category_desc_by_connections(self):
         # Get a random topic that is linked to two ideas that are not the same and not connected
-        noun_type_results = await self.driver.query("""
-            MATCH (noun_type:EntityType)
-            OPTIONAL MATCH ()-[r]->(noun_type)
-            RETURN noun_type, count(r) AS connections
+        semantic_category_results = await self.driver.query("""
+            MATCH (semanticCategory:SemanticCategory)
+            OPTIONAL MATCH ()-[r]->(semanticCategory)
+            RETURN semanticCategory, count(r) AS connections
             ORDER by connections DESC
             """)
-        return noun_type_results
+        return semantic_category_results
 
-    async def link_noun_to_noun_type(self, noun: str, noun_type: str, sentence_id: int):
-        noun_type_link_record = await self.driver.query(
-            "MATCH (e:Entity {text: $noun}), (t:EntityType {text: $noun_type}) "
-            "MERGE (e)-[r:TYPE_OF {sentence_id: $sentence_id}]->(t) "
+    async def link_noun_to_semantic_category(self, noun: str, semantic_category: str, sentence_id: int):
+        semantic_category_link_record = await self.driver.query(
+            "MATCH (noun:Noun {text: $noun}), (semanticCategory:SemanticCategory {text: $semanticCategory}) "
+            "MERGE (noun)-[r:TYPE_OF {sentence_id: $sentence_id}]->(semanticCategory) "
             "RETURN r", {
-                "noun": noun, "noun_type": noun_type, "sentence_id": sentence_id,
+                "noun": noun, "semanticCategory": semantic_category, "sentence_id": sentence_id,
             })
-        logger.info(f"noun type link: {noun_type_link_record}")
-        return noun_type_link_record
+        logger.info(f"noun type link: {semantic_category_link_record}")
+        return semantic_category_link_record
 
     async def link_noun_to_sentence(self, noun: str, sentence_id: int, plurality: str = "singular"):
         noun_link_record = await self.driver.query(
-            "MATCH (e:Entity {text: $noun}), (s:Sentence {sentence_id: $sentence_id}) "
-            "MERGE (s)-[r:REFERENCES {plurality: $plurality, sentence_id: $sentence_id}]->(e) "
+            "MATCH (noun:Noun {text: $noun}), (sentence:Sentence {sentence_id: $sentence_id}) "
+            "MERGE (sentence)-[r:REFERENCES {plurality: $plurality, sentence_id: $sentence_id}]->(noun) "
             "RETURN r", {
                 "noun": noun, "sentence_id": sentence_id, "plurality": plurality
             })
@@ -216,7 +210,7 @@ class IdeaGraph:
 
     async def link_noun_to_modifier(self, noun: str, modifier: str, sentence_id: int):
         link_record = await self.driver.query(
-            "MATCH (noun:Entity {text: $noun}), (modifier:Modifier {text: $modifier}) "
+            "MATCH (noun:Noun {text: $noun}), (modifier:Modifier {text: $modifier}) "
             "MERGE (modifier)-[r:MODIFIES {sentence_id: $sentence_id}]->(noun) "
             "RETURN r", {
                 "noun": noun, "modifier": modifier, "sentence_id": sentence_id,
