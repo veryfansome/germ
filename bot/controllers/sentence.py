@@ -3,15 +3,16 @@ import inflect
 from starlette.concurrency import run_in_threadpool
 
 from bot.graph.idea import SentenceMergeEventHandler, idea_graph
-from bot.lang.classifiers import (get_sentence_nouns_classifier, get_noun_modifier_classifier,
-                                  get_single_noun_classifier)
+from bot.lang.classifiers import (
+    ADJECTIVE_POS_TAGS, ADVERB_POS_TAGS, NOUN_POS_TAGS, PRONOUN_POS_TAGS, VERB_POS_TAGS,
+    get_flair_pos_tags, get_noun_modifier_classifier, get_sentence_nouns_classifier, get_single_noun_classifier)
 from observability.logging import logging, setup_logging
 
 inflect_engine = inflect.engine()
 logger = logging.getLogger(__name__)
 
 
-class NounController(SentenceMergeEventHandler):
+class SentenceController(SentenceMergeEventHandler):
     def __init__(self, interval_seconds: int = 30):
         self.interval_seconds = interval_seconds
         self.sentence_merge_artifacts = []
@@ -22,32 +23,76 @@ class NounController(SentenceMergeEventHandler):
     async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_parameters):
         logger.info(f"on_sentence_merge: sentence_id={sentence_id}, {sentence_parameters}, {sentence}")
 
+        # Get POS in the background
+        pos_task = asyncio.create_task(run_in_threadpool(get_flair_pos_tags, sentence))
+
         # TODO: is sorting by connections enough or should we also care about how many are recent?
-        # Query noun types from graph, sorted by most connections
+        # Query semantic categories from graph, sorted by most connections
         semantic_categories = [t["semanticCategory"]["text"] for t in await idea_graph.get_semantic_category_desc_by_connections()]
         logger.debug(f"semantic_categories: {semantic_categories}")
+
         artifacts = {
-            "semantic_categories": semantic_categories,
             # Used noun types from query as hints to classify sentence
-            "openai_nouns": await run_in_threadpool(get_sentence_nouns_classifier(semantic_categories).classify,
-                                                       sentence, review=False, review_json=None),
+            #"openai_nouns": await run_in_threadpool(get_sentence_nouns_classifier(semantic_categories).classify,
+            #                                        sentence, review=False, review_json=None),
+            "pos_tags": await pos_task,
+            "semantic_categories": semantic_categories,
             "sentence": sentence,
             "sentence_id": sentence_id,
             "sentence_parameters": sentence_parameters,
         }
-        logger.info(f"openai_nouns: {artifacts["openai_nouns"]}")
+        logger.info(f"pos_tags: {artifacts["pos_tags"]}")
+
+        adjectives = [word for word in artifacts["pos_tags"] if word[1] in ADJECTIVE_POS_TAGS]
+        logger.info(f"adjectives: {adjectives}")
+
+        adverbs = [word for word in artifacts["pos_tags"] if word[1] in ADVERB_POS_TAGS]
+        logger.info(f"adverbs: {adverbs}")
+
+        nouns = []
+        for idx, word in enumerate(artifacts["pos_tags"]):
+            text, tag = word
+            if tag not in NOUN_POS_TAGS:
+                continue
+            elif idx > 0 and artifacts["pos_tags"][idx-1][1] in ["''", '""']:
+                nouns.append((f"{artifacts["pos_tags"][idx-1][0]}{word[0]}", tag))
+            else:
+                nouns.append(word)
+
+        logger.info(f"nouns: {nouns}")
+        for noun, tag in nouns:
+            if tag == "NN":  # Common singular
+                await idea_graph.add_noun_form(noun, noun)
+                await idea_graph.link_noun_form_to_sentence(noun, noun, tag, sentence_id)
+            elif tag == "NNP":  # Proper singular
+                await idea_graph.add_proper_noun_form(noun, noun)
+                await idea_graph.link_proper_noun_form_to_sentence(noun, noun, tag, sentence_id)
+            elif tag == "NNS":  # Common plural
+                singular = await run_in_threadpool(inflect_engine.singular_noun, noun)
+                await idea_graph.add_noun_form(singular, noun)
+                await idea_graph.link_noun_form_to_sentence(singular, noun, tag, sentence_id)
+            else:
+                logger.info(f"plural proper noun support is WIP: {noun},{tag}")
+
+        pronouns = [word for word in artifacts["pos_tags"] if word[1] in PRONOUN_POS_TAGS]
+        logger.info(f"pronouns: {pronouns}")
+
+        verbs = [word for word in artifacts["pos_tags"] if word[1] in VERB_POS_TAGS]
+        logger.info(f"verbs: {verbs}")
+
+        #logger.info(f"openai_nouns: {artifacts["openai_nouns"]}")
         tasks_to_await = []
-        if "nouns" not in artifacts["openai_nouns"]:
-            logger.warning(f"expected `nouns` field is missing in: {artifacts["openai_nouns"]}")
-        else:
-            for noun in artifacts["openai_nouns"]["nouns"]:
-                try:
-                    logger.info(f"noun_text: {noun["noun"]}")
-                    tasks_to_await.append(asyncio.create_task(modifier_peeler(
-                        noun["noun"], noun["plurality"], sentence, sentence_id, semantic_categories,
-                        semantic_category=noun["semanticCategory"])))
-                except Exception as e:
-                    logger.warning(f"failed to add noun: {noun}", e)
+        #if "nouns" not in artifacts["openai_nouns"]:
+        #    logger.warning(f"expected `nouns` field is missing in: {artifacts["openai_nouns"]}")
+        #else:
+        #    for noun in artifacts["openai_nouns"]["nouns"]:
+        #        try:
+        #            logger.info(f"noun_text: {noun["noun"]}")
+        #            tasks_to_await.append(asyncio.create_task(modifier_peeler(
+        #                noun["noun"], noun["plurality"], sentence, sentence_id, semantic_categories,
+        #                semantic_category=noun["semanticCategory"])))
+        #        except Exception as e:
+        #            logger.warning(f"failed to add noun: {noun}", e)
         self.sentence_merge_artifacts.append(artifacts)
 
 
@@ -155,11 +200,11 @@ async def modifier_peeler(noun_text: str, plurality: str,
         await add_noun(noun_text, semantic_category, plurality, sentence_id)
 
 
-noun_controller = NounController()
+sentence_controller = SentenceController()
 
 
 async def main():
-    await noun_controller.on_periodic_run()
+    await sentence_controller.on_periodic_run()
 
 
 if __name__ == "__main__":

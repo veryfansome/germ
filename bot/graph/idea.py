@@ -69,6 +69,34 @@ class IdeaGraph:
             last_sentence_id = this_sentence_id
         return document_record
 
+    async def add_noun_form(self, noun: str, form):
+        results = await self.driver.query("""
+        MERGE (noun:Noun {text: $noun})
+        WITH noun
+        UNWIND (COALESCE(noun.forms, []) + [$form]) AS form
+        WITH noun, COLLECT(DISTINCT form) AS uniqueForms
+        SET noun.forms = uniqueForms
+        RETURN noun
+        """, {
+            "noun": noun, "form": form
+        })
+        logger.info(f"noun: {results}")
+        return results
+
+    async def add_proper_noun_form(self, proper_noun: str, form):
+        results = await self.driver.query("""
+        MERGE (properNoun:ProperNoun {text: $properNoun})
+        WITH properNoun
+        UNWIND (COALESCE(properNoun.forms, []) + [$form]) AS form
+        WITH properNoun, COLLECT(DISTINCT form) AS uniqueForms
+        SET properNoun.forms = uniqueForms
+        RETURN properNoun
+        """, {
+            "properNoun": proper_noun, "form": form
+        })
+        logger.info(f"proper noun: {results}")
+        return results
+
     async def add_noun(self, noun: str):
         noun_record = await self.driver.query(
             "MERGE (noun:Noun {text: $noun}) RETURN noun", {"noun": noun})
@@ -197,6 +225,28 @@ class IdeaGraph:
             })
         logger.info(f"noun type link: {semantic_category_link_record}")
         return semantic_category_link_record
+
+    async def link_noun_form_to_sentence(self, noun: str, form: str, tag: str, sentence_id: int):
+        results = await self.driver.query(f"""
+        MATCH (noun:Noun {{text: $noun}}), (sentence:Sentence {{sentence_id: $sentence_id}})
+        MERGE (sentence)-[r:{tag} {{form: $form, sentence_id: $sentence_id}}]->(noun)
+        RETURN r
+        """, {
+            "noun": noun, "form": form, "sentence_id": sentence_id
+        })
+        logger.info(f"noun link: {results}")
+        return results
+
+    async def link_proper_noun_form_to_sentence(self, proper_noun: str, form: str, tag: str, sentence_id: int):
+        results = await self.driver.query(f"""
+        MATCH (properNoun:ProperNoun {{text: $properNoun}}), (sentence:Sentence {{sentence_id: $sentence_id}})
+        MERGE (sentence)-[r:{tag} {{form: $form, sentence_id: $sentence_id}}]->(properNoun)
+        RETURN r
+        """, {
+            "properNoun": proper_noun, "form": form, "sentence_id": sentence_id
+        })
+        logger.info(f"proper_noun link: {results}")
+        return results
 
     async def link_noun_to_sentence(self, noun: str, sentence_id: int, plurality: str = "singular"):
         noun_link_record = await self.driver.query(

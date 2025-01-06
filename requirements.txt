@@ -1,6 +1,7 @@
 apscheduler
 asyncpg
 fastapi
+flair
 gunicorn
 httpx
 inflect
@@ -21,5 +22,4 @@ pytest-xdist
 python-dotenv
 sqlalchemy[asyncio]
 starlette
-transformers
 uvicorn[standard]

@@ -59,7 +59,7 @@ services:
     environment: *local-dev
     working_dir: /src
     command: [
-      "python", "-m", "bot.scheduler", "--noun-controller",
+      "python", "-m", "bot.scheduler", "--sentence-controller",
     ]
 
   bot-init:
