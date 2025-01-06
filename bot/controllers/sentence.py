@@ -31,6 +31,7 @@ class SentenceController(SentenceMergeEventHandler):
         semantic_categories = [t["semanticCategory"]["text"] for t in await idea_graph.get_semantic_category_desc_by_connections()]
         logger.debug(f"semantic_categories: {semantic_categories}")
 
+        # "artifacts" that can be cached or persisted
         artifacts = {
             # Used noun types from query as hints to classify sentence
             #"openai_nouns": await run_in_threadpool(get_sentence_nouns_classifier(semantic_categories).classify,
@@ -43,22 +44,27 @@ class SentenceController(SentenceMergeEventHandler):
         }
         logger.info(f"pos_tags: {artifacts["pos_tags"]}")
 
-        adjectives = [word for word in artifacts["pos_tags"] if word[1] in ADJECTIVE_POS_TAGS]
-        logger.info(f"adjectives: {adjectives}")
-
-        adverbs = [word for word in artifacts["pos_tags"] if word[1] in ADVERB_POS_TAGS]
-        logger.info(f"adverbs: {adverbs}")
-
+        # Nouns and POS:
+        # Start with nouns because they're the things we talk about. Logic dealing with pronouns and adjectives both
+        # depend on their nouns and verbs don't make sense without nouns either so nouns is a good place to start.
+        # We'll need to iterate through all the words at this point, so it makes sense to also do all the POS vertexes
+        # here as well.
         nouns = []
+        last_pos_tag = None
         for idx, word in enumerate(artifacts["pos_tags"]):
             text, tag = word
+            await idea_graph.add_part_of_speech(tag)
+            if last_pos_tag is not None:
+                task = asyncio.create_task(  # Link in background
+                    idea_graph.link_pos_tag_to_last_pos_tag(tag, idx, last_pos_tag, idx-1, sentence_id))
+            last_pos_tag = tag
+
             if tag not in NOUN_POS_TAGS:
                 continue
             elif idx > 0 and artifacts["pos_tags"][idx-1][1] in ["''", '""']:
-                nouns.append((f"{artifacts["pos_tags"][idx-1][0]}{word[0]}", tag))
+                nouns.append((f"{artifacts["pos_tags"][idx-1][0]}{text}", tag))
             else:
                 nouns.append(word)
-
         logger.info(f"nouns: {nouns}")
         for noun, tag in nouns:
             if tag == "NN":  # Common singular
@@ -72,13 +78,20 @@ class SentenceController(SentenceMergeEventHandler):
                 await idea_graph.add_noun_form(singular, noun)
                 await idea_graph.link_noun_form_to_sentence(singular, noun, tag, sentence_id)
             else:
-                logger.info(f"plural proper noun support is WIP: {noun},{tag}")
+                # TODO: flesh out plural proper noun handling since we can't use inflect
+                logger.info(f"plural proper noun handling is WIP: {noun},{tag}")
 
         pronouns = [word for word in artifacts["pos_tags"] if word[1] in PRONOUN_POS_TAGS]
         logger.info(f"pronouns: {pronouns}")
 
+        adjectives = [word for word in artifacts["pos_tags"] if word[1] in ADJECTIVE_POS_TAGS]
+        logger.info(f"adjectives: {adjectives}")
+
         verbs = [word for word in artifacts["pos_tags"] if word[1] in VERB_POS_TAGS]
         logger.info(f"verbs: {verbs}")
+
+        adverbs = [word for word in artifacts["pos_tags"] if word[1] in ADVERB_POS_TAGS]
+        logger.info(f"adverbs: {adverbs}")
 
         #logger.info(f"openai_nouns: {artifacts["openai_nouns"]}")
         tasks_to_await = []

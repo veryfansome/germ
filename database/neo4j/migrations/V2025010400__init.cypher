@@ -9,6 +9,8 @@ CREATE CONSTRAINT     FOR (document:Document)                       REQUIRE docu
 CREATE CONSTRAINT     FOR (noun:Noun)                               REQUIRE noun.text                   IS UNIQUE;
 //
 CREATE CONSTRAINT     FOR (phrase:Phrase)                           REQUIRE phrase.text                 IS UNIQUE;
+//
+CREATE CONSTRAINT     FOR (pos:PartOfSpeech)                        REQUIRE pos.tag                     IS UNIQUE;
 // Corresponds with NNP, singular proper noun
 CREATE CONSTRAINT     FOR (properNoun:ProperNoun)                   REQUIRE properNoun.text             IS UNIQUE;
 //

@@ -69,7 +69,7 @@ class IdeaGraph:
             last_sentence_id = this_sentence_id
         return document_record
 
-    async def add_noun_form(self, noun: str, form):
+    async def add_noun_form(self, noun: str, form: str):
         results = await self.driver.query("""
         MERGE (noun:Noun {text: $noun})
         WITH noun
@@ -83,7 +83,17 @@ class IdeaGraph:
         logger.info(f"noun: {results}")
         return results
 
-    async def add_proper_noun_form(self, proper_noun: str, form):
+    async def add_part_of_speech(self, tag: str):
+        results = await self.driver.query("""
+        MERGE (pos:PartOfSpeech {tag: $tag})
+        RETURN pos
+        """, {
+            "tag": tag
+        })
+        logger.info(f"pos tag: {results}")
+        return results
+
+    async def add_proper_noun_form(self, proper_noun: str, form: str):
         results = await self.driver.query("""
         MERGE (properNoun:ProperNoun {text: $properNoun})
         WITH properNoun
@@ -216,6 +226,27 @@ class IdeaGraph:
             """)
         return semantic_category_results
 
+    async def link_noun_form_to_sentence(self, noun: str, form: str, tag: str, sentence_id: int):
+        results = await self.driver.query(f"""
+        MATCH (noun:Noun {{text: $noun}}), (sentence:Sentence {{sentence_id: $sentence_id}})
+        MERGE (sentence)-[r:{tag} {{form: $form, sentence_id: $sentence_id}}]->(noun)
+        RETURN r
+        """, {
+            "noun": noun, "form": form, "sentence_id": sentence_id
+        })
+        logger.info(f"noun link: {results}")
+        return results
+
+    async def link_noun_to_modifier(self, noun: str, modifier: str, sentence_id: int):
+        link_record = await self.driver.query(
+            "MATCH (noun:Noun {text: $noun}), (modifier:Modifier {text: $modifier}) "
+            "MERGE (modifier)-[r:MODIFIES {sentence_id: $sentence_id}]->(noun) "
+            "RETURN r", {
+                "noun": noun, "modifier": modifier, "sentence_id": sentence_id,
+            })
+        logger.info(f"noun/modifier link: {link_record}")
+        return link_record
+
     async def link_noun_to_semantic_category(self, noun: str, semantic_category: str, sentence_id: int):
         semantic_category_link_record = await self.driver.query(
             "MATCH (noun:Noun {text: $noun}), (semanticCategory:SemanticCategory {text: $semanticCategory}) "
@@ -226,15 +257,26 @@ class IdeaGraph:
         logger.info(f"noun type link: {semantic_category_link_record}")
         return semantic_category_link_record
 
-    async def link_noun_form_to_sentence(self, noun: str, form: str, tag: str, sentence_id: int):
-        results = await self.driver.query(f"""
-        MATCH (noun:Noun {{text: $noun}}), (sentence:Sentence {{sentence_id: $sentence_id}})
-        MERGE (sentence)-[r:{tag} {{form: $form, sentence_id: $sentence_id}}]->(noun)
+    async def link_noun_to_sentence(self, noun: str, sentence_id: int, plurality: str = "singular"):
+        noun_link_record = await self.driver.query(
+            "MATCH (noun:Noun {text: $noun}), (sentence:Sentence {sentence_id: $sentence_id}) "
+            "MERGE (sentence)-[r:REFERENCES {plurality: $plurality, sentence_id: $sentence_id}]->(noun) "
+            "RETURN r", {
+                "noun": noun, "sentence_id": sentence_id, "plurality": plurality
+            })
+        logger.info(f"noun link: {noun_link_record}")
+        return noun_link_record
+
+    async def link_pos_tag_to_last_pos_tag(self, tag: str, tag_idx: int, last_tag: str, last_tag_idx: int, sentence_id: int):
+        results = await self.driver.query("""
+        MATCH (pos:PartOfSpeech {tag: $tag}), (lastPos:PartOfSpeech {tag: $last_tag})
+        MERGE (lastPos)-[r:PRECEDES {sentence_id: $sentence_id, predecessor_idx: $last_tag_idx, successor_idx: $tag_idx}]->(pos)
         RETURN r
         """, {
-            "noun": noun, "form": form, "sentence_id": sentence_id
+            "tag": tag, "tag_idx": tag_idx, "last_tag": last_tag, "last_tag_idx": last_tag_idx,
+            "sentence_id": sentence_id,
         })
-        logger.info(f"noun link: {results}")
+        logger.info(f"pos link: {results}")
         return results
 
     async def link_proper_noun_form_to_sentence(self, proper_noun: str, form: str, tag: str, sentence_id: int):
@@ -247,26 +289,6 @@ class IdeaGraph:
         })
         logger.info(f"proper_noun link: {results}")
         return results
-
-    async def link_noun_to_sentence(self, noun: str, sentence_id: int, plurality: str = "singular"):
-        noun_link_record = await self.driver.query(
-            "MATCH (noun:Noun {text: $noun}), (sentence:Sentence {sentence_id: $sentence_id}) "
-            "MERGE (sentence)-[r:REFERENCES {plurality: $plurality, sentence_id: $sentence_id}]->(noun) "
-            "RETURN r", {
-                "noun": noun, "sentence_id": sentence_id, "plurality": plurality
-            })
-        logger.info(f"noun link: {noun_link_record}")
-        return noun_link_record
-
-    async def link_noun_to_modifier(self, noun: str, modifier: str, sentence_id: int):
-        link_record = await self.driver.query(
-            "MATCH (noun:Noun {text: $noun}), (modifier:Modifier {text: $modifier}) "
-            "MERGE (modifier)-[r:MODIFIES {sentence_id: $sentence_id}]->(noun) "
-            "RETURN r", {
-                "noun": noun, "modifier": modifier, "sentence_id": sentence_id,
-            })
-        logger.info(f"noun/modifier link: {link_record}")
-        return link_record
 
     def signal_handler(self, sig, frame):
         asyncio.run(self.close())
