@@ -35,17 +35,19 @@ class WebSocketSendEventHandler(ABC):
 
 
 class WebSocketSender:
-    def __init__(self, chat_session_id: int, connection: WebSocket):
+    def __init__(self, chat_session_id: int, connection: WebSocket,
+                 send_event_handlers: list[WebSocketSendEventHandler] = None):
         self.chat_session_id = chat_session_id
         self.connection = connection
-        self.ws_event_handlers: list[WebSocketSendEventHandler] = []
+        self.send_event_handlers: list[WebSocketSendEventHandler] = (
+            send_event_handlers if send_event_handlers is not None else [])
 
     async def send_chat_response(self, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
         task = asyncio.create_task(run_in_threadpool(
             new_chat_response_sent, self.chat_session_id, chat_response,
             chat_request_received_id=None))
-        for handler in self.ws_event_handlers:
+        for handler in self.send_event_handlers:
             task = asyncio.create_task(
                 handler.on_send(self.chat_session_id, chat_response))
 
@@ -54,7 +56,7 @@ class WebSocketSender:
         task = asyncio.create_task(run_in_threadpool(
             new_chat_response_sent, self.chat_session_id, chat_response,
             chat_request_received_id=chat_request_received_id))
-        for handler in self.ws_event_handlers:
+        for handler in self.send_event_handlers:
             task = asyncio.create_task(
                 handler.on_send(self.chat_session_id, chat_response,
                                 chat_request_received_id=chat_request_received_id))
@@ -78,19 +80,23 @@ class WebSocketConnectionManager:
     def __init__(self):
         self.active_connections: dict[int, WebSocket] = {}
         self.background_loop = asyncio.new_event_loop()
+        self.receive_event_handlers: list[WebSocketReceiveEventHandler] = []
+        self.send_event_handlers: list[WebSocketSendEventHandler] = []
         self.session_monitors: list[SessionMonitor] = []
-        self.ws_event_handlers: list[WebSocketReceiveEventHandler] = []
 
         def run_event_loop(loop):
             asyncio.set_event_loop(loop)
             loop.run_forever()
         self.background_thread = threading.Thread(target=run_event_loop, args=(self.background_loop,))
 
+    def add_send_event_handler(self, handler: WebSocketSendEventHandler):
+        self.send_event_handlers.append(handler)
+
     def add_session_monitor(self, handler: SessionMonitor):
         self.session_monitors.append(handler)
 
-    def add_ws_event_handler(self, handler: WebSocketReceiveEventHandler):
-        self.ws_event_handlers.append(handler)
+    def add_receive_event_handler(self, handler: WebSocketReceiveEventHandler):
+        self.receive_event_handlers.append(handler)
 
     async def conduct_chat_session(self, chat_session_id: int):
         try:
@@ -126,7 +132,7 @@ class WebSocketConnectionManager:
 
     async def monitor_chat_session(self, chat_session_id: int, ws: WebSocket):
         async def _monitor_chat_session():
-            ws_sender = WebSocketSender(chat_session_id, ws)
+            ws_sender = WebSocketSender(chat_session_id, ws, send_event_handlers=self.send_event_handlers)
             while chat_session_id in self.active_connections:
                 await asyncio.sleep(15)
                 logger.info(f"chat session {chat_session_id} is active")
@@ -139,8 +145,8 @@ class WebSocketConnectionManager:
         chat_request = ChatRequest.parse_obj(await connection.receive_json())
         chat_request_received_id = await run_in_threadpool(
             new_chat_request_received, chat_session_id, chat_request)
-        ws_sender = WebSocketSender(chat_session_id, connection)
-        for handler in self.ws_event_handlers:
+        ws_sender = WebSocketSender(chat_session_id, connection, send_event_handlers=self.send_event_handlers)
+        for handler in self.receive_event_handlers:
             task = asyncio.create_task(
                 handler.on_receive(chat_session_id, chat_request_received_id, chat_request, ws_sender))
 

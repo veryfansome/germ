@@ -30,9 +30,11 @@ class IdeaGraph:
 
     async def add_chat_session(self, chat_session_id: str):
         results = await self.driver.query("""
-        MATCH (chatSession:ChatSession {chatSessionId: $chat_session_id})
+        MERGE (chatSession:ChatSession {chat_session_id: $chat_session_id, time_started: $time_started})
         RETURN chatSession
-        """.strip(), {"chat_session_id": chat_session_id})
+        """.strip(), {
+            "chat_session_id": chat_session_id, "time_started": round_time_now_down_to_nearst_interval()
+        })
         logger.info(f"chat session: {results}")
         return results
 

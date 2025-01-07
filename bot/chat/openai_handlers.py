@@ -1,15 +1,17 @@
 import asyncio
 import json
 import logging
+import mistune
 from abc import ABC, abstractmethod
 from openai import OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 from starlette.concurrency import run_in_threadpool
-from typing import Optional
+from typing import Callable, Optional
 
 from api.models import ChatRequest, ChatResponse
 from bot.graph.idea import idea_graph
 from bot.lang.classifiers import split_to_sentences
+from bot.lang.markdown_extractor import MarkdownExtractor
 from bot.websocket import WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender
 from observability.annotations import measure_exec_seconds
 from settings.openai_settings import (DEFAULT_CHAT_MODEL, DEFAULT_MINI_MODEL, DEFAULT_ROUTING_MODEL,
@@ -190,7 +192,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
 # Internal chat handlers
 
 
-class ResponseSummarizingHandler(WebSocketSendEventHandler):
+class ResponseGraphingHandler(WebSocketSendEventHandler):
     def __init__(self, model: str = DEFAULT_MINI_MODEL):
         self.model = model
 
@@ -198,21 +200,34 @@ class ResponseSummarizingHandler(WebSocketSendEventHandler):
                       chat_session_id: int,
                       chat_response: ChatResponse,
                       chat_request_received_id: int = None):
-        pass
-
-    def process_chat_response(self, chat_session_id: int, chat_response: ChatResponse):
-        response_sentences = split_to_sentences(chat_response.content)
-        with OpenAI() as client:
-            completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": ""},
-                    {"role": "user", "content": f"# Text to summarize:\n{chat_response.content}"}
-                ],
-                model=self.model, n=1, temperature=0,
-                timeout=HTTPX_TIMEOUT)
-            summary = completion.choices[0].message.content
-            task = asyncio.create_task(idea_graph.add_sentence(summary))
-            return
+        elements = await run_in_threadpool(convert_chat_response_to_markdown_elements, chat_response)
+        """
+        ('header', 1, 'Heading 1')
+        ('paragraph', 'This is a paragraph with some text.')
+        ('header', 2, 'Heading 2')
+        ('list', 'unordered', '- Bullet point 1\n- Bullet point 2\n')
+        ('list_item', 'Bullet point 1')
+        ('list_item', 'Bullet point 2')
+        ('list', 'ordered', '1. Ordered item 1\n2. Ordered item 2\n')
+        ('list_item', 'Ordered item 1')
+        ('list_item', 'Ordered item 2')
+        ('code_block', None, 'def hello_world():\n    print("Hello, world!")\n')
+        """
+        for element in elements:
+            logger.info(f"markdown element: {element}")
+            # TODO: consider saving paragraph and codeblock in postgres
+            if element[0] == "paragraph":
+                sentences = split_to_sentences(element[1])
+                for sentence in split_to_sentences(element[1]):
+                    task = asyncio.create_task(idea_graph.add_sentence(sentence))
+            elif element[0] == "code_block":
+                pass
+            elif element[0] == "header":
+                pass
+            elif element[0] == "list":
+                pass
+            elif element[0] == "list_item":
+                pass
 
 
 class UserProfileConsumer(ABC):
@@ -223,18 +238,16 @@ class UserProfileConsumer(ABC):
 
 
 class UserProfilingHandler(WebSocketReceiveEventHandler):
-    """
-    This class is an off-stage router. It analyzes conversations to construct profiles of users, which are persisted
-    and linked with sessions. Additional handlers ara then activated if the situation calls for it.
-    """
     def __init__(self, tool_properties_spec,
                  consumers: list[UserProfileConsumer] = None,
                  model: str = DEFAULT_CHAT_MODEL,
+                 post_func: Callable[[str], str] = None,
                  tool_func_description: str = "",
                  tool_func_name: str = "",
                  tool_parameter_description: str = ""):
         self.consumers: list[UserProfileConsumer] = consumers if consumers else []
         self.model = model
+        self.post_func = post_func
         self.tool_properties_spec = tool_properties_spec
         self.tool_func_name = tool_func_name if tool_func_name else "store_user_profile"
         self.tool_func_description = (tool_func_description
@@ -265,8 +278,12 @@ class UserProfilingHandler(WebSocketReceiveEventHandler):
     async def on_receive(self, chat_session_id: int, chat_request_received_id: id,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         user_profile = await run_in_threadpool(self.process_chat_request, chat_session_id, chat_request)
-        for sentence in user_profile["profile"].values():
-            task = asyncio.create_task(idea_graph.add_sentence(sentence))
+        processed_profile = {}
+        for profile_name, profile_text in user_profile["profile"].items():
+            profile_text = self.post_func(profile_text)
+            processed_profile[profile_name] = profile_text
+            task = asyncio.create_task(idea_graph.add_sentence(profile_text))
+        user_profile["profile"] = processed_profile
         for consumer in self.consumers:
             task = asyncio.create_task(
                 consumer.on_new_user_profile(
@@ -293,6 +310,16 @@ class UserProfilingHandler(WebSocketReceiveEventHandler):
                 "profile": profile_parameters,
             }
             return user_profile
+
+
+##
+# Functions
+
+
+def convert_chat_response_to_markdown_elements(chat_response: ChatResponse):
+    extractor = MarkdownExtractor()
+    mistune.create_markdown(renderer=extractor)(chat_response.content)
+    return extractor.elements
 
 
 @measure_exec_seconds(use_logging=True, use_prometheus=True)

@@ -5,6 +5,7 @@ flair
 gunicorn
 httpx
 inflect
+mistune
 neo4j
 nltk
 openai

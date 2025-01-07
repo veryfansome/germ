@@ -62,6 +62,7 @@ class SentenceController(SentenceMergeEventHandler):
             if tag not in NOUN_POS_TAGS:
                 continue
             elif idx > 0 and artifacts["pos_tags"][idx-1][1] in ["''", '""']:
+                # TODO: this is really bad - replace this with proper quote and HTML tag processing
                 nouns.append((f"{artifacts['pos_tags'][idx-1][0]}{text}", tag))
             else:
                 nouns.append(word)
@@ -80,6 +81,9 @@ class SentenceController(SentenceMergeEventHandler):
             else:
                 # TODO: flesh out plural proper noun handling since we can't use inflect
                 logger.info(f"plural proper noun handling is WIP: {noun},{tag}")
+
+        code_snippets = [word for word in artifacts["pos_tags"] if word[1] == "CODE"]
+        logger.info(f"code_snippets: {code_snippets}")
 
         pronouns = [word for word in artifacts["pos_tags"] if word[1] in PRONOUN_POS_TAGS]
         logger.info(f"pronouns: {pronouns}")

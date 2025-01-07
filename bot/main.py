@@ -26,7 +26,7 @@ from api.models import ChatMessage, ChatSessionSummary, SqlRequest
 from bot.websocket import (WebSocketConnectionManager,
                            get_chat_session_messages, get_chat_session_summaries,
                            update_chat_session_is_hidden)
-from bot.chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
+from bot.chat.openai_handlers import ChatRoutingEventHandler, ResponseGraphingHandler, UserProfilingHandler
 from bot.controllers.sentence import sentence_controller
 from bot.graph.idea import idea_graph
 from db.models import (DATABASE_URL, SessionLocal, engine)
@@ -70,8 +70,7 @@ tracer = trace.get_tracer(__name__)
 
 idea_graph.add_sentence_merge_event_handler(sentence_controller)
 
-websocket_manager = WebSocketConnectionManager()
-
+response_grapher = ResponseGraphingHandler()
 router = ChatRoutingEventHandler()
 # TODO: maybe this shouldn't happen with every message.
 #user_fact_profiler = UserProfilingHandler({
@@ -81,16 +80,21 @@ router = ChatRoutingEventHandler()
 #                        "that must be true."),
 #    },
 #})
-user_intent_profiler = UserProfilingHandler({
-    "intent": {
-        "type": "string",
-        "description": "Using a statement that beings with \"The User\", describe what the User wants.",
+user_intent_profiler = UserProfilingHandler(
+    {
+        "intent": {
+            "type": "string",
+            "description": "A statement beginning with \"The User \", describing what the User wants.",
+        },
     },
-})
+    post_func=lambda intent: intent if intent.startswith("The User") else f"The User {intent}"  # Needed sometimes
+)
 
-websocket_manager.add_ws_event_handler(router)
+websocket_manager = WebSocketConnectionManager()
+websocket_manager.add_send_event_handler(response_grapher)
+websocket_manager.add_receive_event_handler(router)
 #websocket_manager.add_ws_event_handler(user_fact_profiler)
-websocket_manager.add_ws_event_handler(user_intent_profiler)
+websocket_manager.add_receive_event_handler(user_intent_profiler)
 
 
 @asynccontextmanager
