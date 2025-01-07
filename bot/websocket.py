@@ -11,9 +11,10 @@ import logging
 import threading
 
 from api.models import ChatMessage, ChatRequest, ChatResponse, ChatSessionSummary
+from bot.graph.idea import idea_graph
+from db.models import ChatSession, ChatRequestReceived, ChatResponseSent, SessionLocal
 from settings.germ_settings import WEBSOCKET_CONNECTION_IDLE_TIMEOUT
 from settings.openai_settings import DEFAULT_MINI_MODEL, HTTPX_TIMEOUT
-from db.models import ChatSession, ChatRequestReceived, ChatResponseSent, SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -24,22 +25,39 @@ METRIC_CHAT_SESSIONS_IN_PROGRESS = Gauge(
     "chat_sessions_in_progress", "Number of connected sessions that have yet to be disconnected")
 
 
+class WebSocketSendEventHandler(ABC):
+    @abstractmethod
+    async def on_send(self,
+                      chat_session_id: int,
+                      chat_response: ChatResponse,
+                      chat_request_received_id: int = None):
+        pass
+
+
 class WebSocketSender:
     def __init__(self, chat_session_id: int, connection: WebSocket):
         self.chat_session_id = chat_session_id
         self.connection = connection
+        self.ws_event_handlers: list[WebSocketSendEventHandler] = []
 
     async def send_chat_response(self, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
         task = asyncio.create_task(run_in_threadpool(
             new_chat_response_sent, self.chat_session_id, chat_response,
             chat_request_received_id=None))
+        for handler in self.ws_event_handlers:
+            task = asyncio.create_task(
+                handler.on_send(self.chat_session_id, chat_response))
 
     async def return_chat_response(self, chat_request_received_id: int, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
         task = asyncio.create_task(run_in_threadpool(
             new_chat_response_sent, self.chat_session_id, chat_response,
             chat_request_received_id=chat_request_received_id))
+        for handler in self.ws_event_handlers:
+            task = asyncio.create_task(
+                handler.on_send(self.chat_session_id, chat_response,
+                                chat_request_received_id=chat_request_received_id))
 
 
 class SessionMonitor(ABC):
@@ -48,10 +66,10 @@ class SessionMonitor(ABC):
         pass
 
 
-class WebSocketEventHandler(ABC):
+class WebSocketReceiveEventHandler(ABC):
     @abstractmethod
     async def on_receive(self,
-                         chat_session_id: int, chat_request_received_id: id,
+                         chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         pass
 
@@ -61,7 +79,7 @@ class WebSocketConnectionManager:
         self.active_connections: dict[int, WebSocket] = {}
         self.background_loop = asyncio.new_event_loop()
         self.session_monitors: list[SessionMonitor] = []
-        self.ws_event_handlers: list[WebSocketEventHandler] = []
+        self.ws_event_handlers: list[WebSocketReceiveEventHandler] = []
 
         def run_event_loop(loop):
             asyncio.set_event_loop(loop)
@@ -71,7 +89,7 @@ class WebSocketConnectionManager:
     def add_session_monitor(self, handler: SessionMonitor):
         self.session_monitors.append(handler)
 
-    def add_ws_event_handler(self, handler: WebSocketEventHandler):
+    def add_ws_event_handler(self, handler: WebSocketReceiveEventHandler):
         self.ws_event_handlers.append(handler)
 
     async def conduct_chat_session(self, chat_session_id: int):
@@ -90,6 +108,7 @@ class WebSocketConnectionManager:
         await ws.accept()
         self.active_connections[chat_session_id] = ws
         METRIC_CHAT_SESSIONS_IN_PROGRESS.inc()
+        task = asyncio.create_task(idea_graph.add_chat_session(chat_session_id))
         return chat_session_id
 
     async def disconnect(self, chat_session_id: int):

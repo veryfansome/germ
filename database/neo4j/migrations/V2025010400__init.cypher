@@ -4,6 +4,8 @@ CREATE CONSTRAINT     FOR (adjective:Adjective)                     REQUIRE adje
 // Corresponds with RB, standard adverb
 CREATE CONSTRAINT     FOR (adverb:Adverb)                           REQUIRE adverb.text                 IS UNIQUE;
 //
+CREATE CONSTRAINT     FOR (chatSession:ChatSession)                 REQUIRE chatSession.chat_session_id IS UNIQUE;
+//
 CREATE CONSTRAINT     FOR (document:Document)                       REQUIRE document.name               IS UNIQUE;
 // Corresponds with NN, singular noun
 CREATE CONSTRAINT     FOR (noun:Noun)                               REQUIRE noun.text                   IS UNIQUE;

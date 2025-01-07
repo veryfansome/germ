@@ -9,8 +9,8 @@ from typing import Optional
 
 from api.models import ChatRequest, ChatResponse
 from bot.graph.idea import idea_graph
-from bot.websocket import WebSocketEventHandler, WebSocketSender
-from db.models import (ChatSessionChatUserProfileLink, ChatUserProfile, SessionLocal)
+from bot.lang.classifiers import split_to_sentences
+from bot.websocket import WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender
 from observability.annotations import measure_exec_seconds
 from settings.openai_settings import (DEFAULT_CHAT_MODEL, DEFAULT_MINI_MODEL, DEFAULT_ROUTING_MODEL,
                                       ENABLED_CHAT_MODELS, ENABLED_IMAGE_MODELS, HTTPX_TIMEOUT)
@@ -18,7 +18,11 @@ from settings.openai_settings import (DEFAULT_CHAT_MODEL, DEFAULT_MINI_MODEL, DE
 logger = logging.getLogger(__name__)
 
 
-class RoutableChatEventHandler(WebSocketEventHandler, ABC):
+##
+# User facing routing and routable chat handlers
+
+
+class RoutableChatEventHandler(WebSocketReceiveEventHandler, ABC):
 
     @abstractmethod
     def get_function_name(self):
@@ -115,69 +119,6 @@ class ImageModelEventHandler(RoutableChatEventHandler):
                 ChatResponse(content=markdown_image, model=self.model)))
 
 
-def messages_to_transcript(chat_request: ChatRequest):
-    """
-    GPT-4o recommended the following format because it captures directionality and provides clear boundaries to
-    messages, which is helpful when trying to get embeddings that capture the context of the conversation.
-
-    [USER] Hi! [ASSISTANT]
-    [ASSISTANT] Hey! How can I help you? [USER]
-    [USER] Tell me a joke [ASSISTANT]
-
-    :param chat_request:
-    :return: transcript as a string
-    """
-    transcript_lines = []
-    for message in chat_request.messages:
-        end_tag = "user" if message.role == "assistant" else "assistant"
-        transcript_lines.append(f"[{message.role.upper()}] {message.content} [{end_tag.upper()}]")
-    return "\n".join(transcript_lines)
-
-
-@measure_exec_seconds(use_logging=True, use_prometheus=True)
-def generate_image_model_inputs(chat_request: ChatRequest):
-    with OpenAI() as client:
-        completion = client.chat.completions.create(
-            messages=([{
-                "role": "system",
-                "content": "The user wants an image."
-            }] + [message.model_dump() for message in chat_request.messages]),
-
-            model=DEFAULT_MINI_MODEL, n=1, temperature=chat_request.temperature,
-            tool_choice={
-                "type": "function",
-                "function": {"name": "generate_image"}
-            },
-            tools=[{
-                "type": "function",
-                "function": {
-                    "name": "generate_image",
-                    "description": "Return a generated image, given a text prompt, image size, and style.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "prompt": {
-                                "type": "string",
-                                "description": "The text prompt for the image model."
-                            },
-                            "size": {
-                                "type": "string",
-                                "enum": ["1024x1024", "1024x1792", "1792x1024"],
-                            },
-                            "style": {
-                                "type": "string",
-                                "enum": ["natural", "vivid"],
-                            },
-                        },
-                        "required": ["prompt", "size", "style"],
-                        "additionalProperties": False,
-                    },
-                }
-            }],
-            timeout=HTTPX_TIMEOUT)
-        return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
-
-
 USER_FACING_CHAT_HANDLERS: dict[str, RoutableChatEventHandler] = {}
 for m in ENABLED_CHAT_MODELS:
     USER_FACING_CHAT_HANDLERS[m] = ChatModelEventHandler(m)
@@ -245,6 +186,35 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
         return None
 
 
+##
+# Internal chat handlers
+
+
+class ResponseSummarizingHandler(WebSocketSendEventHandler):
+    def __init__(self, model: str = DEFAULT_MINI_MODEL):
+        self.model = model
+
+    async def on_send(self,
+                      chat_session_id: int,
+                      chat_response: ChatResponse,
+                      chat_request_received_id: int = None):
+        pass
+
+    def process_chat_response(self, chat_session_id: int, chat_response: ChatResponse):
+        response_sentences = split_to_sentences(chat_response.content)
+        with OpenAI() as client:
+            completion = client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": ""},
+                    {"role": "user", "content": f"# Text to summarize:\n{chat_response.content}"}
+                ],
+                model=self.model, n=1, temperature=0,
+                timeout=HTTPX_TIMEOUT)
+            summary = completion.choices[0].message.content
+            task = asyncio.create_task(idea_graph.add_sentence(summary))
+            return
+
+
 class UserProfileConsumer(ABC):
     @abstractmethod
     async def on_new_user_profile(self, user_profile, chat_session_id: int, chat_request_received_id: id,
@@ -252,41 +222,41 @@ class UserProfileConsumer(ABC):
         pass
 
 
-class UserProfilingHandler(WebSocketEventHandler):
+class UserProfilingHandler(WebSocketReceiveEventHandler):
     """
     This class is an off-stage router. It analyzes conversations to construct profiles of users, which are persisted
     and linked with sessions. Additional handlers ara then activated if the situation calls for it.
     """
-
-    tool_func_name = "store_user_profile"
-    tool_properties_spec = {
-        "intent": {
-            "type": "string",
-            "description": "Using a statement that beings with \"The User\", describe what the User wants.",
-        },
-        "sentiment": {
-            "type": "number",
-            "description": ("On a scale of 0 to 5, where 0 is very bad, 3 is neutral, and 5 is very good, "
-                            "how does the user feels about the conversation?"),
-        }}
-    tool = {
-        "type": "function",
-        "function": {
-            "name": tool_func_name,
-            "description": "Store user profile generated from an analysis of the conversation.",
-            "parameters": {
-                "type": "object",
-                "description": "Analysis of the user and the conversation to store.",
-                "properties": tool_properties_spec,
-                "required": list(tool_properties_spec.keys()),
-                "additionalProperties": False,
-            },
-        },
-    }
-
-    def __init__(self, consumers: list[UserProfileConsumer] = None, model: str = DEFAULT_CHAT_MODEL):
+    def __init__(self, tool_properties_spec,
+                 consumers: list[UserProfileConsumer] = None,
+                 model: str = DEFAULT_CHAT_MODEL,
+                 tool_func_description: str = "",
+                 tool_func_name: str = "",
+                 tool_parameter_description: str = ""):
         self.consumers: list[UserProfileConsumer] = consumers if consumers else []
         self.model = model
+        self.tool_properties_spec = tool_properties_spec
+        self.tool_func_name = tool_func_name if tool_func_name else "store_user_profile"
+        self.tool_func_description = (tool_func_description
+                                      if tool_func_description
+                                      else "Store user profile generated from an analysis of the conversation.")
+        self.tool_parameter_description = (tool_parameter_description
+                                           if tool_parameter_description
+                                           else "Analysis of the user and the conversation to store.")
+        self.tool = {
+            "type": "function",
+            "function": {
+                "name": self.tool_func_name,
+                "description": self.tool_func_description,
+                "parameters": {
+                    "type": "object",
+                    "description": self.tool_parameter_description,
+                    "properties": tool_properties_spec,
+                    "required": list(tool_properties_spec.keys()),
+                    "additionalProperties": False,
+                },
+            },
+        }
 
     def add_consumer(self, consumer: UserProfileConsumer):
         self.consumers.append(consumer)
@@ -295,7 +265,8 @@ class UserProfilingHandler(WebSocketEventHandler):
     async def on_receive(self, chat_session_id: int, chat_request_received_id: id,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         user_profile = await run_in_threadpool(self.process_chat_request, chat_session_id, chat_request)
-        await idea_graph.add_sentence(user_profile["profile"]["intent"])
+        for sentence in user_profile["profile"].values():
+            task = asyncio.create_task(idea_graph.add_sentence(sentence))
         for consumer in self.consumers:
             task = asyncio.create_task(
                 consumer.on_new_user_profile(
@@ -309,22 +280,60 @@ class UserProfilingHandler(WebSocketEventHandler):
                 n=1, temperature=0,
                 tool_choice={
                     "type": "function",
-                    "function": {"name": UserProfilingHandler.tool_func_name}
+                    "function": {"name": self.tool_func_name}
                 },
-                tools=[UserProfilingHandler.tool],
+                tools=[self.tool],
                 timeout=HTTPX_TIMEOUT)
             profile_parameters = json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
             user_profile = {
-                "profile": profile_parameters,
+                "chat_session_id": chat_session_id,
                 "system_messages": [
-                    message.model_dump() for message in chat_request.messages if message.role == "system"]
+                    message.model_dump() for message in chat_request.messages if message.role == "system"],
+                "messages": chat_request.messages,
+                "profile": profile_parameters,
             }
-            with SessionLocal() as session:
-                user_profile_record = ChatUserProfile(chat_user_profile=user_profile)
-                session.add(user_profile_record)
-                session.commit()
-                user_profile_to_session_link = ChatSessionChatUserProfileLink(
-                    chat_session_id=chat_session_id, chat_user_profile_id=user_profile_record.chat_user_profile_id)
-                session.add(user_profile_to_session_link)
-                session.commit()
             return user_profile
+
+
+@measure_exec_seconds(use_logging=True, use_prometheus=True)
+def generate_image_model_inputs(chat_request: ChatRequest):
+    with OpenAI() as client:
+        completion = client.chat.completions.create(
+            messages=([{
+                "role": "system",
+                "content": "The user wants an image."
+            }] + [message.model_dump() for message in chat_request.messages]),
+
+            model=DEFAULT_MINI_MODEL, n=1, temperature=chat_request.temperature,
+            tool_choice={
+                "type": "function",
+                "function": {"name": "generate_image"}
+            },
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "generate_image",
+                    "description": "Return a generated image, given a text prompt, image size, and style.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "prompt": {
+                                "type": "string",
+                                "description": "The text prompt for the image model."
+                            },
+                            "size": {
+                                "type": "string",
+                                "enum": ["1024x1024", "1024x1792", "1792x1024"],
+                            },
+                            "style": {
+                                "type": "string",
+                                "enum": ["natural", "vivid"],
+                            },
+                        },
+                        "required": ["prompt", "size", "style"],
+                        "additionalProperties": False,
+                    },
+                }
+            }],
+            timeout=HTTPX_TIMEOUT)
+        return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)

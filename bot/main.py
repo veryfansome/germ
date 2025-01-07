@@ -73,10 +73,24 @@ idea_graph.add_sentence_merge_event_handler(sentence_controller)
 websocket_manager = WebSocketConnectionManager()
 
 router = ChatRoutingEventHandler()
-user_profiler = UserProfilingHandler()
+# TODO: maybe this shouldn't happen with every message.
+#user_fact_profiler = UserProfilingHandler({
+#    "user_fact": {
+#        "type": "string",
+#        "description": ("Using a statement that beings with \"The User\", infer something about the User "
+#                        "that must be true."),
+#    },
+#})
+user_intent_profiler = UserProfilingHandler({
+    "intent": {
+        "type": "string",
+        "description": "Using a statement that beings with \"The User\", describe what the User wants.",
+    },
+})
 
 websocket_manager.add_ws_event_handler(router)
-websocket_manager.add_ws_event_handler(user_profiler)
+#websocket_manager.add_ws_event_handler(user_fact_profiler)
+websocket_manager.add_ws_event_handler(user_intent_profiler)
 
 
 @asynccontextmanager
