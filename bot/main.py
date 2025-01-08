@@ -27,7 +27,7 @@ from bot.websocket import (WebSocketConnectionManager,
                            get_chat_session_messages, get_chat_session_summaries,
                            update_chat_session_is_hidden)
 from bot.chat.openai_handlers import ChatRoutingEventHandler, ResponseGraphingHandler, UserProfilingHandler
-from bot.controllers.sentence import sentence_controller
+from bot.controllers.english import english_controller
 from bot.graph.idea import idea_graph
 from db.models import (DATABASE_URL, SessionLocal, engine)
 from db.utils import db_stats_job
@@ -68,7 +68,9 @@ tracer = trace.get_tracer(__name__)
 ##
 # App
 
-idea_graph.add_sentence_merge_event_handler(sentence_controller)
+idea_graph.add_code_block_merge_event_handler(english_controller)
+idea_graph.add_paragraph_merge_event_handler(english_controller)
+idea_graph.add_sentence_merge_event_handler(english_controller)
 
 response_grapher = ResponseGraphingHandler()
 router = ChatRoutingEventHandler()

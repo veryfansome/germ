@@ -6,17 +6,17 @@ CREATE CONSTRAINT     FOR (adverb:Adverb)                           REQUIRE adve
 //
 CREATE CONSTRAINT     FOR (chatSession:ChatSession)                 REQUIRE chatSession.chat_session_id IS UNIQUE;
 //
-CREATE CONSTRAINT     FOR (codeBlock:CodeBlock)                     REQUIRE codeBlock.text              IS UNIQUE;
+CREATE CONSTRAINT     FOR (codeBlock:CodeBlock)                     REQUIRE codeBlock.code_block_id     IS UNIQUE;
 //
 CREATE CONSTRAINT     FOR (codeSnippet:CodeSnippet)                 REQUIRE codeSnippet.text            IS UNIQUE;
 //
 CREATE CONSTRAINT     FOR (document:Document)                       REQUIRE document.name               IS UNIQUE;
 //
-CREATE CONSTRAINT     FOR (heading:Heading)                         REQUIRE heading.text                IS UNIQUE;
+CREATE CONSTRAINT     FOR (header:Header)                           REQUIRE header.text                 IS UNIQUE;
 // Corresponds with NN, singular noun
 CREATE CONSTRAINT     FOR (noun:Noun)                               REQUIRE noun.text                   IS UNIQUE;
 //
-CREATE CONSTRAINT     FOR (paragraph:Paragraph)                     REQUIRE paragraph.text              IS UNIQUE;
+CREATE CONSTRAINT     FOR (paragraph:Paragraph)                     REQUIRE paragraph.paragraph_id      IS UNIQUE;
 //
 CREATE CONSTRAINT     FOR (partOfSpeech:PartOfSpeech)               REQUIRE partOfSpeech.tag            IS UNIQUE;
 //

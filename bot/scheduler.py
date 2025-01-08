@@ -4,7 +4,7 @@ import signal
 import traceback
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from bot.controllers.sentence import sentence_controller
+from bot.controllers.english import english_controller
 from bot.graph.idea import idea_graph
 from db.utils import db_stats_job
 from observability.logging import logging, setup_logging
@@ -20,7 +20,9 @@ async def main():
     scheduler.start()
 
     await idea_graph.add_default_semantic_categories()
-    idea_graph.add_sentence_merge_event_handler(sentence_controller)
+    idea_graph.add_code_block_merge_event_handler(english_controller)
+    idea_graph.add_paragraph_merge_event_handler(english_controller)
+    idea_graph.add_sentence_merge_event_handler(english_controller)
 
     while True:
         await asyncio.sleep(10)
@@ -34,15 +36,15 @@ def signal_handler(sig, frame):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Build a graph of ideas.')
-    parser.add_argument("--sentence-controller", help='Enable sentence controller.',
+    parser.add_argument("--english-controller", help='Enable English controller.',
                         action="store_true", default=False)
     args = parser.parse_args()
     scheduler = AsyncIOScheduler()
     scheduler.add_job(db_stats_job, "interval", minutes=15, name="PostgreSQL stats")
 
-    if args.sentence_controller:
-        scheduler.add_job(sentence_controller.on_periodic_run, "interval",
-                          seconds=sentence_controller.interval_seconds, name="EntityController")
+    if args.english_controller:
+        scheduler.add_job(english_controller.on_periodic_run, "interval",
+                          seconds=english_controller.interval_seconds, name="EntityController")
 
     try:
         asyncio.run(main())

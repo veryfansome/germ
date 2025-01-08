@@ -2,23 +2,32 @@ import asyncio
 import inflect
 from starlette.concurrency import run_in_threadpool
 
-from bot.graph.idea import SentenceMergeEventHandler, idea_graph
+from bot.graph.idea import CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler, idea_graph
 from bot.lang.classifiers import (
     ADJECTIVE_POS_TAGS, ADVERB_POS_TAGS, NOUN_POS_TAGS, PRONOUN_POS_TAGS, VERB_POS_TAGS,
-    get_flair_pos_tags)
+    get_flair_pos_tags, split_to_sentences)
 from observability.logging import logging, setup_logging
 
 inflect_engine = inflect.engine()
 logger = logging.getLogger(__name__)
 
 
-class SentenceController(SentenceMergeEventHandler):
+class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler):
     def __init__(self, interval_seconds: int = 30):
         self.interval_seconds = interval_seconds
         self.sentence_merge_artifacts = []
 
+    async def on_code_block_merge(self, code_block: str, code_block_id: int):
+        logger.info(f"on_code_block_merge: code_block_id={code_block_id}, {code_block}")
+
     async def on_periodic_run(self):
         logger.info(f"on_periodic_run: {self.sentence_merge_artifacts}")
+
+    async def on_paragraph_merge(self, paragraph: str, paragraph_id: int):
+        logger.info(f"on_paragraph_merge: paragraph_id={paragraph_id}, {paragraph}")
+        for sentence in split_to_sentences(paragraph):
+            # TODO: add proper HTML handling
+            await idea_graph.add_sentence(sentence)
 
     async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_parameters):
         logger.info(f"on_sentence_merge: sentence_id={sentence_id}, {sentence_parameters}, {sentence}")
@@ -85,6 +94,9 @@ class SentenceController(SentenceMergeEventHandler):
         code_snippets = [word for word in artifacts["pos_tags"] if word[1] == "CODE"]
         logger.info(f"code_snippets: {code_snippets}")
 
+        # TODO: since we're dealing with simple language tasks, try using a flair or transformers LLM
+        #       that we can tune.
+
         pronouns = [word for word in artifacts["pos_tags"] if word[1] in PRONOUN_POS_TAGS]
         logger.info(f"pronouns: {pronouns}")
 
@@ -113,11 +125,11 @@ class SentenceController(SentenceMergeEventHandler):
         self.sentence_merge_artifacts.append(artifacts)
 
 
-sentence_controller = SentenceController()
+english_controller = EnglishController()
 
 
 async def main():
-    await sentence_controller.on_periodic_run()
+    await english_controller.on_periodic_run()
 
 
 if __name__ == "__main__":

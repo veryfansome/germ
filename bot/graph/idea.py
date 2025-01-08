@@ -10,11 +10,23 @@ from starlette.concurrency import run_in_threadpool
 from bot.graph.noun import default_semantic_categories
 from bot.lang.classifiers import get_sentence_classifier, split_to_sentences
 from db.neo4j import AsyncNeo4jDriver
-from db.models import AsyncSessionLocal, Sentence
+from db.models import AsyncSessionLocal, CodeBlock, Paragraph, Sentence
 from observability.logging import logging
 from settings.germ_settings import UUID5_NS
 
 logger = logging.getLogger(__name__)
+
+
+class CodeBlockMergeEventHandler(ABC):
+    @abstractmethod
+    async def on_code_block_merge(self, code_block: str, code_block_id: int):
+        pass
+
+
+class ParagraphMergeEventHandler(ABC):
+    @abstractmethod
+    async def on_paragraph_merge(self, paragraph: str, paragraph_id: int):
+        pass
 
 
 class SentenceMergeEventHandler(ABC):
@@ -26,17 +38,51 @@ class SentenceMergeEventHandler(ABC):
 class IdeaGraph:
     def __init__(self, driver: AsyncNeo4jDriver):
         self.driver = driver
+        self.code_block_merge_event_handlers: list[CodeBlockMergeEventHandler] = []
+        self.paragraph_merge_event_handlers: list[ParagraphMergeEventHandler] = []
         self.sentence_merge_event_handlers: list[SentenceMergeEventHandler] = []
 
     async def add_chat_session(self, chat_session_id: str):
         results = await self.driver.query("""
         MERGE (chatSession:ChatSession {chat_session_id: $chat_session_id, time_started: $time_started})
         RETURN chatSession
-        """.strip(), {
+        """, {
             "chat_session_id": chat_session_id, "time_started": round_time_now_down_to_nearst_interval()
         })
         logger.info(f"chat session: {results}")
         return results
+
+    async def add_code_block(self, code_block: str, language: str = None):
+        code_block = code_block.strip()
+        # Generate signature for lookup in PostgreSQL
+        code_block_signature = uuid.uuid5(UUID5_NS, code_block)
+        async with (AsyncSessionLocal() as rdb_session):
+            async with rdb_session.begin():
+                code_block_select_stmt = sql_select(CodeBlock).where(CodeBlock.code_block_signature == code_block_signature)
+                code_block_select_result = await rdb_session.execute(code_block_select_stmt)
+                rdb_record = code_block_select_result.scalars().first()
+
+                # Create record if not found
+                if not rdb_record:
+                    rdb_record = CodeBlock(text=code_block, code_block_signature=code_block_signature)
+                    rdb_session.add(rdb_record)
+                    await rdb_session.commit()
+
+        graph_results = await self.driver.query("""
+        MERGE (code_block:CodeBlock {code_block_id: $code_block_id, language: $language})
+        RETURN code_block
+        """, {
+            "code_block_id": rdb_record.code_block_id, "language": language,
+        })
+        logger.info(f"code block: {graph_results}")
+        async_tasks = []
+        for handler in self.code_block_merge_event_handlers:
+            async_tasks.append(asyncio.create_task(
+                handler.on_code_block_merge(code_block, rdb_record.code_block_id)))
+        return graph_results, rdb_record.code_block_id, async_tasks
+
+    def add_code_block_merge_event_handler(self, handler: CodeBlockMergeEventHandler):
+        self.code_block_merge_event_handlers.append(handler)
 
     async def add_default_semantic_categories(self) -> list[Task]:
         async_tasks = []
@@ -79,6 +125,17 @@ class IdeaGraph:
             last_sentence_id = this_sentence_id
         return document_record
 
+    async def add_header(self, header: str):
+        header = header.strip()
+        results = await self.driver.query("""
+        MERGE (header:Header {text: $text})
+        RETURN header
+        """, {
+            "text": header
+        })
+        logger.info(f"header: {results}")
+        return results
+
     async def add_noun_form(self, noun: str, form: str):
         results = await self.driver.query("""
         MERGE (noun:Noun {text: $noun})
@@ -98,9 +155,41 @@ class IdeaGraph:
         MATCH (noun:Noun {text: $noun})
         SET noun.plural_forms = coalesce(noun.plural_forms, []) + [$plural]
         RETURN noun
-        """.strip(), {"noun": noun, "plural": plural})
+        """, {"noun": noun, "plural": plural})
         logger.info(f"noun: {noun_record}")
         return noun_record
+
+    async def add_paragraph(self, paragraph: str):
+        paragraph = paragraph.strip()
+        # Generate signature for lookup in PostgreSQL
+        paragraph_signature = uuid.uuid5(UUID5_NS, paragraph)
+        async with (AsyncSessionLocal() as rdb_session):
+            async with rdb_session.begin():
+                paragraph_select_stmt = sql_select(Paragraph).where(Paragraph.paragraph_signature == paragraph_signature)
+                paragraph_select_result = await rdb_session.execute(paragraph_select_stmt)
+                rdb_record = paragraph_select_result.scalars().first()
+
+                # Create record if not found
+                if not rdb_record:
+                    rdb_record = Paragraph(text=paragraph, paragraph_signature=paragraph_signature)
+                    rdb_session.add(rdb_record)
+                    await rdb_session.commit()
+
+        graph_results = await self.driver.query("""
+        MERGE (paragraph:Paragraph {paragraph_id: $paragraph_id})
+        RETURN paragraph
+        """, {
+            "paragraph_id": rdb_record.paragraph_id
+        })
+        logger.info(f"paragraph: {graph_results}")
+        async_tasks = []
+        for handler in self.paragraph_merge_event_handlers:
+            async_tasks.append(asyncio.create_task(
+                handler.on_paragraph_merge(paragraph, rdb_record.paragraph_id)))
+        return graph_results, rdb_record.paragraph_id, async_tasks
+
+    def add_paragraph_merge_event_handler(self, handler: ParagraphMergeEventHandler):
+        self.paragraph_merge_event_handlers.append(handler)
 
     async def add_part_of_speech(self, tag: str):
         results = await self.driver.query("""
@@ -135,7 +224,6 @@ class IdeaGraph:
 
     async def add_sentence(self, sentence: str):
         sentence = sentence.strip()
-
         # Generate signature for lookup in PostgreSQL
         sentence_signature = uuid.uuid5(UUID5_NS, sentence)
         async with (AsyncSessionLocal() as rdb_session):
@@ -169,7 +257,7 @@ class IdeaGraph:
 
             # Merge sentence node
             parameter_spec = sentence_classifier.tool_properties_spec
-            graph_record = await self.driver.query(
+            graph_results = await self.driver.query(
                 ("MERGE (sentence:Sentence "
                  + "{text: $text, sentence_id: $sentence_id, "
                  + ", ".join([f"{k}: ${k}" for k in parameter_spec.keys()])
@@ -179,13 +267,13 @@ class IdeaGraph:
                     "sentence_id": rdb_record.sentence_id,
                     **{k: rdb_record.sentence_openai_parameters[k] for k in parameter_spec.keys()},
                 })
-            logger.info(f"sentence node: {graph_record}")
+            logger.info(f"sentence node: {graph_results}")
         async_tasks = []
         for handler in self.sentence_merge_event_handlers:
             async_tasks.append(asyncio.create_task(
                 handler.on_sentence_merge(
                     sentence, rdb_record.sentence_id, rdb_record.sentence_openai_parameters)))
-        return graph_record, rdb_record.sentence_id, async_tasks
+        return graph_results, rdb_record.sentence_id, async_tasks
 
     def add_sentence_merge_event_handler(self, handler: SentenceMergeEventHandler):
         self.sentence_merge_event_handlers.append(handler)
@@ -266,6 +354,23 @@ class IdeaGraph:
             "properNoun": proper_noun, "form": form, "sentence_id": sentence_id
         })
         logger.info(f"proper_noun link: {results}")
+        return results
+
+    async def link_successive_elements(self, predecessor_type: str, predecessor_attrs,
+                                       successor_type: str, successor_attrs, link_attrs):
+        link_attrs_expr = ", ".join([f"{k}: ${k}" for k in link_attrs.keys()])
+        predecessor_attrs_expr = ", ".join([f"{k}: ${k}" for k in predecessor_attrs.keys()])
+        successor_attrs_expr = ", ".join([f"{k}: ${k}" for k in successor_attrs.keys()])
+        results = await self.driver.query(f"""
+        MATCH (predecessor:{predecessor_type} {{{predecessor_attrs_expr}}}), (successor:{successor_type} {{{successor_attrs_expr}}})
+        MERGE (predecessor)-[r:PRECEDES {{{link_attrs_expr}}}]->(successor)
+        RETURN r
+        """, {
+            **link_attrs,
+            **predecessor_attrs,
+            **successor_attrs,
+        })
+        logger.info(f"successive element link: {results}")
         return results
 
     def signal_handler(self, sig, frame):

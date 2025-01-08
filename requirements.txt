@@ -1,10 +1,12 @@
 apscheduler
 asyncpg
+beautifulsoup4
 fastapi
 flair
 gunicorn
 httpx
 inflect
+lxml
 mistune
 neo4j
 nltk

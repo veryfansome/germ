@@ -1,7 +1,7 @@
 from sqlalchemy import (create_engine, Boolean, Column, DateTime, ForeignKey,
                         Index, Integer, JSON, String, UUID)
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine, AsyncSession
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 from settings import germ_settings
 
@@ -53,6 +53,30 @@ class ChatResponseSent(Base):
     __table_args__ = (
         # Since we look up responses by session for bookmarks.
         Index("idx_chat_response_sent_chat_session_id", "chat_session_id"),
+    )
+
+
+class CodeBlock(Base):
+    __tablename__ = "code_block"
+    code_block_id = Column(Integer, primary_key=True, autoincrement=True)
+
+    code_block_signature = Column(UUID)
+    text = Column(String)
+
+    __table_args__ = (
+        Index('idx_code_block_signature', 'code_block_signature'),  # Secondary index
+    )
+
+
+class Paragraph(Base):
+    __tablename__ = "paragraph"
+    paragraph_id = Column(Integer, primary_key=True, autoincrement=True)
+
+    paragraph_signature = Column(UUID)
+    text = Column(String)
+
+    __table_args__ = (
+        Index('idx_paragraph_signature', 'paragraph_signature'),  # Secondary index
     )
 
 
