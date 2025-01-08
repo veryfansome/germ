@@ -7,10 +7,10 @@ import asyncio
 import signal
 import uuid
 
-from bot.graph.noun import default_semantic_categories
+from bot.graph.semantic_categories import default_semantic_categories
 from bot.lang.classifiers import get_sentence_classifier, split_to_sentences
-from db.neo4j import AsyncNeo4jDriver
-from db.models import AsyncSessionLocal, CodeBlock, Paragraph, Sentence
+from bot.db.models import AsyncSessionLocal, CodeBlock, Paragraph, Sentence
+from bot.db.neo4j import AsyncNeo4jDriver
 from observability.logging import logging
 from settings.germ_settings import UUID5_NS
 

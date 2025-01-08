@@ -6,7 +6,7 @@ import difflib
 import json
 import re
 
-from bot.graph.noun import default_semantic_categories
+from bot.graph.semantic_categories import default_semantic_categories
 from observability.logging import logging
 
 differ = difflib.Differ()

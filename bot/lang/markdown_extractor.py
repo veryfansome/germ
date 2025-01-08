@@ -1,7 +1,7 @@
 import mistune
 
 
-class MarkdownExtractor(mistune.HTMLRenderer):
+class MarkdownPageExtractor(mistune.HTMLRenderer):
     def __init__(self):
         super().__init__()
         self.elements = []
@@ -21,3 +21,7 @@ class MarkdownExtractor(mistune.HTMLRenderer):
     def block_code(self, code, info=None):
         self.elements.append(('code_block', info, code))
         return super().block_code(code, info)
+
+    def block_quote(self, text):
+        self.elements.append(('block_quote', text))
+        return super().block_quote(text)

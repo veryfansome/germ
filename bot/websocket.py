@@ -10,9 +10,9 @@ import datetime
 import logging
 import threading
 
-from api.models import ChatMessage, ChatRequest, ChatResponse, ChatSessionSummary
+from bot.api.models import ChatMessage, ChatRequest, ChatResponse, ChatSessionSummary
+from bot.db.models import ChatSession, ChatRequestReceived, ChatResponseSent, SessionLocal
 from bot.graph.idea import idea_graph
-from db.models import ChatSession, ChatRequestReceived, ChatResponseSent, SessionLocal
 from settings.germ_settings import WEBSOCKET_CONNECTION_IDLE_TIMEOUT
 from settings.openai_settings import DEFAULT_MINI_MODEL, HTTPX_TIMEOUT
 

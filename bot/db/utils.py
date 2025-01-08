@@ -1,8 +1,8 @@
 from prometheus_client import Gauge
 from starlette.concurrency import run_in_threadpool
 
-from db.models import (SessionLocal,
-                       ChatSession, ChatRequestReceived, ChatResponseSent)
+from bot.db.models import (SessionLocal,
+                           ChatSession, ChatRequestReceived, ChatResponseSent)
 from observability.logging import logging
 
 logger = logging.getLogger(__name__)

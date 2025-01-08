@@ -99,7 +99,7 @@ services:
       - ./:/src
     environment:
       <<: *local-dev
-      WAIT_FOR_AFTER_COMMAND: python -m db.models
+      WAIT_FOR_AFTER_COMMAND: python -m bot.db.models
       WAIT_FOR_HOST: *db-host
       WAIT_FOR_PORT: 5432
     working_dir: /src
@@ -185,7 +185,7 @@ services:
     image: neo4j:latest
     volumes:
       - ./scripts/neo4j-start.sh:/neo4j-start.sh
-      - ./db_dump/neo4j:/dump  # Persist data
+      - ./database_dump/neo4j:/dump  # Persist data
     environment:
       NEO4J_AUTH: *neo4j-auth
     ports:

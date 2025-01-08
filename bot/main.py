@@ -22,15 +22,15 @@ import os
 import subprocess
 import traceback
 
-from api.models import ChatMessage, ChatSessionSummary, SqlRequest
+from bot.api.models import ChatMessage, ChatSessionSummary, SqlRequest
+from bot.chat.openai_handlers import ChatRoutingEventHandler, ResponseGraphingHandler, UserProfilingHandler
+from bot.db.models import DATABASE_URL, SessionLocal, engine
+from bot.db.utils import db_stats_job
+from bot.graph.idea import idea_graph
+from bot.lang.controllers.english import english_controller
 from bot.websocket import (WebSocketConnectionManager,
                            get_chat_session_messages, get_chat_session_summaries,
                            update_chat_session_is_hidden)
-from bot.chat.openai_handlers import ChatRoutingEventHandler, ResponseGraphingHandler, UserProfilingHandler
-from bot.controllers.english import english_controller
-from bot.graph.idea import idea_graph
-from db.models import (DATABASE_URL, SessionLocal, engine)
-from db.utils import db_stats_job
 from observability.logging import logging, setup_logging
 from settings import germ_settings
 

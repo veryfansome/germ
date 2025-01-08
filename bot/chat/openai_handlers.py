@@ -8,9 +8,9 @@ import json
 import logging
 import mistune
 
-from api.models import ChatRequest, ChatResponse
+from bot.api.models import ChatRequest, ChatResponse
 from bot.graph.idea import idea_graph
-from bot.lang.markdown_extractor import MarkdownExtractor
+from bot.lang.markdown_extractor import MarkdownPageExtractor
 from bot.websocket import WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender
 from observability.annotations import measure_exec_seconds
 from settings.openai_settings import (DEFAULT_CHAT_MODEL, DEFAULT_MINI_MODEL, DEFAULT_ROUTING_MODEL,
@@ -226,6 +226,7 @@ class ResponseGraphingHandler(WebSocketSendEventHandler):
         }
         for element in elements:
             logger.debug(f"markdown element: {element}")
+            # `paragraph` and `code_block` are ordered at the top for frequency
             if element[0] == "paragraph":
                 _, paragraph_id, _ = await idea_graph.add_paragraph(element[1])
                 this_element_attrs = {"paragraph_id": paragraph_id}
@@ -235,9 +236,13 @@ class ResponseGraphingHandler(WebSocketSendEventHandler):
             elif element[0] == "header":
                 await idea_graph.add_header(element[1])
                 this_element_attrs = {"text": element[1]}
+            # TODO: List may need its own node type with vertexes to item sentences
             #elif element[0] == "list":
             #    pass
             #elif element[0] == "list_item":
+            #    pass
+            # TODO: BlockQuote may need its own node type with vertexes to inner sentences
+            #elif element[0] == "block_quote":
             #    pass
             else:
                 logger.info(f"unsupported element type: {element[0]}")
@@ -347,7 +352,7 @@ class UserProfilingHandler(WebSocketReceiveEventHandler):
 
 
 def convert_chat_response_to_markdown_elements(chat_response: ChatResponse):
-    extractor = MarkdownExtractor()
+    extractor = MarkdownPageExtractor()
     mistune.create_markdown(renderer=extractor)(chat_response.content)
     return extractor.elements
 

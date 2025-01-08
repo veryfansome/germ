@@ -4,9 +4,9 @@ import asyncio
 import signal
 import traceback
 
-from bot.controllers.english import english_controller
+from bot.db.utils import db_stats_job
 from bot.graph.idea import idea_graph
-from db.utils import db_stats_job
+from bot.lang.controllers.english import english_controller
 from observability.logging import logging, setup_logging
 
 setup_logging()
