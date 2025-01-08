@@ -25,12 +25,17 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
 
     async def on_paragraph_merge(self, paragraph: str, paragraph_id: int):
         logger.info(f"on_paragraph_merge: paragraph_id={paragraph_id}, {paragraph}")
+        previous_sentence_id = None
         for sentence in split_to_sentences(paragraph):
-            # TODO: add proper HTML handling
-            await idea_graph.add_sentence(sentence)
+            _, sentence_id, _ = await idea_graph.add_sentence(sentence)
+            _ = asyncio.create_task(idea_graph.link_paragraph_to_sentence(paragraph_id, sentence_id))
+            if previous_sentence_id is not None:
+                _ = asyncio.create_task(
+                    idea_graph.link_sentence_to_previous_sentence(previous_sentence_id, sentence_id))
 
     async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_parameters):
         logger.info(f"on_sentence_merge: sentence_id={sentence_id}, {sentence_parameters}, {sentence}")
+        # TODO: add proper HTML handling
 
         # Get POS in the background
         pos_task = asyncio.create_task(run_in_threadpool(get_flair_pos_tags, sentence))

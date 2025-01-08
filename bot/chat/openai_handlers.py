@@ -200,8 +200,9 @@ class ResponseGraphingHandler(WebSocketSendEventHandler):
         }
 
     async def on_send(self,
-                      chat_session_id: int,
+                      chat_response_sent_id: int,
                       chat_response: ChatResponse,
+                      chat_session_id: int,
                       chat_request_received_id: int = None):
         elements = await run_in_threadpool(convert_chat_response_to_markdown_elements, chat_response)
         """
@@ -218,7 +219,11 @@ class ResponseGraphingHandler(WebSocketSendEventHandler):
         """
         last_element_type = None
         last_element_attrs = None
-        link_attrs = {"chat_session_id": chat_session_id, "chat_request_received_id": chat_request_received_id}
+        link_attrs = {
+            "chat_request_received_id": chat_request_received_id,
+            "chat_response_sent_id": chat_response_sent_id,
+            "chat_session_id": chat_session_id,
+        }
         for element in elements:
             logger.debug(f"markdown element: {element}")
             if element[0] == "paragraph":
@@ -238,12 +243,15 @@ class ResponseGraphingHandler(WebSocketSendEventHandler):
                 logger.info(f"unsupported element type: {element[0]}")
                 continue
 
-            if last_element_type and last_element_attrs:
-                await idea_graph.link_successive_elements(
+            _ = asyncio.create_task(idea_graph.link_page_element_to_chat_response(
+                self.node_types[element[0]], this_element_attrs, chat_response_sent_id))
+
+            if last_element_type is not None and last_element_attrs is not None:
+                _ = asyncio.create_task(idea_graph.link_successive_page_elements(
                     last_element_type, last_element_attrs,
                     self.node_types[element[0]], this_element_attrs,
-                    link_attrs)
-            # TODO: debug why the 1st paragraph can link to itself
+                    link_attrs))
+
             last_element_attrs = this_element_attrs
             last_element_type = self.node_types[element[0]]
 
@@ -300,7 +308,11 @@ class UserProfilingHandler(WebSocketReceiveEventHandler):
         for profile_name, profile_text in user_profile["profile"].items():
             profile_text = self.post_func(profile_text)
             processed_profile[profile_name] = profile_text
-            task = asyncio.create_task(idea_graph.add_sentence(profile_text))
+            _, sentence_id, _ = await idea_graph.add_sentence(profile_text)
+            _ = asyncio.create_task(
+                idea_graph.link_reactive_sentence_to_chat_request(chat_request_received_id, sentence_id))
+            # Get how many nodes are linked to session
+            # If first node, create starts link
         user_profile["profile"] = processed_profile
         for consumer in self.consumers:
             task = asyncio.create_task(

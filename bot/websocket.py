@@ -28,8 +28,9 @@ METRIC_CHAT_SESSIONS_IN_PROGRESS = Gauge(
 class WebSocketSendEventHandler(ABC):
     @abstractmethod
     async def on_send(self,
-                      chat_session_id: int,
+                      chat_response_sent_id: int,
                       chat_response: ChatResponse,
+                      chat_session_id: int,
                       chat_request_received_id: int = None):
         pass
 
@@ -44,21 +45,31 @@ class WebSocketSender:
 
     async def send_chat_response(self, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
-        task = asyncio.create_task(run_in_threadpool(
+        chat_response_sent_id = await run_in_threadpool(
             new_chat_response_sent, self.chat_session_id, chat_response,
-            chat_request_received_id=None))
+            chat_request_received_id=None)
+
+        _, time_occurred = await idea_graph.add_chat_response(chat_response_sent_id)
+        await idea_graph.link_chat_response_to_chat_session(chat_response_sent_id, self.chat_session_id, time_occurred)
+
         for handler in self.send_event_handlers:
-            task = asyncio.create_task(
-                handler.on_send(self.chat_session_id, chat_response))
+            _ = asyncio.create_task(
+                handler.on_send(chat_response_sent_id, chat_response, self.chat_session_id))
 
     async def return_chat_response(self, chat_request_received_id: int, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
-        task = asyncio.create_task(run_in_threadpool(
+        chat_response_sent_id = await run_in_threadpool(
             new_chat_response_sent, self.chat_session_id, chat_response,
-            chat_request_received_id=chat_request_received_id))
+            chat_request_received_id=chat_request_received_id)
+
+        _, time_occurred = await idea_graph.add_chat_response(chat_response_sent_id)
+        await idea_graph.link_chat_response_to_chat_request(
+            chat_request_received_id, chat_response_sent_id, self.chat_session_id, time_occurred)
+        await idea_graph.link_chat_response_to_chat_session(chat_response_sent_id, self.chat_session_id, time_occurred)
+
         for handler in self.send_event_handlers:
-            task = asyncio.create_task(
-                handler.on_send(self.chat_session_id, chat_response,
+            _ = asyncio.create_task(
+                handler.on_send(chat_response_sent_id, chat_response, self.chat_session_id,
                                 chat_request_received_id=chat_request_received_id))
 
 
@@ -143,11 +154,16 @@ class WebSocketConnectionManager:
     async def receive(self, chat_session_id: int):
         connection: WebSocket = self.active_connections[chat_session_id]
         chat_request = ChatRequest.parse_obj(await connection.receive_json())
+
         chat_request_received_id = await run_in_threadpool(
             new_chat_request_received, chat_session_id, chat_request)
+        _, time_occurred = await idea_graph.add_chat_request(chat_request_received_id)
+        _ = asyncio.create_task(
+            idea_graph.link_chat_request_to_chat_session(chat_request_received_id, chat_session_id, time_occurred))
+
         ws_sender = WebSocketSender(chat_session_id, connection, send_event_handlers=self.send_event_handlers)
         for handler in self.receive_event_handlers:
-            task = asyncio.create_task(
+            _ = asyncio.create_task(
                 handler.on_receive(chat_session_id, chat_request_received_id, chat_request, ws_sender))
 
 

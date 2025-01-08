@@ -42,14 +42,36 @@ class IdeaGraph:
         self.paragraph_merge_event_handlers: list[ParagraphMergeEventHandler] = []
         self.sentence_merge_event_handlers: list[SentenceMergeEventHandler] = []
 
-    async def add_chat_session(self, chat_session_id: str):
+    async def add_chat_request(self, chat_request_received_id: int):
+        time_occurred = round_time_now_down_to_nearst_interval()
+        results = await self.driver.query("""
+        MERGE (chatRequest:ChatRequest {chat_request_received_id: $chat_request_received_id, time_occurred: $time_occurred})
+        RETURN chatRequest
+        """, {
+            "chat_request_received_id": chat_request_received_id, "time_occurred": time_occurred,
+        })
+        logger.info(f"request: {results}")
+        return results, time_occurred
+
+    async def add_chat_response(self, chat_response_sent_id: int):
+        time_occurred = round_time_now_down_to_nearst_interval()
+        results = await self.driver.query("""
+        MERGE (chatResponse:ChatResponse {chat_response_sent_id: $chat_response_sent_id, time_occurred: $time_occurred})
+        RETURN chatResponse
+        """, {
+            "chat_response_sent_id": chat_response_sent_id, "time_occurred": time_occurred,
+        })
+        logger.info(f"response: {results}")
+        return results, time_occurred
+
+    async def add_chat_session(self, chat_session_id: int):
         results = await self.driver.query("""
         MERGE (chatSession:ChatSession {chat_session_id: $chat_session_id, time_started: $time_started})
         RETURN chatSession
         """, {
             "chat_session_id": chat_session_id, "time_started": round_time_now_down_to_nearst_interval()
         })
-        logger.info(f"chat session: {results}")
+        logger.info(f"session: {results}")
         return results
 
     async def add_code_block(self, code_block: str, language: str = None):
@@ -69,10 +91,12 @@ class IdeaGraph:
                     await rdb_session.commit()
 
         graph_results = await self.driver.query("""
-        MERGE (code_block:CodeBlock {code_block_id: $code_block_id, language: $language})
+        MERGE (code_block:CodeBlock {text: $text, language: $language, code_block_id: $code_block_id})
         RETURN code_block
         """, {
-            "code_block_id": rdb_record.code_block_id, "language": language,
+            "text": code_block,
+            "language": language,
+            "code_block_id": rdb_record.code_block_id,
         })
         logger.info(f"code block: {graph_results}")
         async_tasks = []
@@ -176,10 +200,11 @@ class IdeaGraph:
                     await rdb_session.commit()
 
         graph_results = await self.driver.query("""
-        MERGE (paragraph:Paragraph {paragraph_id: $paragraph_id})
+        MERGE (paragraph:Paragraph {text: $text, paragraph_id: $paragraph_id})
         RETURN paragraph
         """, {
-            "paragraph_id": rdb_record.paragraph_id
+            "text": paragraph,
+            "paragraph_id": rdb_record.paragraph_id,
         })
         logger.info(f"paragraph: {graph_results}")
         async_tasks = []
@@ -312,6 +337,45 @@ class IdeaGraph:
             """)
         return semantic_category_results
 
+    async def link_chat_request_to_chat_session(self, chat_request_received_id: int, chat_session_id: int, time_occurred):
+        results = await self.driver.query("""
+        MATCH (req:ChatRequest {chat_request_received_id: $chat_request_received_id}), (session:ChatSession {chat_session_id: $chat_session_id})
+        MERGE (session)-[r:RECEIVED {time_occurred: $time_occurred}]->(req)
+        RETURN r
+        """, {
+            "chat_request_received_id": chat_request_received_id, "chat_session_id": chat_session_id,
+            "time_occurred": time_occurred,
+
+        })
+        logger.info(f"request/session link: {results}")
+        return results
+
+    async def link_chat_response_to_chat_request(self, chat_request_received_id: int, chat_response_sent_id: int,
+                                                 chat_session_id: int, time_occurred):
+        results = await self.driver.query("""
+        MATCH (req:ChatRequest {chat_request_received_id: $chat_request_received_id}), (resp:ChatResponse {chat_response_sent_id: $chat_response_sent_id})
+        MERGE (resp)-[r:REACTS_TO {chat_session_id: $chat_session_id, time_occurred: $time_occurred}]->(req)
+        RETURN r
+        """, {
+            "chat_request_received_id": chat_request_received_id, "chat_response_sent_id": chat_response_sent_id,
+            "chat_session_id": chat_session_id, "time_occurred": time_occurred
+        })
+        logger.info(f"request/response link: {results}")
+        return results
+
+    async def link_chat_response_to_chat_session(self, chat_response_sent_id: int, chat_session_id: int, time_occurred):
+        results = await self.driver.query("""
+        MATCH (resp:ChatResponse {chat_response_sent_id: $chat_response_sent_id}), (session:ChatSession {chat_session_id: $chat_session_id})
+        MERGE (session)-[r:SENT {time_occurred: $time_occurred}]->(resp)
+        RETURN r
+        """, {
+            "chat_response_sent_id": chat_response_sent_id, "chat_session_id": chat_session_id,
+            "time_occurred": time_occurred,
+
+        })
+        logger.info(f"response/session link: {results}")
+        return results
+
     async def link_noun_form_to_sentence(self, noun: str, form: str, tag: str, sentence_id: int):
         results = await self.driver.query(f"""
         MATCH (noun:Noun {{text: $noun}}), (sentence:Sentence {{sentence_id: $sentence_id}})
@@ -332,6 +396,31 @@ class IdeaGraph:
             })
         logger.info(f"noun type link: {semantic_category_link_record}")
         return semantic_category_link_record
+
+    async def link_page_element_to_chat_response(self, element_type: str, element_attrs,
+                                                 chat_response_sent_id: int):
+        element_attrs_expr = ", ".join([f"{k}: ${k}" for k in element_attrs.keys()])
+        results = await self.driver.query(f"""
+        MATCH (element:{element_type} {{{element_attrs_expr}}}), (resp:ChatResponse {{chat_response_sent_id: $chat_response_sent_id}})
+        MERGE (resp)-[r:CONTAINS]->(element)
+        RETURN r
+        """, {
+            "chat_response_sent_id": chat_response_sent_id,
+            **element_attrs,
+        })
+        logger.info(f"element/response link: {results}")
+        return results
+
+    async def link_paragraph_to_sentence(self, paragraph_id: int, sentence_id: int):
+        results = await self.driver.query("""
+        MATCH (paragraph:Paragraph {paragraph_id: $paragraph_id}), (sentence:Sentence {sentence_id: $sentence_id})
+        MERGE (paragraph)-[r:CONTAINS]->(sentence)
+        RETURN r
+        """, {
+            "paragraph_id": paragraph_id, "sentence_id": sentence_id
+        })
+        logger.info(f"sentence/paragraph link: {results}")
+        return results
 
     async def link_pos_tag_to_last_pos_tag(self, tag: str, tag_idx: int, last_tag: str, last_tag_idx: int, sentence_id: int):
         results = await self.driver.query("""
@@ -356,19 +445,42 @@ class IdeaGraph:
         logger.info(f"proper_noun link: {results}")
         return results
 
-    async def link_successive_elements(self, predecessor_type: str, predecessor_attrs,
-                                       successor_type: str, successor_attrs, link_attrs):
+    async def link_reactive_sentence_to_chat_request(self, chat_request_received_id: int, sentence_id: int):
+        results = await self.driver.query("""
+        MATCH (req:ChatRequest {chat_request_received_id: $chat_request_received_id}), (sentence:Sentence {sentence_id: $sentence_id})
+        MERGE (sentence)-[r:REACTS_TO]->(req)
+        RETURN r
+        """, {
+            "chat_request_received_id": chat_request_received_id, "sentence_id": sentence_id
+        })
+        logger.info(f"sentence/request link: {results}")
+        return results
+
+    async def link_sentence_to_previous_sentence(self, previous_sentence_id: int, sentence_id: int):
+        results = await self.driver.query("""
+        MATCH (prev:Sentence {sentence_id: $previous_sentence_id}), (this:Sentence {sentence_id: $sentence_id})
+        MERGE (prev)-[r:PRECEDES]->(this)
+        RETURN r
+        """, {
+            "previous_sentence_id": previous_sentence_id, "sentence_id": sentence_id,
+
+        })
+        logger.info(f"sentence/previous link: {results}")
+        return results
+
+    async def link_successive_page_elements(self, predecessor_type: str, predecessor_attrs,
+                                            successor_type: str, successor_attrs, link_attrs):
         link_attrs_expr = ", ".join([f"{k}: ${k}" for k in link_attrs.keys()])
-        predecessor_attrs_expr = ", ".join([f"{k}: ${k}" for k in predecessor_attrs.keys()])
-        successor_attrs_expr = ", ".join([f"{k}: ${k}" for k in successor_attrs.keys()])
+        predecessor_attrs_expr = ", ".join([f"{k}: $predecessor_{k}" for k in predecessor_attrs.keys()])
+        successor_attrs_expr = ", ".join([f"{k}: $successor_{k}" for k in successor_attrs.keys()])
         results = await self.driver.query(f"""
         MATCH (predecessor:{predecessor_type} {{{predecessor_attrs_expr}}}), (successor:{successor_type} {{{successor_attrs_expr}}})
         MERGE (predecessor)-[r:PRECEDES {{{link_attrs_expr}}}]->(successor)
         RETURN r
         """, {
             **link_attrs,
-            **predecessor_attrs,
-            **successor_attrs,
+            **{f"predecessor_{k}": v for k, v in predecessor_attrs.items()},
+            **{f"successor_{k}": v for k, v in successor_attrs.items()},
         })
         logger.info(f"successive element link: {results}")
         return results
