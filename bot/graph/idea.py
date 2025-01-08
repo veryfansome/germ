@@ -1,11 +1,11 @@
-import asyncio
-import signal
-import uuid
 from abc import ABC, abstractmethod
 from asyncio import Task
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.future import select as sql_select
 from starlette.concurrency import run_in_threadpool
+import asyncio
+import signal
+import uuid
 
 from bot.graph.noun import default_semantic_categories
 from bot.lang.classifiers import get_sentence_classifier, split_to_sentences

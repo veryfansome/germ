@@ -1,10 +1,10 @@
-import difflib
-import json
-import re
 from flair.data import Sentence
 from flair.models import SequenceTagger
 from nltk.tokenize import sent_tokenize
 from openai import OpenAI
+import difflib
+import json
+import re
 
 from bot.graph.noun import default_semantic_categories
 from observability.logging import logging

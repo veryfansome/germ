@@ -1,12 +1,12 @@
-import asyncio
-import json
-import logging
-import mistune
 from abc import ABC, abstractmethod
 from openai import OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 from starlette.concurrency import run_in_threadpool
 from typing import Callable, Optional
+import asyncio
+import json
+import logging
+import mistune
 
 from api.models import ChatRequest, ChatResponse
 from bot.graph.idea import idea_graph

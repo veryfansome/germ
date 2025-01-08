@@ -1,6 +1,6 @@
+from starlette.concurrency import run_in_threadpool
 import asyncio
 import inflect
-from starlette.concurrency import run_in_threadpool
 
 from bot.graph.idea import CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler, idea_graph
 from bot.lang.classifiers import (

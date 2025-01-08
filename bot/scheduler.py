@@ -1,8 +1,8 @@
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import argparse
 import asyncio
 import signal
 import traceback
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot.controllers.english import english_controller
 from bot.graph.idea import idea_graph

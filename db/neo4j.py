@@ -1,8 +1,8 @@
+from neo4j import AsyncGraphDatabase, GraphDatabase
 import asyncio
 import os
 import time
 import uuid
-from neo4j import AsyncResult, AsyncGraphDatabase, GraphDatabase
 
 from observability.logging import logging
 from settings.germ_settings import NEO4J_HOST, UUID5_NS
