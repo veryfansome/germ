@@ -24,9 +24,18 @@ async def strip_html_elements(soup: BeautifulSoup, tag: str = None):
             text_elements.append("[oops]")  # Placeholder
             html_elements[idx] = element
     for idx, element in html_elements.items():
+        # TODO: If hyperlink:
+        #       - Add a hyperlink node.
+        #       - Make a decision about what to do with inner text, which may contain non POS elements like addresses.
+
         if element.find():  # Has inner elements
             logger.info(f"found <{element.name}>, with inner elements: {element}")
-            text_elements[idx] = await strip_html_elements(element)
+            inner_string = await strip_html_elements(element)
+            # TODO: Check inner string:
+            #       - Keep meaningful text
+            #       - Strip non-meaningful text and replace with something like "Hyperlink", implying a connection to
+            #         a Hyperlink node in the graph.
+            text_elements[idx] = inner_string
         else:  # Doesn't have inner elements
             logger.info(f"stripped <{element.name}>, kept inner string: {element.string}")
             text_elements[idx] = element.string if element.string else ""
@@ -63,9 +72,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
 
     async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_parameters):
         logger.info(f"on_sentence_merge: sentence_id={sentence_id}, {sentence_parameters}, {sentence}")
-        return
-
-        # TODO: add proper HTML handling
+        return  # TODO: Remove me
 
         # Get POS in the background
         pos_task = asyncio.create_task(run_in_threadpool(get_flair_pos_tags, sentence))
