@@ -1,3 +1,4 @@
+from bs4 import BeautifulSoup
 from starlette.concurrency import run_in_threadpool
 import asyncio
 import inflect
@@ -13,6 +14,25 @@ inflect_engine = inflect.engine()
 logger = logging.getLogger(__name__)
 
 
+async def strip_html_elements(soup: BeautifulSoup, tag: str = None):
+    text_elements = []
+    html_elements = {}
+    for idx, element in enumerate(soup.find_all() if tag is None else soup.find(tag)):
+        if element.name is None:  # This is just text
+            text_elements.append(element.string)
+        else:
+            text_elements.append("[oops]")  # Placeholder
+            html_elements[idx] = element
+    for idx, element in html_elements.items():
+        if element.find():  # Has inner elements
+            logger.info(f"found <{element.name}>, with inner elements: {element}")
+            text_elements[idx] = await strip_html_elements(element)
+        else:  # Doesn't have inner elements
+            logger.info(f"stripped <{element.name}>, kept inner string: {element.string}")
+            text_elements[idx] = element.string if element.string else ""
+    return ''.join(text_elements)
+
+
 class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler):
     def __init__(self, interval_seconds: int = 30):
         self.interval_seconds = interval_seconds
@@ -26,21 +46,23 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
 
     async def on_paragraph_merge(self, paragraph: str, paragraph_id: int):
         logger.info(f"on_paragraph_merge: paragraph_id={paragraph_id}, {paragraph}")
-        previous_sentence_id = None
-        for sentence in split_to_sentences(paragraph):
-            _, sentence_id, _ = await idea_graph.add_sentence(sentence)
-            _ = asyncio.create_task(idea_graph.link_paragraph_to_sentence(paragraph_id, sentence_id))
-            if previous_sentence_id is not None:
-                _ = asyncio.create_task(
-                    idea_graph.link_sentence_to_previous_sentence(previous_sentence_id, sentence_id))
+
+        paragraph_soup = await run_in_threadpool(get_html_parser, f"<p>{paragraph}</p>")
+        paragraph_text = await strip_html_elements(paragraph_soup, "p")
+        logger.info(f"paragraph_text: {paragraph_text}")
+        if not paragraph_text:
+            return
+
+       # previous_sentence_id = None
+       # for sentence in split_to_sentences(paragraph):
+       #     _, sentence_id, _ = await idea_graph.add_sentence(sentence)
+       #     _ = asyncio.create_task(idea_graph.link_paragraph_to_sentence(paragraph_id, sentence_id))
+       #     if previous_sentence_id is not None:
+       #         _ = asyncio.create_task(
+       #             idea_graph.link_sentence_to_previous_sentence(previous_sentence_id, sentence_id))
 
     async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_parameters):
         logger.info(f"on_sentence_merge: sentence_id={sentence_id}, {sentence_parameters}, {sentence}")
-        sentence_parser = await run_in_threadpool(get_html_parser, f"<p>{sentence}</p>")
-        for element in sentence_parser.find("p"):
-            logger.info(f"element name: {element.name}")
-            logger.info(f"element: {element}")
-            logger.info(f"element: {element.string.strip()}")
         return
 
         # TODO: add proper HTML handling

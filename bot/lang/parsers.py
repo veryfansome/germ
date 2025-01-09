@@ -51,5 +51,5 @@ def extract_large_html_elements(text: str):
     return extractor.elements
 
 
-def get_html_parser(text):
+def get_html_parser(text) -> BeautifulSoup:
     return BeautifulSoup(text, 'html.parser')
