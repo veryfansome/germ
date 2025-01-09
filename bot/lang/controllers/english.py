@@ -3,6 +3,7 @@ import asyncio
 import inflect
 
 from bot.graph.idea import CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler, idea_graph
+from bot.lang.parsers import get_html_parser
 from bot.lang.classifiers import (
     ADJECTIVE_POS_TAGS, ADVERB_POS_TAGS, NOUN_POS_TAGS, PRONOUN_POS_TAGS, VERB_POS_TAGS,
     get_flair_pos_tags, split_to_sentences)
@@ -35,6 +36,13 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
 
     async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_parameters):
         logger.info(f"on_sentence_merge: sentence_id={sentence_id}, {sentence_parameters}, {sentence}")
+        sentence_parser = await run_in_threadpool(get_html_parser, f"<p>{sentence}</p>")
+        for element in sentence_parser.find("p"):
+            logger.info(f"element name: {element.name}")
+            logger.info(f"element: {element}")
+            logger.info(f"element: {element.string.strip()}")
+        return
+
         # TODO: add proper HTML handling
 
         # Get POS in the background

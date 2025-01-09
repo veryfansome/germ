@@ -6,11 +6,10 @@ from typing import Callable, Optional
 import asyncio
 import json
 import logging
-import mistune
 
 from bot.api.models import ChatRequest, ChatResponse
 from bot.graph.idea import idea_graph
-from bot.lang.markdown_extractor import MarkdownPageExtractor
+from bot.lang.parsers import extract_large_html_elements
 from bot.websocket import WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender
 from observability.annotations import measure_exec_seconds
 from settings.openai_settings import (DEFAULT_CHAT_MODEL, DEFAULT_MINI_MODEL, DEFAULT_ROUTING_MODEL,
@@ -43,7 +42,7 @@ class ChatModelEventHandler(RoutableChatEventHandler):
                 "name": self.function_name,
                 "description": " ".join((
                     f"Use {model} to generate a reply if the user asks for {model}",
-                    f"or if conversation is not banter.",
+                    f"or if conversation is intellectual or technical in nature.",
                 )),
                 "parameters": {},
             },
@@ -194,7 +193,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
 class ResponseGraphingHandler(WebSocketSendEventHandler):
     def __init__(self):
         self.node_types = {
-            "code_block": "CodeBlock",
+            "block_code": "CodeBlock",
             "header": "Header",
             "paragraph": "Paragraph",
         }
@@ -204,7 +203,7 @@ class ResponseGraphingHandler(WebSocketSendEventHandler):
                       chat_response: ChatResponse,
                       chat_session_id: int,
                       chat_request_received_id: int = None):
-        elements = await run_in_threadpool(convert_chat_response_to_markdown_elements, chat_response)
+        elements = await run_in_threadpool(extract_large_html_elements, chat_response.content)
         """
         ('header', 1, 'Heading 1')
         ('paragraph', 'This is a paragraph with some text.')
@@ -230,7 +229,7 @@ class ResponseGraphingHandler(WebSocketSendEventHandler):
             if element[0] == "paragraph":
                 _, paragraph_id, _ = await idea_graph.add_paragraph(element[1])
                 this_element_attrs = {"paragraph_id": paragraph_id}
-            elif element[0] == "code_block":
+            elif element[0] == "block_code":
                 _, code_block_id, _ = await idea_graph.add_code_block(element[2], language=element[1])
                 this_element_attrs = {"code_block_id": code_block_id}
             elif element[0] == "header":
@@ -349,12 +348,6 @@ class UserProfilingHandler(WebSocketReceiveEventHandler):
 
 ##
 # Functions
-
-
-def convert_chat_response_to_markdown_elements(chat_response: ChatResponse):
-    extractor = MarkdownPageExtractor()
-    mistune.create_markdown(renderer=extractor)(chat_response.content)
-    return extractor.elements
 
 
 @measure_exec_seconds(use_logging=True, use_prometheus=True)
