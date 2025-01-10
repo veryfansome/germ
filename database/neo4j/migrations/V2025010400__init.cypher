@@ -33,6 +33,10 @@ CREATE CONSTRAINT     FOR (semanticCategory:SemanticCategory)  REQUIRE semanticC
 CREATE CONSTRAINT     FOR (sentence:Sentence)                  REQUIRE sentence.text                         IS UNIQUE;
 // Corresponds with VB, base form
 CREATE CONSTRAINT     FOR (verb:Verb)                          REQUIRE verb.text                             IS UNIQUE;
+//
+CREATE CONSTRAINT     FOR (webDomain:WebDomain)                REQUIRE webDomain.name                        IS UNIQUE;
+//
+CREATE CONSTRAINT     FOR (webDomain:WebDomain)                REQUIRE webDomain.proper_noun                 IS UNIQUE;
 
 //
 CREATE INDEX          FOR (noun:Noun)                          ON noun.forms;

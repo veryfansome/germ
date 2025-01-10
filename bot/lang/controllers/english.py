@@ -1,5 +1,7 @@
 from bs4 import BeautifulSoup
+from copy import deepcopy
 from starlette.concurrency import run_in_threadpool
+from typing import Any
 import asyncio
 import inflect
 
@@ -23,23 +25,34 @@ async def strip_html_elements(soup: BeautifulSoup, tag: str = None):
         else:
             text_elements.append("[oops]")  # Placeholder
             html_elements[idx] = element
+    # Iterate through elements to write over the placeholders
+    element_artifacts = list(html_elements.values())
     for idx, element in html_elements.items():
-        # TODO: If hyperlink:
-        #       - Add a hyperlink node.
-        #       - Make a decision about what to do with inner text, which may contain non POS elements like addresses.
-
         if element.find():  # Has inner elements
             logger.info(f"found <{element.name}>, with inner elements: {element}")
-            inner_string = await strip_html_elements(element)
-            # TODO: Check inner string:
-            #       - Keep meaningful text
-            #       - Strip non-meaningful text and replace with something like "Hyperlink", implying a connection to
-            #         a Hyperlink node in the graph.
+            inner_string, inner_artifacts = await strip_html_elements(element)
+            if inner_artifacts:
+                element_artifacts += inner_artifacts
+
+            if element.name == "a":
+                logger.info(f"href: {element['href']}")
+                # TODO: - Replace inner_string
+                #       - Use some alphabetical hash based on the domain, with the first letter upper cased so that the
+                #         word would be seen as a proper noun by the POS tagger.
+                #       - Use regex to capture [\s]*[\w]+\.[\w]+[^\s]*
+                #       - Capture protocol, path, and params if any
+                #       - Do a domain resolution against captured domain string to see
+                #       - But it could also be a local link so we'll have to be careful.
+                pass
+
             text_elements[idx] = inner_string
         else:  # Doesn't have inner elements
             logger.info(f"stripped <{element.name}>, kept inner string: {element.string}")
+            if element.name == "a":
+                # TODO: Same as above
+                pass
             text_elements[idx] = element.string if element.string else ""
-    return ''.join(text_elements)
+    return ''.join(text_elements), element_artifacts
 
 
 class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler):
@@ -57,8 +70,16 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         logger.info(f"on_paragraph_merge: paragraph_id={paragraph_id}, {paragraph}")
 
         paragraph_soup = await run_in_threadpool(get_html_parser, f"<p>{paragraph}</p>")
-        paragraph_text = await strip_html_elements(paragraph_soup, "p")
+        paragraph_text, paragraph_elements = await strip_html_elements(paragraph_soup, "p")
         logger.info(f"paragraph_text: {paragraph_text}")
+        for element in paragraph_elements:
+            logger.info(f"paragraph_element: {element}")
+            # TODO: If hyperlink:
+            #       - Merge a Domain.
+            #       - Hash from above and the actual domain name should be attributes of this node.
+            #       - Add the protocol, path, and parameters on the vertexes to the paragraph
+            #       - Add inner text as a vertex attribute
+
         if not paragraph_text:
             return
 
@@ -72,11 +93,12 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
 
     async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_parameters):
         logger.info(f"on_sentence_merge: sentence_id={sentence_id}, {sentence_parameters}, {sentence}")
-        return  # TODO: Remove me
 
         # Get POS in the background
         pos_task = asyncio.create_task(run_in_threadpool(get_flair_pos_tags, sentence))
+        logger.info(f"pos_tags: {await pos_task}")
 
+        return  # TODO: Remove me
         # TODO: is sorting by connections enough or should we also care about how many are recent?
         # Query semantic categories from graph, sorted by most connections
         semantic_categories = [t["semanticCategory"]["text"] for t in await idea_graph.get_semantic_category_desc_by_connections()]

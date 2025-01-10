@@ -160,6 +160,16 @@ class IdeaGraph:
         logger.info(f"header: {results}")
         return results
 
+    async def add_hyperlink(self, html_tag: str, url: str):
+        results = await self.driver.query("""
+        MERGE (hyperlink:Hyperlink {url: $url, html_tag: $html_tag})
+        RETURN hyperlink
+        """, {
+            "html_tag": html_tag, "url": url,
+        })
+        logger.info(f"header: {results}")
+        return results
+
     async def add_noun_form(self, noun: str, form: str):
         results = await self.driver.query("""
         MERGE (noun:Noun {text: $noun})
