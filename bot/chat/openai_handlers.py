@@ -9,7 +9,7 @@ import logging
 
 from bot.api.models import ChatRequest, ChatResponse
 from bot.graph.idea import idea_graph
-from bot.lang.parsers import extract_large_html_elements
+from bot.lang.parsers import extract_markdown_page_elements
 from bot.websocket import WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender
 from observability.annotations import measure_exec_seconds
 from settings.openai_settings import (DEFAULT_CHAT_MODEL, DEFAULT_MINI_MODEL, DEFAULT_ROUTING_MODEL,
@@ -203,7 +203,7 @@ class ResponseGraphingHandler(WebSocketSendEventHandler):
                       chat_response: ChatResponse,
                       chat_session_id: int,
                       chat_request_received_id: int = None):
-        elements = await run_in_threadpool(extract_large_html_elements, chat_response.content)
+        elements = await run_in_threadpool(extract_markdown_page_elements, chat_response.content)
         """
         ('header', 1, 'Heading 1')
         ('paragraph', 'This is a paragraph with some text.')

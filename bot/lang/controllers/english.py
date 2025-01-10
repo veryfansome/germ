@@ -1,12 +1,10 @@
 from bs4 import BeautifulSoup
-from copy import deepcopy
 from starlette.concurrency import run_in_threadpool
-from typing import Any
 import asyncio
 import inflect
 
 from bot.graph.idea import CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler, idea_graph
-from bot.lang.parsers import get_html_parser
+from bot.lang.parsers import get_html_soup, strip_html_elements
 from bot.lang.classifiers import (
     ADJECTIVE_POS_TAGS, ADVERB_POS_TAGS, NOUN_POS_TAGS, PRONOUN_POS_TAGS, VERB_POS_TAGS,
     get_flair_pos_tags, split_to_sentences)
@@ -14,45 +12,6 @@ from observability.logging import logging, setup_logging
 
 inflect_engine = inflect.engine()
 logger = logging.getLogger(__name__)
-
-
-async def strip_html_elements(soup: BeautifulSoup, tag: str = None):
-    text_elements = []
-    html_elements = {}
-    for idx, element in enumerate(soup.find_all() if tag is None else soup.find(tag)):
-        if element.name is None:  # This is just text
-            text_elements.append(element.string)
-        else:
-            text_elements.append("[oops]")  # Placeholder
-            html_elements[idx] = element
-    # Iterate through elements to write over the placeholders
-    element_artifacts = list(html_elements.values())
-    for idx, element in html_elements.items():
-        if element.find():  # Has inner elements
-            logger.info(f"found <{element.name}>, with inner elements: {element}")
-            inner_string, inner_artifacts = await strip_html_elements(element)
-            if inner_artifacts:
-                element_artifacts += inner_artifacts
-
-            if element.name == "a":
-                logger.info(f"href: {element['href']}")
-                # TODO: - Replace inner_string
-                #       - Use some alphabetical hash based on the domain, with the first letter upper cased so that the
-                #         word would be seen as a proper noun by the POS tagger.
-                #       - Use regex to capture [\s]*[\w]+\.[\w]+[^\s]*
-                #       - Capture protocol, path, and params if any
-                #       - Do a domain resolution against captured domain string to see
-                #       - But it could also be a local link so we'll have to be careful.
-                pass
-
-            text_elements[idx] = inner_string
-        else:  # Doesn't have inner elements
-            logger.info(f"stripped <{element.name}>, kept inner string: {element.string}")
-            if element.name == "a":
-                # TODO: Same as above
-                pass
-            text_elements[idx] = element.string if element.string else ""
-    return ''.join(text_elements), element_artifacts
 
 
 class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler):
@@ -69,7 +28,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
     async def on_paragraph_merge(self, paragraph: str, paragraph_id: int):
         logger.info(f"on_paragraph_merge: paragraph_id={paragraph_id}, {paragraph}")
 
-        paragraph_soup = await run_in_threadpool(get_html_parser, f"<p>{paragraph}</p>")
+        paragraph_soup = await run_in_threadpool(get_html_soup, f"<p>{paragraph}</p>")
         paragraph_text, paragraph_elements = await strip_html_elements(paragraph_soup, "p")
         logger.info(f"paragraph_text: {paragraph_text}")
         for element in paragraph_elements:
