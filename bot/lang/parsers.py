@@ -12,6 +12,8 @@ from bot.data.iana import IanaTLDCacher
 
 logger = logging.getLogger(__name__)
 
+iana_data = IanaTLDCacher()
+
 
 class MarkdownPageElementExtractor(mistune.HTMLRenderer):
     def __init__(self):
@@ -129,7 +131,7 @@ def extract_href_features(href: str):
                 artifacts["fqdn"] = "relative"  # Probably
             else:
                 # Things that look like fqdns can actually be files
-                if matched_blob.split(".")[-1] in IanaTLDCacher().known_tlds:
+                if iana_data.is_possible_public_fqdn(matched_blob):
                     artifacts["fqdn"] = matched_blob
                 else:
                     guessed_mimetype, _ = mimetypes.guess_type(matched_blob)
@@ -137,7 +139,7 @@ def extract_href_features(href: str):
                         artifacts["fqdn"] = "relative"
                         artifacts["path"] = matched_blob
                     else:
-                        artifacts["fqdn"] = matched_blob
+                        return {**artifacts, **{"skipped": True, "reason": "unexpected_pattern"}}
                 href = href[len(matched_blob):]
         else:
             artifacts["fqdn"] = "relative"
