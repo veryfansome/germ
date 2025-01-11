@@ -7,82 +7,9 @@ import os
 import re
 import socket
 
+from bot.data.iana import IanaTLDCacher
+
 logger = logging.getLogger(__name__)
-
-
-class DomainNameValidator:
-    def __init__(self):
-        self.known_tlds = {  # TODO: Persist in DB and add to this list automatically over time
-            # Infra
-            "arpa",
-
-            # Country TLDs
-            "ac", "ad", "ae", "af", "ag", "ai", "al", "am", "ao", "aq", "ar", "as", "at", "au", "aw", "ax", "az",
-            "ba", "bb", "bd", "be", "bf", "bg", "bh", "bi", "bj", "bm", "bn", "bo", "bq", "br", "bs", "bt", "bw", "by",
-            "bz",
-            "ca", "cc", "cd", "cf", "cg", "ch", "ci", "ck", "cl", "cm", "cn", "co", "cr", "cu", "cv", "cw", "cx", "cy",
-            "cz",
-            "de", "dj", "dk", "dm", "do", "dz",
-            "ec", "ee", "eg", "eh", "er", "es", "et", "eu",
-            "fi", "fj", "fk", "fm", "fo", "fr",
-            "ga", "gd", "ge", "gf", "gg", "gh", "gi", "gl", "gm", "gn", "gp", "gq", "gs", "gt", "gu", "gw", "gy",
-            "hk", "hm", "hn", "hr", "ht", "hu",
-            "id", "ie", "il", "im", "in", "io", "iq", "ir", "is", "it",
-            "je", "jm", "jo", "jp",
-            "ke", "kg", "kh", "ki", "km", "kn", "kp", "kr", "kw", "ky", "kz",
-            "la", "lb", "lc", "li", "lk", "lr", "ls", "lt", "lu", "lv", "ly",
-            "ma", "mc", "md", "me", "mg", "mh", "mk", "ml", "mm", "mn", "mo", "mp", "mq", "mr", "ms", "mt", "mu", "mv",
-            "mw", "mx", "my", "mz",
-            "na", "nc", "ne", "nf", "ng", "ni", "nl", "no", "np", "nr", "nu", "nz",
-            "om", "pa", "pe", "pf", "pg", "ph", "pk", "pl", "pm", "pn", "pr", "ps", "pt", "pw", "py",
-            "qa",
-            "re", "ro", "rs", "ru", "rw",
-            "sa", "sb", "sc", "sd", "se", "sg", "sh", "si", "sk", "sl", "sm", "sn", "so", "sr", "ss", "st", "su", "sv",
-            "sx", "sy", "sz",
-            "tc", "td", "tf", "tg", "th", "tj", "tk", "tl", "tm", "tn", "to", "tr", "tt", "tv", "tw", "tz",
-            "ua", "ug", "uk", "us", "uy", "uz",
-            "va", "vc", "ve", "vg", "vi", "vn", "vu",
-            "wf", "ws",
-            "ye", "yt",
-            "za", "zm", "zw",
-
-            # Generic TLDs
-            "academy", "accountant", "accountants", "active", "actor", "ads", "adult", "aero", "africa", "agency",
-            "airforce", "amazon", "amex", "analytics", "apartments", "app", "apple", "archi", "army", "art", "arte",
-            "associates", "attorney", "auction", "audible", "audio", "author", "auto", "autos", "aws",
-
-            "baby",
-            "band",
-            "bank",
-            "bar",
-            "barefoot",
-            "bargains",
-            "baseball",
-            "basketball",
-            "beauty",
-            "biz",
-            "blog",
-            "co",
-            "com",
-            "design",
-            "dev",
-            "info",
-            "me",
-            "net",
-            "online",
-            "org",
-            "site",
-            "store",
-            "tech",
-            "xyz",
-
-            "coop",
-            "edu",
-            "gov",
-            "int",
-            "mil",
-            "museum",
-        }
 
 
 class MarkdownPageElementExtractor(mistune.HTMLRenderer):
@@ -164,9 +91,9 @@ def extract_href_features(href: str):
     # After this point, everything "should" be domain, port, path and/or params
 
     if "scheme" in artifacts and artifacts["scheme"] == "file":
-        filename_match = re.search(r"^(?P<path>(/C:)?[a-zA-Z0-9/._~%-]+)", href)
-        if filename_match:
-            artifacts["path"] = filename_match.group("path")
+        file_path_match = re.search(r"^(?P<path>(/C:)?[a-zA-Z0-9/._~%-]+)", href)
+        if file_path_match:
+            artifacts["path"] = file_path_match.group("path")
             artifacts["path_exists"] = os.path.exists(artifacts["path"])
             if artifacts["path_exists"]:
                 artifacts["path_is_dir"] = os.path.isdir(artifacts["path"])
@@ -201,15 +128,38 @@ def extract_href_features(href: str):
                 artifacts["domain"] = "relative"  # Probably
             else:
                 # Things that look like domains can actually be files
-                guessed_mimetype, _ = mimetypes.guess_type(matched_blob)
-                if guessed_mimetype:
-                    artifacts["domain"] = "relative"
-                    artifacts["path"] = matched_blob
-                else:
+                if matched_blob.split(".")[-1] in IanaTLDCacher().known_tlds:
                     artifacts["domain"] = matched_blob
+                else:
+                    guessed_mimetype, _ = mimetypes.guess_type(matched_blob)
+                    if guessed_mimetype:
+                        artifacts["domain"] = "relative"
+                        artifacts["path"] = matched_blob
+                    else:
+                        artifacts["domain"] = matched_blob
                 href = href[len(matched_blob):]
+        else:
+            artifacts["domain"] = "relative"
 
-    #print(href)
+        port_match = re.search(r"^(?P<port>:\d{,5}(?=[/?#]?))", href)
+        # (?P<port>...): Named capturing group for the port.
+        # :\d{,5}: Colon and up to five digits
+        # (?=[/?#]?): A positive lookahead for possible end of port characters
+        if port_match:
+            artifacts["port"] = port_match.group("port")
+            href = href[len(artifacts["port"]):]
+
+        url_path_match = re.search(r"^(?P<path>[a-zA-Z0-9/._~%-]+)(?=[?#]?)", href)
+        # (?P<path>...): Named capturing group for the path.
+        # [a-zA-Z0-9/._~%-]+): Capture consecutive valid path characters
+        # (?=[?#]?): A positive lookahead for possible end of path characters
+        if url_path_match:
+            artifacts["path"] = url_path_match.group("path")
+            href = href[len(artifacts["path"]):]
+
+    # If anything's left, it'll be the query blob
+    if href:
+        artifacts["query"] = href
     return artifacts
 
 
@@ -279,7 +229,6 @@ if __name__ == "__main__":
 
     def test(url: str):
         print(url, extract_href_features(url))
-        #extract_href_features(url)
 
     test("/")
     test("/ui.css")
@@ -288,6 +237,7 @@ if __name__ == "__main__":
     test("localhost:8080")
     test("localhost:8080/index.html")
     test("https://example.com:8080?foo=foo#bar")
+    test("https://example.com:8080#bar")
     test("https://example.me:8080/?foo=foo#bar")
     test("https://example.me:8080/index.php?foo=foo")
     test("https://example.me:8080/us.js?foo=foo")
