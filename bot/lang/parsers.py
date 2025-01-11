@@ -1,11 +1,12 @@
 from bs4 import BeautifulSoup
 from typing import Any
+import dns.resolver
+import dns.exception
 import logging
 import mimetypes
 import mistune
 import os
 import re
-import socket
 
 from bot.data.iana import IanaTLDCacher
 
@@ -78,7 +79,7 @@ def extract_href_features(href: str):
             return {"skipped": True, "reason": "unsupported_scheme"}
 
     # Now stripped till after the :
-    if href.startswith("///"):
+    if href.startswith("///"):  #TODO: just /// was an older style that still works with some browsers
         if "scheme" not in artifacts or artifacts["scheme"] != "file":  # Should be "file"
             return {**artifacts, **{"skipped": True, "reason": "unexpected_pattern"}}
         href = re.sub(r"^/{3,}", "/", href)  # Tolerant of minor typos
@@ -88,7 +89,7 @@ def extract_href_features(href: str):
         elif artifacts["scheme"] not in ["http", "https"]:
             return {**artifacts, **{"skipped": True, "reason": "unexpected_pattern"}}
         href = href[2:]
-    # After this point, everything "should" be domain, port, path and/or params
+    # After this point, everything "should" be fqdn, port, path and/or params
 
     if "scheme" in artifacts and artifacts["scheme"] == "file":
         file_path_match = re.search(r"^(?P<path>(/C:)?[a-zA-Z0-9/._~%-]+)", href)
@@ -109,37 +110,37 @@ def extract_href_features(href: str):
         if "scheme" not in artifacts:
             artifacts["scheme"] = "relative"
 
-        domain_match = re.search(r"^(?P<domain>[a-zA-Z0-9](?:(?![-.]{2})[a-zA-Z0-9.-]){0,61}[a-zA-Z0-9])", href)
+        fqdn_match = re.search(r"^(?P<fqdn>[a-zA-Z0-9](?:(?![-.]{2})[a-zA-Z0-9.-]){0,61}[a-zA-Z0-9])", href)
         # ^: Asserts the start of the string.
-        # (?P<domain>...): Named capturing group for the domain.
+        # (?P<fqdn>...): Named capturing group for the fqdn.
         # [a-zA-Z0-9]: The first character must be alphanumeric.
-        # (?:...): A non-capturing group for the rest of the domain.
+        # (?:...): A non-capturing group for the rest of the fqdn.
         # (?![-.]{2}): A negative lookahead that asserts what follows is not two consecutive hyphens or dots.
         # [a-zA-Z0-9.-]: Allows alphanumeric characters, hyphens, and dots.
         # {0,61}: Allows up to 61 additional characters (to ensure total length does not exceed 63 characters).
-        # [a-zA-Z0-9]: Ensures the last character of the domain is alphanumeric.
-        if domain_match:
-            matched_blob = domain_match.group("domain")
+        # [a-zA-Z0-9]: Ensures the last character of the fqdn is alphanumeric.
+        if fqdn_match:
+            matched_blob = fqdn_match.group("fqdn")
             if matched_blob in ["127.0.0.1", "localhost"]:
-                artifacts["domain"] = matched_blob
+                artifacts["fqdn"] = matched_blob
                 href = href[len(matched_blob):]
             elif "." not in matched_blob:
                 # matched_blob could actually be part of a path
-                artifacts["domain"] = "relative"  # Probably
+                artifacts["fqdn"] = "relative"  # Probably
             else:
-                # Things that look like domains can actually be files
+                # Things that look like fqdns can actually be files
                 if matched_blob.split(".")[-1] in IanaTLDCacher().known_tlds:
-                    artifacts["domain"] = matched_blob
+                    artifacts["fqdn"] = matched_blob
                 else:
                     guessed_mimetype, _ = mimetypes.guess_type(matched_blob)
                     if guessed_mimetype:
-                        artifacts["domain"] = "relative"
+                        artifacts["fqdn"] = "relative"
                         artifacts["path"] = matched_blob
                     else:
-                        artifacts["domain"] = matched_blob
+                        artifacts["fqdn"] = matched_blob
                 href = href[len(matched_blob):]
         else:
-            artifacts["domain"] = "relative"
+            artifacts["fqdn"] = "relative"
 
         port_match = re.search(r"^(?P<port>:\d{,5}(?=[/?#]?))", href)
         # (?P<port>...): Named capturing group for the port.
@@ -173,12 +174,26 @@ def get_html_soup(text) -> BeautifulSoup:
     return BeautifulSoup(text, 'html.parser')
 
 
-def is_resolvable_domain(domain: str):
+def resolve_fqdn(fqdn: str, nameservers: list[str] = None, timeout: int = 2):
+    """
+    Resolve fqdn and return Answer or failure reason.
+
+    :param fqdn:
+    :param nameservers:
+    :param timeout:
+    :return: answer:Answer, error: bool, timed_out: bool
+    """
+    resolver = dns.resolver.Resolver()
+    resolver.nameservers = nameservers if nameservers else ["1.1.1.1"]
+    resolver.timeout = timeout
+    resolver.lifetime = timeout  # Set the lifetime for the query
+
     try:
-        resolved_address = socket.gethostbyname(domain)
-        return True, resolved_address
-    except socket.gaierror:
-        return False, None
+        return resolver.resolve(fqdn), False, False
+    except dns.exception.Timeout:
+        return None, False, True
+    except dns.exception.DNSException as e:
+        return None, True, False
 
 
 async def strip_html_elements(soup: BeautifulSoup, tag: str = None):

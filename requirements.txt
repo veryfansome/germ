@@ -1,6 +1,7 @@
 apscheduler
 asyncpg
 beautifulsoup4
+dnspython
 fastapi
 flair
 gunicorn
