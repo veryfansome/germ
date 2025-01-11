@@ -18,6 +18,7 @@ opentelemetry-instrumentation-httpx
 opentelemetry-instrumentation-sqlalchemy
 prometheus_client
 psycopg2-binary
+publicsuffix2
 pydantic
 pytest
 pytest-cov
