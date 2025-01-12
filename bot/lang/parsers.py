@@ -1,7 +1,8 @@
 from bs4 import BeautifulSoup
 from typing import Any
-import dns.resolver
 import dns.exception
+import dns.resolver
+import inflect
 import logging
 import mimetypes
 import mistune
@@ -9,10 +10,12 @@ import os
 import re
 
 from bot.data.iana import IanaTLDCacher
+from bot.data.url import ipv4_addr_pattern, ipv6_addr_pattern
 
 logger = logging.getLogger(__name__)
 
 iana_data = IanaTLDCacher()
+inflect_engine = inflect.engine()
 
 
 class MarkdownPageElementExtractor(mistune.HTMLRenderer):
@@ -81,8 +84,10 @@ def extract_href_features(href: str):
             return {"skipped": True, "reason": "unsupported_scheme"}
 
     # Now stripped till after the :
-    if href.startswith("///"):  #TODO: just /// was an older style that still works with some browsers
-        if "scheme" not in artifacts or artifacts["scheme"] != "file":  # Should be "file"
+    if href.startswith("///"):
+        if "scheme" not in artifacts:
+            artifacts["scheme"] = "file"
+        elif artifacts["scheme"] != "file":  # Should be "file"
             return {**artifacts, **{"skipped": True, "reason": "unexpected_pattern"}}
         href = re.sub(r"^/{3,}", "/", href)  # Tolerant of minor typos
     elif href.startswith("//"):
@@ -123,15 +128,16 @@ def extract_href_features(href: str):
         # [a-zA-Z0-9]: Ensures the last character of the fqdn is alphanumeric.
         if fqdn_match:
             matched_blob = fqdn_match.group("fqdn")
-            if matched_blob in ["127.0.0.1", "localhost"]:
+            if matched_blob in ["localhost"]:
                 artifacts["fqdn"] = matched_blob
                 href = href[len(matched_blob):]
             elif "." not in matched_blob:
                 # matched_blob could actually be part of a path
                 artifacts["fqdn"] = "relative"  # Probably
             else:
-                # Things that look like fqdns can actually be files
-                if iana_data.is_possible_public_fqdn(matched_blob):
+                if ipv4_addr_pattern.search(matched_blob):
+                    artifacts["ipv4_address"] = matched_blob
+                elif iana_data.is_possible_public_fqdn(matched_blob):  # Things that look like fqdns can be files
                     artifacts["fqdn"] = matched_blob
                 else:
                     guessed_mimetype, _ = mimetypes.guess_type(matched_blob)
@@ -142,7 +148,13 @@ def extract_href_features(href: str):
                         return {**artifacts, **{"skipped": True, "reason": "unexpected_pattern"}}
                 href = href[len(matched_blob):]
         else:
-            artifacts["fqdn"] = "relative"
+            ipv6_addr_match = ipv6_addr_pattern.search(href)
+            if ipv6_addr_match:
+                ipv6_address = ipv6_addr_match.group("ipv6_addr")
+                href = href[len(ipv6_address):]
+                artifacts["ipv6_address"] = ipv6_address.strip("[]")
+            else:
+                artifacts["fqdn"] = "relative"
 
         if not href:
             return artifacts
@@ -179,8 +191,47 @@ def extract_markdown_page_elements(text: str):
     return extractor.elements
 
 
+def fqdn_to_proper_noun(fqdn: str):
+    """
+    Converts FQDNs to something that looks like a single proper noun. For example, converts www.google.com to
+    "Googledotcom"
+
+    :param fqdn:
+    :return:
+    """
+    return "dot".join(fqdn.lower().split(".")[-2:]).capitalize()
+
+
 def get_html_soup(text) -> BeautifulSoup:
     return BeautifulSoup(text, 'html.parser')
+
+
+def ipv4_addr_to_proper_noun(addr: str):
+    """
+    Converts IPv4 addresses to something that looks like a single proper noun. For example, converts 127.0.0.1 to
+    "Onetwosevendotzerodotzerodotone"
+
+    :param addr:
+    :return:
+    """
+    tokens = []
+    for char in addr:
+        tokens.append("dot" if char == "." else inflect_engine.number_to_words(char))
+    return "".join(tokens).capitalize()
+
+
+def ipv6_addr_to_proper_noun(addr: str):
+    """
+    Converts IPv6 addresses to something that looks like a single proper noun. For example, converts 2001:db8::1 to
+    "Twozerozeroonecolondbeightcoloncolonone"
+
+    :param addr:
+    :return:
+    """
+    tokens = []
+    for char in addr:
+        tokens.append("colon" if char == ":" else (inflect_engine.number_to_words(char) if char.isdigit() else char))
+    return "".join(tokens).capitalize()
 
 
 def resolve_fqdn(fqdn: str, nameservers: list[str] = None, timeout: int = 2):
@@ -222,28 +273,20 @@ async def strip_html_elements(soup: BeautifulSoup, tag: str = None):
             inner_string, inner_artifacts = await strip_html_elements(element)
             if inner_artifacts:
                 element_artifacts += inner_artifacts
-
-            if element.name == "a":
-                href_features = extract_href_features(element['href'])
-                logger.info(f"href_features: {href_features}")
-                # TODO: - Replace inner_string
-                #       - Use some alphabetical hash based on the domain, with the first letter upper cased so that the
-                #         word would be seen as a proper noun by the POS tagger.
-                #       - Use regex to capture [\s]*[\w]+\.[\w]+[^\s]*
-                #       - Capture protocol, path, and params if any
-                #       - Do a domain resolution against captured domain string to see
-                #       - But it could also be a local link so we'll have to be careful.
-                pass
-
-            text_elements[idx] = inner_string
         else:  # Doesn't have inner elements
             logger.info(f"stripped <{element.name}>, kept inner string: {element.string}")
-            if element.name == "a":
-                href_features = extract_href_features(element['href'])
-                logger.info(f"href_features: {href_features}")
-                # TODO: Same as above
-                pass
-            text_elements[idx] = element.string if element.string else ""
+
+        if element.name == "a":
+            href_features = extract_href_features(element['href'])
+            logger.info(f"href_features: {href_features}")
+            if "fqdn" in href_features:
+                text_elements[idx] = fqdn_to_proper_noun(href_features["fqdn"])
+            elif "ipv4_address" in href_features:
+                text_elements[idx] = ipv4_addr_to_proper_noun(href_features["ipv4_address"])
+            elif "ipv6_address" in href_features:
+                text_elements[idx] = ipv6_addr_to_proper_noun(href_features["ipv6_address"])
+            continue
+        text_elements[idx] = element.string if element.string else ""
     return ''.join(text_elements), element_artifacts
 
 

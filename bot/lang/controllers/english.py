@@ -34,8 +34,9 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         for element in paragraph_elements:
             logger.info(f"paragraph_element: {element}")
             # TODO: If hyperlink:
-            #       - Merge a Domain.
-            #       - Hash from above and the actual domain name should be attributes of this node.
+            #       - Merge a domain.
+            #       - Link the domain to the domain's proper noun, which will automatically connect it to the sentence.
+            #       - domain name should be attributes of this domain node.
             #       - Add the protocol, path, and parameters on the vertexes to the paragraph
             #       - Add inner text as a vertex attribute
 
@@ -60,7 +61,8 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         return  # TODO: Remove me
         # TODO: is sorting by connections enough or should we also care about how many are recent?
         # Query semantic categories from graph, sorted by most connections
-        semantic_categories = [t["semanticCategory"]["text"] for t in await idea_graph.get_semantic_category_desc_by_connections()]
+        semantic_categories = [t["semanticCategory"]["text"]
+                               for t in await idea_graph.get_semantic_category_desc_by_connections()]
         logger.debug(f"semantic_categories: {semantic_categories}")
 
         # "artifacts" that can be cached or persisted
