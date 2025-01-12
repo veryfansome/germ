@@ -144,13 +144,20 @@ def extract_href_features(href: str):
         else:
             artifacts["fqdn"] = "relative"
 
+        if not href:
+            return artifacts
+
         port_match = re.search(r"^(?P<port>:\d{,5}(?=[/?#]?))", href)
         # (?P<port>...): Named capturing group for the port.
         # :\d{,5}: Colon and up to five digits
         # (?=[/?#]?): A positive lookahead for possible end of port characters
         if port_match:
-            artifacts["port"] = port_match.group("port")
-            href = href[len(artifacts["port"]):]
+            port_match = port_match.group("port")
+            href = href[len(port_match):]
+            artifacts["port"] = port_match[1:]  # Strip the leading colon
+
+        if not href:
+            return artifacts
 
         url_path_match = re.search(r"^(?P<path>[a-zA-Z0-9/._~%-]+)(?=[?#]?)", href)
         # (?P<path>...): Named capturing group for the path.
@@ -243,32 +250,3 @@ async def strip_html_elements(soup: BeautifulSoup, tag: str = None):
 if __name__ == "__main__":
     from observability.logging import setup_logging
     setup_logging()
-
-    def test(url: str):
-        print(url, extract_href_features(url))
-
-    test("/")
-    test("/ui.css")
-    test("https://www.google.com")
-    test("http://localhost:8080")
-    test("localhost:8080")
-    test("localhost:8080/index.html")
-    test("https://example.com:8080?foo=foo#bar")
-    test("https://example.com:8080#bar")
-    test("https://example.me:8080/?foo=foo#bar")
-    test("https://example.me:8080/index.php?foo=foo")
-    test("https://example.me:8080/us.js?foo=foo")
-    test("https://example.photography:8080/path/to/some/object?foo=foo")
-    test("http://127.0.0.1:8080")
-    test("page.html")
-    test("page.html#section1")
-    test("folder/page.html")
-    test("../page.html")
-    test("//www.google.com")
-    test("www.google.com")
-    test("mailto:someone@example.com?subject=Hello&body=Message")
-    test("tel:+1234567890")
-    test("file:///C:/path/to/file.txt")
-    test("file:///src/README.md")
-    test("javascript:alert('Hello World!')")
-    test("data:text/plain;base64,SGVsbG8sIFdvcmxkIQ==")
