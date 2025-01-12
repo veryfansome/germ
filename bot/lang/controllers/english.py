@@ -43,13 +43,13 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         if not paragraph_text:
             return
 
-       # previous_sentence_id = None
-       # for sentence in split_to_sentences(paragraph):
-       #     _, sentence_id, _ = await idea_graph.add_sentence(sentence)
-       #     _ = asyncio.create_task(idea_graph.link_paragraph_to_sentence(paragraph_id, sentence_id))
-       #     if previous_sentence_id is not None:
-       #         _ = asyncio.create_task(
-       #             idea_graph.link_sentence_to_previous_sentence(previous_sentence_id, sentence_id))
+        previous_sentence_id = None
+        for sentence in split_to_sentences(paragraph):
+            _, sentence_id, _ = await idea_graph.add_sentence(sentence)
+            _ = asyncio.create_task(idea_graph.link_paragraph_to_sentence(paragraph_id, sentence_id))
+            if previous_sentence_id is not None:
+                _ = asyncio.create_task(
+                    idea_graph.link_sentence_to_previous_sentence(previous_sentence_id, sentence_id))
 
     async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_parameters):
         logger.info(f"on_sentence_merge: sentence_id={sentence_id}, {sentence_parameters}, {sentence}")
