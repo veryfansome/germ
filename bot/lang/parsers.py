@@ -199,7 +199,8 @@ def fqdn_to_proper_noun(fqdn: str):
     :param fqdn:
     :return:
     """
-    return "dot".join(fqdn.lower().split(".")[-2:]).capitalize()
+    #return "DOT".join(fqdn.lower().split(".")[-2:]).capitalize()
+    return "".join([char.upper() if idx == 0 else char for idx, char in enumerate("DOT".join(fqdn.lower().split(".")[-2:]))])
 
 
 def get_html_soup(text) -> BeautifulSoup:
@@ -216,8 +217,9 @@ def ipv4_addr_to_proper_noun(addr: str):
     """
     tokens = []
     for char in addr:
-        tokens.append("dot" if char == "." else inflect_engine.number_to_words(char))
-    return "".join(tokens).capitalize()
+        tokens.append("DOT" if char == "." else inflect_engine.number_to_words(char))
+    #return "".join(tokens).capitalize()
+    return [char.upper() if idx == 0 else char for idx, char in enumerate("".join(tokens))]
 
 
 def ipv6_addr_to_proper_noun(addr: str):
@@ -275,17 +277,6 @@ async def strip_html_elements(soup: BeautifulSoup, tag: str = None):
                 element_artifacts += inner_artifacts
         else:  # Doesn't have inner elements
             logger.info(f"stripped <{element.name}>, kept inner string: {element.string}")
-
-        if element.name == "a":
-            href_features = extract_href_features(element['href'])
-            logger.info(f"href_features: {href_features}")
-            if "fqdn" in href_features:
-                text_elements[idx] = fqdn_to_proper_noun(href_features["fqdn"])
-            elif "ipv4_address" in href_features:
-                text_elements[idx] = ipv4_addr_to_proper_noun(href_features["ipv4_address"])
-            elif "ipv6_address" in href_features:
-                text_elements[idx] = ipv6_addr_to_proper_noun(href_features["ipv6_address"])
-            continue
         text_elements[idx] = element.string if element.string else ""
     return ''.join(text_elements), element_artifacts
 

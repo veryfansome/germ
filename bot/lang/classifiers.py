@@ -4,7 +4,6 @@ from nltk.tokenize import sent_tokenize
 from openai import OpenAI
 import difflib
 import json
-import re
 
 from bot.graph.semantic_categories import default_semantic_categories
 from observability.logging import logging
@@ -115,15 +114,9 @@ class OpenAITextClassifier:
 
 
 def get_flair_pos_tags(sentence_text: str):
-    if "<code>" in sentence_text:
-        preprocessed_text, code_snippets = preprocess_text_for_pos_tagging(sentence_text)
-        sentence = Sentence(preprocessed_text)
-        flair_pos_tagger.predict(sentence)
-        return postprocess_sentence_pos_tags(sentence, code_snippets)
-    else:
-        sentence = Sentence(sentence_text)
-        flair_pos_tagger.predict(sentence)
-        return [(word.text, word.tag) for word in sentence]
+    sentence = Sentence(sentence_text)
+    flair_pos_tagger.predict(sentence)
+    return [(word.text, word.tag) for word in sentence]
 
 
 def get_noun_modifier_classifier(semantic_categories: list[str] = default_semantic_categories) -> OpenAITextClassifier:
@@ -226,32 +219,6 @@ def get_single_noun_classifier(semantic_categories: list[str] = default_semantic
         tool_description="Store generated noun classifications.",
         tool_parameter_description="Noun classifications to be stored.",
     )
-
-
-def postprocess_sentence_pos_tags(sentence: Sentence, code_snippets: list[str]):
-    pos_tags = []
-    snippet_map = {}
-    # Map snippets to placeholders
-    for i, snippet in enumerate(code_snippets):
-        # TODO: flair isn't recognizing the placeholder format - try CODE1 or some single token we can easily
-        placeholder = f"<CODE_SNIPPET_{i}>"
-        snippet_map[placeholder] = snippet
-    # Replace placeholders back with original code snippets
-    for word in sentence:
-        if word.text.startswith("<CODE_SNIPPET_"):
-            pos_tags.append((snippet_map[word.text], "CODE"))
-        else:
-            pos_tags.append((word.text, word.tag))
-    return pos_tags
-
-
-def preprocess_text_for_pos_tagging(text: str):
-    # Replace <code>...</code> with a placeholder
-    code_snippets = re.findall(r'<code>(.*?)</code>', text)
-    for i, snippet in enumerate(code_snippets):
-        placeholder = f"<CODE_SNIPPET_{i}>"
-        text = text.replace(f"<code>{snippet}</code>", placeholder)
-    return text, code_snippets
 
 
 def split_to_sentences(text: str) -> list[str]:

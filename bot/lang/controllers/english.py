@@ -30,7 +30,6 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
 
         paragraph_soup = await run_in_threadpool(get_html_soup, f"<p>{paragraph}</p>")
         paragraph_text, paragraph_elements = await strip_html_elements(paragraph_soup, "p")
-        logger.info(f"paragraph_text: {paragraph_text}")
         for element in paragraph_elements:
             logger.info(f"paragraph_element: {element}")
             # TODO: If hyperlink:
@@ -43,8 +42,9 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         if not paragraph_text:
             return
 
+        logger.info(f"paragraph_text: {paragraph_text}")
         previous_sentence_id = None
-        for sentence in split_to_sentences(paragraph):
+        for sentence in split_to_sentences(paragraph_text):
             _, sentence_id, _ = await idea_graph.add_sentence(sentence)
             _ = asyncio.create_task(idea_graph.link_paragraph_to_sentence(paragraph_id, sentence_id))
             if previous_sentence_id is not None:
