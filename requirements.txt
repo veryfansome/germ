@@ -4,6 +4,7 @@ beautifulsoup4
 dnspython
 fastapi
 flair
+googletrans
 gunicorn
 httpx
 inflect
