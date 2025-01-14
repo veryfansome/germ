@@ -17,6 +17,7 @@ async def main():
             # The following languages have been chosen to get a wide variety of grammar patterns
             # TODO: - Shuffle the order.
             #       - Translate intermediate steps to english as well and keep them if there are differences.
+            #       - Try my original rumination idea here to get different flavors of similar sentences.
             zh_cn_trans = await translator.translate(line, dest='zh-cn')  # -> Chinese (Sino-Tibetan)
             es_trans = await translator.translate(zh_cn_trans.text, dest='es')  # -> Spanish (Romance)
             ja_trans = await translator.translate(es_trans.text, dest='ja')  # -> Japanese (Japonic)
