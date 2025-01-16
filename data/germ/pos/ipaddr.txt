@@ -39,3 +39,8 @@ The network engineer discovered a routing issue between 192.168.1.1 and 192.168.
 The security team began scanning both 10.1.1.10 and 10.1.1.20 for vulnerabilities after detecting unusual traffic patterns.
 The investigation revealed that the malware was hiding in the systems at 172.16.0.5 and 172.16.0.10, making it difficult to detect and remove.
 The network administrator discovered that unauthorized sniffing was occurring on the connections between 192.168.2.15 and 192.168.2.30, compromising sensitive data.
+DNS (Domain Name System) resolution is the process of translating human-friendly domain names (like www.example.com) into IP addresses (like 93.184.216.34) that computers use to identify each other on the network.
+This is typically provided by your Internet Service Provider (ISP) or a third-party DNS service like Google Public DNS (8.8.8.8) or Cloudflare (1.1.1.1).
+The resolver queries the authoritative name server for example.com, which might return something like 93.184.216.34.
+CIDR notation specifies an IP address followed by a slash and a number (e.g., 192.168.1.0/24), where the number indicates the number of bits in the subnet mask.
+If your CIDR range is 10.0.0.0/8, then you must have a total of 16,777,216 IP addresses.
