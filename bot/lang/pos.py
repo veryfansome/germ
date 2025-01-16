@@ -1,3 +1,4 @@
+from flair.data import Sentence
 from flair.datasets import ColumnCorpus
 from flair.models import SequenceTagger
 from flair.trainers import ModelTrainer
@@ -9,6 +10,16 @@ logger = logging.getLogger(__name__)
 # Load the pre-trained POS tagger
 pos_tagger = (SequenceTagger.load("pos") if not os.path.isdir("/src/models/germ/pos/final-model.pt")
               else SequenceTagger.load("/src/models/germ/pos/final-model.pt"))
+pos_tagger_info = {
+    "tag_dictionary": pos_tagger.label_dictionary,
+    "tag_format": pos_tagger.tag_format
+}
+
+
+def get_pos_tags(text: str):
+    sentence = Sentence(text)
+    pos_tagger.predict(sentence)
+    return [(word.text, word.tag) for word in sentence]
 
 
 def train_pos_tagger():

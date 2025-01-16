@@ -8,15 +8,3 @@ To route traffic to external networks, we set the default gateway to 192.168.1.1
 Certain IP addresses, such as 240.0.0.0 to 255.255.255.255, are reserved for future use and should not be assigned to any devices on the network.
 In IPv6 configurations, we use the loopback address ::1 to test local applications, similar to how we use 127.0.0.1 in IPv4.
 Devices on an IPv6 network automatically generate link-local addresses in the fe80::/10 range, allowing them to communicate with each other on the same local link without a global address.
-The DNS resolution process begins when a user types in a domain, leading to queries that ultimately resolve to addresses like 203.0.113.5.
-When troubleshooting connectivity issues, checking the DNS server at 8.8.8.8 can help determine if the problem lies with name resolution.
-The transition from IPv4 to IPv6 is evident as more services begin to utilize addresses like 2001:0db8:85a3:0000:0000:8a2e:0370:7334 in their DNS configurations.
-To enhance security, many companies implement DNS filtering, which can block access to known malicious addresses such as 185.220.101.2.
-The IP address 8.8.8.8 is one of Google's public DNS servers, widely used for its reliability and speed in resolving domain names.
-When configuring a DNS server, you might encounter the IP address 1.1.1.1, which belongs to Cloudflare and is known for its privacy-focused DNS services.
-192.168.1.1 is commonly used as a default gateway in local networks, but it plays no direct role in public DNS resolution.
-127.0.0.1 is known as the loopback address and is used for testing and troubleshooting DNS configurations on a local machine.
-The IP address 198.41.0.4 is one of the root DNS servers, playing a crucial role in the global DNS hierarchy by directing queries to the appropriate top-level domain servers.
-The IP 224.0.0.251 is used for multicast DNS (mDNS), allowing devices on the same local network to resolve hostnames without a traditional DNS server.
-In a common network setup, the gateway at 192.168.1.1 serves as the primary access point for devices within the local area network, facilitating communication with external networks.
-Many organizations utilize 10.0.0.0/8 for their internal networks, allowing for a vast number of devices to connect without consuming public IPs.

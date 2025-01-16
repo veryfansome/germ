@@ -2,13 +2,11 @@ from flair.data import Sentence
 from flair.models import SequenceTagger
 from nltk.tokenize import sent_tokenize
 from openai import OpenAI
-import difflib
 import json
 
 from bot.graph.semantic_categories import default_semantic_categories
 from observability.logging import logging
 
-differ = difflib.Differ()
 logger = logging.getLogger(__name__)
 flair_pos_tagger = SequenceTagger.load("pos")
 
