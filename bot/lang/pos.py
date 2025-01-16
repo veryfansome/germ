@@ -27,9 +27,10 @@ def train_pos_tagger():
 
     # Create the corpus
     corpus = ColumnCorpus("/src/data/germ/pos", columns,
-                          train_file="train.txt",
-                          test_file="test.txt",
-                          dev_file="dev.txt")
+                          # TODO: make this configurable
+                          train_file="ipaddr.txt_train.txt",
+                          test_file="ipaddr.txt_test.txt",
+                          dev_file="ipaddr.txt_dev.txt")
 
     # Initialize the trainer
     trainer = ModelTrainer(pos_tagger, corpus)

@@ -8,3 +8,34 @@ To route traffic to external networks, we set the default gateway to 192.168.1.1
 Certain IP addresses, such as 240.0.0.0 to 255.255.255.255, are reserved for future use and should not be assigned to any devices on the network.
 In IPv6 configurations, we use the loopback address ::1 to test local applications, similar to how we use 127.0.0.1 in IPv4.
 Devices on an IPv6 network automatically generate link-local addresses in the fe80::/10 range, allowing them to communicate with each other on the same local link without a global address.
+The software version 1.2.3 could easily be misinterpreted as an IP address by a text parser, but it actually refers to the release version of the application.
+The date 2023.04.15 might confuse a text parser into thinking it's an IP address, but it simply represents April 15, 2023, in a non-standard format.
+The file path /usr/local/bin/10.0.0.1 could be misread as an IP address, but it actually points to a directory in the Linux file system.
+In our Git repository, the tag v1.0.0 might be mistaken for an IP address, but it denotes a specific version of the codebase.
+The coordinates 37.7749.122.4194 might confuse a text parser into thinking it's an IP address, but it actually represents the latitude and longitude of San Francisco.
+The serial number SN-123.456.789 could be mistaken for an IP address, but it is simply a unique identifier for the product.
+The branch name feature/1.2.3 might be misread as an IP address, but it actually refers to a specific feature version in our version control system.
+The timestamp 2023.03.15.12.30 could be misinterpreted as an IP address, but it represents March 15, 2023, at 12:30 PM.
+The DNS resolution process begins when a user types in a domain, leading to queries that ultimately resolve to addresses like 203.0.113.5.
+When troubleshooting connectivity issues, checking the DNS server at 8.8.8.8 can help determine if the problem lies with name resolution.
+To enhance security, many companies implement DNS filtering, which can block access to known malicious addresses such as 185.220.101.2.
+The IP address 8.8.8.8 is one of Google's public DNS servers, widely used for its reliability and speed in resolving domain names.
+When configuring a DNS server, you might encounter the IP address 1.1.1.1, which belongs to Cloudflare and is known for its privacy-focused DNS services.
+192.168.1.1 is commonly used as a default gateway in local networks, but it plays no direct role in public DNS resolution.
+127.0.0.1 is known as the loopback address and is used for testing and troubleshooting DNS configurations on a local machine.
+The IP address 198.41.0.4 is one of the root DNS servers, playing a crucial role in the global DNS hierarchy by directing queries to the appropriate top-level domain servers.
+The IP 224.0.0.251 is used for multicast DNS (mDNS), allowing devices on the same local network to resolve hostnames without a traditional DNS server.
+In a common network setup, the gateway at 192.168.1.1 serves as the primary access point for devices within the local area network, facilitating communication with external networks.
+The email originating from 192.0.2.34 was flagged for review, as it matched patterns associated with previous phishing attempts.
+When using the corporate VPN, your actual IP address is hidden, and you appear to be browsing from the address 203.0.113.90.
+Our DDoS protection system detected an unusual surge in traffic from 198.51.100.22 and automatically initiated countermeasures.
+During the incident investigation, we found that the IP address 203.0.113.67 was repeatedly attempting to access a restricted endpoint, which contributed to the service disruption.
+The firewall has blocked access to both 192.168.1.10 and 192.168.1.20 due to suspicious activity.
+After the security review, the administrator unblocked both 10.1.1.5 and 10.1.1.6, allowing them to communicate freely again.
+The network administrator discovered that traffic to both 172.16.0.10 and 172.16.0.20 had been blackholed due to a misconfiguration in the routing table.
+Due to a typo in the configuration, requests to 192.168.2.15 and 192.168.2.30 were incorrectly routed, causing connectivity issues.
+The security team implemented endpoint protection on both 10.0.0.50 and 10.0.0.60 to safeguard against potential malware threats.
+The network engineer discovered a routing issue between 192.168.1.1 and 192.168.1.2, which was causing intermittent connectivity problems for users.
+The security team began scanning both 10.1.1.10 and 10.1.1.20 for vulnerabilities after detecting unusual traffic patterns.
+The investigation revealed that the malware was hiding in the systems at 172.16.0.5 and 172.16.0.10, making it difficult to detect and remove.
+The network administrator discovered that unauthorized sniffing was occurring on the connections between 192.168.2.15 and 192.168.2.30, compromising sensitive data.

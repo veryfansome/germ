@@ -1,7 +1,8 @@
 from googletrans import Translator
 from openai import AsyncOpenAI
 from starlette.concurrency import run_in_threadpool
-from uuid import uuid5
+from typing import Callable, Union
+from uuid import UUID, uuid5
 import asyncio
 import difflib
 import logging
@@ -15,7 +16,6 @@ from settings.openai_settings import DEFAULT_MINI_MODEL, HTTPX_TIMEOUT
 logger = logging.getLogger(__name__)
 
 differ = difflib.Differ()
-example_cache = {}
 # The following languages have been chosen to get a wide variety of grammar patterns
 filter_languages = {
     # Arabic: uses a root-based system where words are formed from a set of consonants
@@ -47,7 +47,77 @@ formatted_tag_dictionary_blob = '\n'.join(pos_tagger_info['tag_dictionary'].get_
 translator = Translator()
 
 
-async def basic_gpt_prompt(prompt: str, text: str,
+class ExampleCache:
+    def __init__(self, additional_instruction: list[str] = None,
+                 on_classify: Callable[[str, str], str] = None, on_diff: Callable[[str, str], str] = None):
+        self.cache: dict[UUID, Union[str, bool]] = {}
+        self.instructions_blob = "".join([f"- {instruction}\n" for instruction in [
+            "Change flair part-of-speech tags in column 2, to the corrected value if incorrect.",
+            "Don't change anything from column 1.",
+        ] + (additional_instruction or [])])
+        self.on_classify = on_classify
+        self.on_diff = on_diff
+
+    async def add_example(self, text: str) -> bool:
+        signature = uuid5(UUID5_NS, text)
+        if signature not in self.cache:  # Skips exact dupes
+            self.cache[signature] = True  # Create placeholder
+
+            async def task():
+                # Overwrite placeholder
+                pos_tags = await run_in_threadpool(get_pos_tags, text)
+                example = "\n".join([
+                    self.on_classify(txt, tag) if self.on_classify else f"{txt} {tag}" for txt, tag in pos_tags])
+                async with (AsyncOpenAI() as client):
+                    completion = await client.chat.completions.create(
+                        messages=([
+                            {
+                                "role": "system",
+                                "content": f"""
+                                *Instruction*:
+                                {self.instructions_blob}
+                                *Part-of-speech classes*:
+                                {formatted_tag_dictionary_blob}"
+                                """.strip()
+                            },
+                            {
+                                "role": "user",
+                                "content": example,
+                            }
+                        ]),
+                        model=DEFAULT_MINI_MODEL, n=1, temperature=0.0,
+                        timeout=HTTPX_TIMEOUT)
+                    returned_example = re.sub(r"\s+\n", "\n", completion.choices[0].message.content.strip())
+                    if example != returned_example:
+                        diff = difflib.context_diff(example.splitlines(), returned_example.splitlines(), lineterm='')
+                        diff_blob = "\n".join([line for line in diff])
+                        logger.info(f"diff:\n{diff_blob}")
+                        if self.on_diff:
+                            logger.info(f"caching on_diff callback result")
+                            self.cache[signature] = self.on_diff(example, returned_example)
+                        else:
+                            logger.info(f"caching OpenAI adjusted example")
+                            self.cache[signature] = returned_example
+                    else:
+                        logger.info(f"caching uncontested example")
+                        self.cache[signature] = example
+
+            _ = asyncio.create_task(task())
+            return True
+        else:
+            return False
+
+    def get_examples(self) -> list[str]:
+        return list(self.cache.values())
+
+    def estimate_num_tasks_outstanding(self) -> int:
+        return len([e for e in self.cache.values() if e is True])
+
+    def has_tasks_outstanding(self) -> bool:
+        return True in self.cache.values()
+
+
+async def basic_gpt_prompt(prompt: str, text: str, cache: ExampleCache,
                            add_distillation: bool = False, add_translations: bool = False, label: str = None):
     """
     Use OpenAI's GPT to complete some text prompt.
@@ -60,85 +130,40 @@ async def basic_gpt_prompt(prompt: str, text: str,
             }]),
             model=DEFAULT_MINI_MODEL, n=1,
             timeout=HTTPX_TIMEOUT)
-        if await cache_example(completion.choices[0].message.content):
+        if await cache.add_example(completion.choices[0].message.content):
             logger.info(f"{completion.choices[0].message.content} [{label}]" if label
                         else completion.choices[0].message.content)
             if add_distillation:
                 _ = asyncio.create_task(
-                    distill_text(completion.choices[0].message.content))
+                    distill_text(completion.choices[0].message.content, cache))
             if add_translations:
                 _ = asyncio.create_task(
-                    create_text_variations_using_translation(completion.choices[0].message.content))
+                    create_text_variations_using_translation(completion.choices[0].message.content, cache))
 
 
-async def cache_example(text: str) -> bool:
-    signature = uuid5(UUID5_NS, text)
-    if signature not in example_cache:  # Skips exact dupes
-        example_cache[signature] = True  # Create placeholder
-
-        async def task():
-            # Overwrite placeholder
-            pos_tags = await run_in_threadpool(get_pos_tags, text)
-            example = "\n".join([f"{txt} {tag}" for txt, tag in pos_tags])
-            async with AsyncOpenAI() as client:
-                completion = await client.chat.completions.create(
-                    messages=([
-                        {
-                            "role": "system",
-                            "content": f"""
-                            *Instruction*:
-                            - Change flair part-of-speech tags in column 2, to the corrected value if incorrect.
-                            - Don't change anything from column 1.
-                            *Part-of-speech classes*:
-                            {formatted_tag_dictionary_blob}"
-                            """
-                        },
-                        {
-                            "role": "user",
-                            "content": example,
-                        }
-                    ]),
-                    model=DEFAULT_MINI_MODEL, n=1, temperature=0.0,
-                    timeout=HTTPX_TIMEOUT)
-                returned_example = re.sub(r"[\s\t]+$", "", completion.choices[0].message.content.strip())
-                foo = example.splitlines()
-                bar = returned_example.splitlines()
-                logger.info(f"foo: {foo}")
-                logger.info(f"bar: {bar}")
-                if example != returned_example:
-                    diff_blob = "\n".join([line for line in difflib.context_diff(
-                        foo, bar, lineterm='')])
-                    logger.info(f"\n>>>diff: {diff_blob}<<<")
-                    example_cache[signature] = returned_example
-                else:
-                    logger.info(f"caching uncontested example")
-                    example_cache[signature] = example
-
-        _ = asyncio.create_task(task())
-        return True
-    else:
-        return False
-
-
-async def change_nouns_and_verbs(text: str, add_distillation: bool = False, add_translations: bool = False):
+async def change_nouns_and_verbs(text: str, cache: ExampleCache,
+                                 add_distillation: bool = False, add_translations: bool = False):
     """
     Change nouns and verbs without change meaning.
     """
-    await basic_gpt_prompt("Change nouns and verbs, without changing the meaning", text,
+    await basic_gpt_prompt("Change nouns and verbs, without changing the meaning",
+                           text, cache,
                            add_distillation=add_distillation, add_translations=add_translations,
                            label="new nouns and verbs")
 
 
-async def change_sentence_structure(text: str, add_distillation: bool = False, add_translations: bool = False):
+async def change_sentence_structure(text: str, cache: ExampleCache,
+                                    add_distillation: bool = False, add_translations: bool = False):
     """
     Completely change sentence structure without change meaning.
     """
-    await basic_gpt_prompt("Completely change the sentence structure, without changing the meaning", text,
+    await basic_gpt_prompt("Completely change the sentence structure, without changing the meaning",
+                           text, cache,
                            add_distillation=add_distillation, add_translations=add_translations,
                            label="structure change")
 
 
-async def create_text_variations_using_translation(text: str,
+async def create_text_variations_using_translation(text: str, cache: ExampleCache,
                                                    add_distillation: bool = False,
                                                    cache_intermediates: bool = False):
     """
@@ -151,19 +176,19 @@ async def create_text_variations_using_translation(text: str,
     text_to_filter = text
     for filter_lang in filter_order:
         filtered_text, foreign_trans = await filter_text_using_translation(text_to_filter, filter_lang)
-        if cache_intermediates and await cache_example(filtered_text):
+        if cache_intermediates and await cache.add_example(filtered_text):
             logger.info(f"{filtered_text} [{filter_lang}]")
             if add_distillation:
-                _ = asyncio.create_task(distill_text(filtered_text))
+                _ = asyncio.create_task(distill_text(filtered_text, cache))
         text_to_filter = foreign_trans.text  # Play rumors with different languages
     if not cache_intermediates:  # We already cached this if we're caching intermediates
-        if await cache_example(filtered_text):
+        if await cache.add_example(filtered_text):
             logger.info(f"{filtered_text} {filter_order}")
             if add_distillation:
-                _ = asyncio.create_task(distill_text(filtered_text))
+                _ = asyncio.create_task(distill_text(filtered_text, cache))
 
 
-async def distill_text(text: str, count: int = 1, cut_ratio: float = 0.2,
+async def distill_text(text: str, cache: ExampleCache, count: int = 1, cut_ratio: float = 0.2,
                        stop: int = 1, add_translations: bool = False):
     """
     Shorten, without altering meaning. Set a higher `stop` to do multiple distillations, but things can turn to
@@ -180,14 +205,14 @@ async def distill_text(text: str, count: int = 1, cut_ratio: float = 0.2,
             }]),
             model=DEFAULT_MINI_MODEL, n=1,
             timeout=HTTPX_TIMEOUT)
-        if await cache_example(completion.choices[0].message.content):
+        if await cache.add_example(completion.choices[0].message.content):
             logger.info(f"{completion.choices[0].message.content} [distilled {count}]")
             if add_translations:
                 _ = asyncio.create_task(
-                    create_text_variations_using_translation(completion.choices[0].message.content))
+                    create_text_variations_using_translation(completion.choices[0].message.content, cache))
         if count < stop:
             _ = asyncio.create_task(
-                distill_text(completion.choices[0].message.content, count=count+1, cut_ratio=cut_ratio, stop=stop))
+                distill_text(completion.choices[0].message.content, cache, count=count+1, cut_ratio=cut_ratio, stop=stop))
 
 
 async def filter_text_using_translation(text: str, dest_lang: str, src_lang: str = "en"):
@@ -195,7 +220,7 @@ async def filter_text_using_translation(text: str, dest_lang: str, src_lang: str
     return (await translator.translate(dest_trans.text, dest=src_lang)).text, dest_trans
 
 
-async def main(txt_file: str, training_split_percentage: float = 0.8):
+async def main(txt_file: str, cache: ExampleCache, training_split_percentage: float = 0.8):
     # TODO: - Create a controller that waits for the creation of noun nodes or just works periodically off a ranked
     #         list of choices to prioritize
     #       - On creation of nodes or vertexes, generate additional examples of this noun used in sentences
@@ -209,33 +234,47 @@ async def main(txt_file: str, training_split_percentage: float = 0.8):
     #         even though the impression allows me to recall the general ideas later. This is more efficient storage
     #         wise - neo4j should store impressions of ideas, not texts.
 
-    logger.info("augmenting loaded data")
     with open(txt_file) as fd:
         for line in fd:
             line = line.strip()
             logger.info(f"{line} [original]")
-            await cache_example(line)
+            await cache.add_example(line)
             # Augment example diversification
             await asyncio.gather(*[
-                create_text_variations_using_translation(line, add_distillation=True),
+                create_text_variations_using_translation(line, cache, add_distillation=True),
                 # TODO: convert nouns and verbs to different forms or tenses.
-                change_nouns_and_verbs(line, add_distillation=True),
-                change_sentence_structure(line, add_distillation=True),
-                distill_text(line),  # Maybe distill should happen at the end of each of the above?
+                change_nouns_and_verbs(line, cache, add_distillation=True),
+                change_sentence_structure(line, cache, add_distillation=True),
+                distill_text(line, cache),  # Maybe distill should happen at the end of each of the above?
             ])
-    candidates = list(example_cache.values())
+    while cache.has_tasks_outstanding():
+        logger.info(f"wait for {cache.estimate_num_tasks_outstanding()} more tasks to complete")
+        await asyncio.sleep(3)
+
+    candidates = cache.get_examples()
+
     training_stop_idx = int(len(candidates) * training_split_percentage)
+    training_set = [f"{example}\n\n" for example in candidates[:training_stop_idx]]
+    logger.info(f"writing training set with {len(training_set)} examples")
     with open(f"{txt_file}_train.txt", "w") as fd:
-        fd.writelines(candidates[:training_stop_idx])
+        fd.writelines(training_set)
+
     test_stop_idx = training_stop_idx + int(len(candidates) * ((1 - training_split_percentage) / 2))
+    test_set = [f"{example}\n\n" for example in candidates[training_stop_idx:test_stop_idx]]
+    logger.info(f"writing test set with {len(test_set)} examples")
     with open(f"{txt_file}_test.txt", "w") as fd:
-        fd.writelines(candidates[training_stop_idx:test_stop_idx])
+        fd.writelines(test_set)
+
+    dev_set = [f"{example}\n\n" for example in candidates[test_stop_idx:]]
+    logger.info(f"writing dev set with {len(dev_set)} examples")
     with open(f"{txt_file}_dev.txt", "w") as fd:
-        fd.writelines(candidates[test_stop_idx:])
+        fd.writelines(dev_set)
 
 
 if __name__ == '__main__':
     from observability.logging import setup_logging
 
     setup_logging()
-    asyncio.run(main("/src/data/germ/pos/ipaddr.txt"))
+    asyncio.run(main("/src/data/germ/pos/ipaddr.txt", ExampleCache(
+        additional_instruction=["Tag IP addresses as nouns."],
+    )))
