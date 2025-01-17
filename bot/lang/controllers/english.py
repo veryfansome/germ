@@ -5,9 +5,9 @@ import inflect
 
 from bot.graph.idea import CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler, idea_graph
 from bot.lang.parsers import get_html_soup, strip_html_elements
+from bot.lang.pos import get_pos_tags
 from bot.lang.classifiers import (
-    ADJECTIVE_POS_TAGS, ADVERB_POS_TAGS, NOUN_POS_TAGS, PRONOUN_POS_TAGS, VERB_POS_TAGS,
-    get_flair_pos_tags, split_to_sentences)
+    ADJECTIVE_POS_TAGS, ADVERB_POS_TAGS, NOUN_POS_TAGS, PRONOUN_POS_TAGS, VERB_POS_TAGS, split_to_sentences)
 from observability.logging import logging, setup_logging
 
 inflect_engine = inflect.engine()
@@ -55,7 +55,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         logger.info(f"on_sentence_merge: sentence_id={sentence_id}, {sentence_parameters}, {sentence}")
 
         # Get POS in the background
-        pos_task = asyncio.create_task(run_in_threadpool(get_flair_pos_tags, sentence))
+        pos_task = asyncio.create_task(run_in_threadpool(get_pos_tags, sentence))
         logger.info(f"pos_tags: {await pos_task}")
 
         return  # TODO: Remove me

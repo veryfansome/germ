@@ -37,16 +37,16 @@ def train_pos_tagger():
 
     # Start training
     trainer.train("/src/models/germ/pos",
+                  # May need toggling
+                  embeddings_storage_mode="gpu",
                   # Reduce learning_rate to 0.001 even if there are signs of overfitting due to small num of examples.
                   learning_rate=0.01,
-                  # Small batch for more frequent updates, which may help with generalization with fewer examples.
-                  mini_batch_size=1,
                   # Fewer epochs to prevent overfitting
                   max_epochs=3,
+                  # Small batch for more frequent updates, which may help with generalization with fewer examples.
+                  mini_batch_size=1,
                   # Use validation set for early stopping when the model starts to overfit
-                  train_with_dev=True,
-                  # May need toggling
-                  embeddings_storage_mode="gpu")
+                  train_with_dev=True)
 
 
 if __name__ == "__main__":

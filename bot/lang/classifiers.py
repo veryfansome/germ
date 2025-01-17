@@ -1,5 +1,3 @@
-from flair.data import Sentence
-from flair.models import SequenceTagger
 from nltk.tokenize import sent_tokenize
 from openai import OpenAI
 import json
@@ -8,7 +6,6 @@ from bot.graph.semantic_categories import default_semantic_categories
 from observability.logging import logging
 
 logger = logging.getLogger(__name__)
-flair_pos_tagger = SequenceTagger.load("pos")
 
 ADJECTIVE_POS_TAGS = set()
 ADJECTIVE_POS_TAGS.add("JJ")  # Standard, "big"
@@ -109,12 +106,6 @@ class OpenAITextClassifier:
 
     def get_tool_properties_spec(self):
         return self.tool_properties_spec
-
-
-def get_flair_pos_tags(sentence_text: str):
-    sentence = Sentence(sentence_text)
-    flair_pos_tagger.predict(sentence)
-    return [(word.text, word.tag) for word in sentence]
 
 
 def get_noun_modifier_classifier(semantic_categories: list[str] = default_semantic_categories) -> OpenAITextClassifier:

@@ -116,6 +116,13 @@ class ExampleCache:
     def has_tasks_outstanding(self) -> bool:
         return True in self.cache.values()
 
+    async def while_has_tasks_outstanding(self, threshold: int = 8, interval: float = 3):
+        num_outstanding = self.estimate_num_tasks_outstanding()
+        while num_outstanding > threshold:
+            await asyncio.sleep(interval)
+            num_outstanding = self.estimate_num_tasks_outstanding()
+            logger.info(f"wait for {num_outstanding} more tasks to complete")
+
 
 async def basic_gpt_prompt(prompt: str, text: str, cache: ExampleCache,
                            add_distillation: bool = False, add_translations: bool = False, label: str = None):
@@ -141,10 +148,21 @@ async def basic_gpt_prompt(prompt: str, text: str, cache: ExampleCache,
                     create_text_variations_using_translation(completion.choices[0].message.content, cache))
 
 
+async def change_modifiers(text: str, cache: ExampleCache,
+                           add_distillation: bool = False, add_translations: bool = False):
+    """
+    Change modifiers without changing meaning.
+    """
+    await basic_gpt_prompt("Change noun and verb modifiers, without changing the meaning",
+                           text, cache,
+                           add_distillation=add_distillation, add_translations=add_translations,
+                           label="new modifiers")
+
+
 async def change_nouns_and_verbs(text: str, cache: ExampleCache,
                                  add_distillation: bool = False, add_translations: bool = False):
     """
-    Change nouns and verbs without change meaning.
+    Change nouns and verbs without changing meaning.
     """
     await basic_gpt_prompt("Change nouns and verbs, without changing the meaning",
                            text, cache,
@@ -152,15 +170,37 @@ async def change_nouns_and_verbs(text: str, cache: ExampleCache,
                            label="new nouns and verbs")
 
 
+async def change_pov(text: str, cache: ExampleCache,
+                     add_distillation: bool = False, add_translations: bool = False):
+    """
+    Change narrative point-of-view without changing meaning.
+    """
+    await basic_gpt_prompt("Change the narrative point-of-view, without changing the meaning",
+                           text, cache,
+                           add_distillation=add_distillation, add_translations=add_translations,
+                           label="new pov")
+
+
 async def change_sentence_structure(text: str, cache: ExampleCache,
                                     add_distillation: bool = False, add_translations: bool = False):
     """
-    Completely change sentence structure without change meaning.
+    Completely change sentence structure without changing meaning.
     """
-    await basic_gpt_prompt("Completely change the sentence structure, without changing the meaning",
+    await basic_gpt_prompt("Completely reorder all parts-of-speech, without changing the meaning",
                            text, cache,
                            add_distillation=add_distillation, add_translations=add_translations,
-                           label="structure change")
+                           label="new structure")
+
+
+async def change_tense(text: str, cache: ExampleCache,
+                       add_distillation: bool = False, add_translations: bool = False):
+    """
+    Change tense without changing meaning.
+    """
+    await basic_gpt_prompt("Change the tense of the sentence, without changing the meaning",
+                           text, cache,
+                           add_distillation=add_distillation, add_translations=add_translations,
+                           label="new tense")
 
 
 async def create_text_variations_using_translation(text: str, cache: ExampleCache,
@@ -194,25 +234,28 @@ async def distill_text(text: str, cache: ExampleCache, count: int = 1, cut_ratio
     Shorten, without altering meaning. Set a higher `stop` to do multiple distillations, but things can turn to
     nonsense. Set `add_translations` to True to use translation filters to more variations of distilled text.
     """
-    len_to_cut = int(len(text.split()) * cut_ratio)
-    async with AsyncOpenAI() as client:
-        completion = await client.chat.completions.create(
-            messages=([{
-                "role": "user",
-                # We cut from the first half because there is a butterfly effect here. Changing the beginning of a
-                # sentence increases the likelihood of generating a more varied overall result.
-                "content": f"Cut {len_to_cut} words from the beginning, without changing the meaning: {text}",
-            }]),
-            model=DEFAULT_MINI_MODEL, n=1,
-            timeout=HTTPX_TIMEOUT)
-        if await cache.add_example(completion.choices[0].message.content):
-            logger.info(f"{completion.choices[0].message.content} [distilled {count}]")
-            if add_translations:
+    word_cnt = len(text.split())
+    if word_cnt > 10:
+        len_to_cut = int(word_cnt * cut_ratio)
+        async with AsyncOpenAI() as client:
+            completion = await client.chat.completions.create(
+                messages=([{
+                    "role": "user",
+                    # We cut from the first half because there is a butterfly effect here. Changing the beginning of a
+                    # sentence increases the likelihood of generating a more varied overall result.
+                    "content": f"Cut {len_to_cut} words from the beginning, without changing the meaning: {text}",
+                }]),
+                model=DEFAULT_MINI_MODEL, n=1,
+                timeout=HTTPX_TIMEOUT)
+            if await cache.add_example(completion.choices[0].message.content):
+                logger.info(f"{completion.choices[0].message.content} [distilled {count}]")
+                if add_translations:
+                    _ = asyncio.create_task(
+                        create_text_variations_using_translation(completion.choices[0].message.content, cache))
+            if count < stop:
                 _ = asyncio.create_task(
-                    create_text_variations_using_translation(completion.choices[0].message.content, cache))
-        if count < stop:
-            _ = asyncio.create_task(
-                distill_text(completion.choices[0].message.content, cache, count=count+1, cut_ratio=cut_ratio, stop=stop))
+                    distill_text(completion.choices[0].message.content, cache,
+                                 count=count+1, cut_ratio=cut_ratio, stop=stop))
 
 
 async def filter_text_using_translation(text: str, dest_lang: str, src_lang: str = "en"):
@@ -242,16 +285,42 @@ async def main(txt_file: str, cache: ExampleCache, training_split_percentage: fl
             # Augment example diversification
             await asyncio.gather(*[
                 create_text_variations_using_translation(line, cache, add_distillation=True),
-                # TODO: convert nouns and verbs to different forms or tenses.
-                change_nouns_and_verbs(line, cache, add_distillation=True),
-                change_sentence_structure(line, cache, add_distillation=True),
-                distill_text(line, cache),  # Maybe distill should happen at the end of each of the above?
+                distill_text(line, cache),
             ])
-    while cache.has_tasks_outstanding():
-        logger.info(f"wait for {cache.estimate_num_tasks_outstanding()} more tasks to complete")
-        await asyncio.sleep(3)
+            await cache.while_has_tasks_outstanding()
+
+            await asyncio.gather(*[
+                change_modifiers(line, cache, add_distillation=True),
+                change_modifiers(line, cache, add_translations=True),
+            ])
+            await cache.while_has_tasks_outstanding()
+
+            await asyncio.gather(*[
+                change_nouns_and_verbs(line, cache, add_distillation=True),
+                change_nouns_and_verbs(line, cache, add_translations=True),
+            ])
+            await cache.while_has_tasks_outstanding()
+
+            await asyncio.gather(*[
+                change_pov(line, cache, add_distillation=True),
+                change_pov(line, cache, add_translations=True),
+            ])
+            await cache.while_has_tasks_outstanding()
+
+            await asyncio.gather(*[
+                change_sentence_structure(line, cache, add_distillation=True),
+                change_sentence_structure(line, cache, add_translations=True),
+            ])
+            await cache.while_has_tasks_outstanding()
+
+            await asyncio.gather(*[
+                change_tense(line, cache, add_distillation=True),
+                change_tense(line, cache, add_translations=True),
+            ])
+            await cache.while_has_tasks_outstanding()
 
     candidates = cache.get_examples()
+    random.shuffle(candidates)
 
     training_stop_idx = int(len(candidates) * training_split_percentage)
     training_set = [f"{example}\n\n" for example in candidates[:training_stop_idx]]
