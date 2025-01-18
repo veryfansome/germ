@@ -1,4 +1,3 @@
-from bs4 import BeautifulSoup
 from starlette.concurrency import run_in_threadpool
 import asyncio
 import inflect

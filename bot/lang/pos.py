@@ -8,8 +8,13 @@ import os
 logger = logging.getLogger(__name__)
 
 # Load the pre-trained POS tagger
-pos_tagger = (SequenceTagger.load("pos") if not os.path.isdir("/src/models/germ/pos/final-model.pt")
-              else SequenceTagger.load("/src/models/germ/pos/final-model.pt"))
+model_file = "/src/models/germ/pos/final-model.pt"
+if not os.path.isdir(model_file):
+    logger.info(f"{model_file} not found, loading vanilla POS tagger")
+    pos_tagger = SequenceTagger.load("pos")
+else:
+    logger.info(f"loading POS tagger from {model_file}")
+    pos_tagger = SequenceTagger.load(model_file)
 pos_tagger_info = {
     "tag_dictionary": pos_tagger.label_dictionary,
     "tag_format": pos_tagger.tag_format
@@ -40,7 +45,7 @@ def train_pos_tagger():
                   # May need toggling
                   embeddings_storage_mode="gpu",
                   # Reduce learning_rate to 0.001 even if there are signs of overfitting due to small num of examples.
-                  learning_rate=0.01,
+                  learning_rate=0.001,
                   # Fewer epochs to prevent overfitting
                   max_epochs=3,
                   # Small batch for more frequent updates, which may help with generalization with fewer examples.

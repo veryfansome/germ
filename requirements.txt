@@ -30,4 +30,5 @@ sentence_transformers
 scikit-learn
 sqlalchemy[asyncio]
 starlette
+tensorflow
 uvicorn[standard]

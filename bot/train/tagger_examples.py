@@ -48,13 +48,13 @@ translator = Translator()
 
 
 class ExampleCache:
-    def __init__(self, additional_instruction: list[str] = None,
+    def __init__(self, additional_instructions: list[str] = None,
                  on_classify: Callable[[str, str], str] = None, on_diff: Callable[[str, str], str] = None):
         self.cache: dict[UUID, Union[str, bool]] = {}
         self.instructions_blob = "".join([f"- {instruction}\n" for instruction in [
             "Change flair part-of-speech tags in column 2, to the corrected value if incorrect.",
             "Don't change anything from column 1.",
-        ] + (additional_instruction or [])])
+        ] + (additional_instructions or [])])
         self.on_classify = on_classify
         self.on_diff = on_diff
 
@@ -121,7 +121,7 @@ class ExampleCache:
         while num_outstanding > threshold:
             await asyncio.sleep(interval)
             num_outstanding = self.estimate_num_tasks_outstanding()
-            logger.info(f"wait for {num_outstanding} more tasks to complete")
+            logger.info(f"waiting for {num_outstanding} more tasks to complete")
 
 
 async def basic_gpt_prompt(prompt: str, text: str, cache: ExampleCache,
@@ -282,42 +282,45 @@ async def main(txt_file: str, cache: ExampleCache, training_split_percentage: fl
             line = line.strip()
             logger.info(f"{line} [original]")
             await cache.add_example(line)
+
             # Augment example diversification
             await asyncio.gather(*[
                 create_text_variations_using_translation(line, cache, add_distillation=True),
-                distill_text(line, cache),
+                distill_text(line, cache, add_translations=True),
             ])
             await cache.while_has_tasks_outstanding()
 
-            await asyncio.gather(*[
-                change_modifiers(line, cache, add_distillation=True),
-                change_modifiers(line, cache, add_translations=True),
-            ])
-            await cache.while_has_tasks_outstanding()
+            #await asyncio.gather(*[
+            #    change_modifiers(line, cache, add_distillation=True),
+            #    change_modifiers(line, cache, add_translations=True),
+            #])
+            #await cache.while_has_tasks_outstanding()
 
-            await asyncio.gather(*[
-                change_nouns_and_verbs(line, cache, add_distillation=True),
-                change_nouns_and_verbs(line, cache, add_translations=True),
-            ])
-            await cache.while_has_tasks_outstanding()
+            #await asyncio.gather(*[
+            #    change_nouns_and_verbs(line, cache, add_distillation=True),
+            #    change_nouns_and_verbs(line, cache, add_translations=True),
+            #])
+            #await cache.while_has_tasks_outstanding()
 
-            await asyncio.gather(*[
-                change_pov(line, cache, add_distillation=True),
-                change_pov(line, cache, add_translations=True),
-            ])
-            await cache.while_has_tasks_outstanding()
+            #await asyncio.gather(*[
+            #    change_pov(line, cache, add_distillation=True),
+            #    change_pov(line, cache, add_translations=True),
+            #])
+            #await cache.while_has_tasks_outstanding()
 
-            await asyncio.gather(*[
-                change_sentence_structure(line, cache, add_distillation=True),
-                change_sentence_structure(line, cache, add_translations=True),
-            ])
-            await cache.while_has_tasks_outstanding()
+            #await asyncio.gather(*[
+            #    change_sentence_structure(line, cache, add_distillation=True),
+            #    change_sentence_structure(line, cache, add_translations=True),
+            #])
+            #await cache.while_has_tasks_outstanding()
 
-            await asyncio.gather(*[
-                change_tense(line, cache, add_distillation=True),
-                change_tense(line, cache, add_translations=True),
-            ])
-            await cache.while_has_tasks_outstanding()
+            #await asyncio.gather(*[
+            #    change_tense(line, cache, add_distillation=True),
+            #    change_tense(line, cache, add_translations=True),
+            #])
+            #await cache.while_has_tasks_outstanding()
+
+    await cache.while_has_tasks_outstanding(threshold=0)
 
     candidates = cache.get_examples()
     random.shuffle(candidates)
@@ -345,5 +348,9 @@ if __name__ == '__main__':
 
     setup_logging()
     asyncio.run(main("/src/data/germ/pos/ipaddr.txt", ExampleCache(
-        additional_instruction=["Tag IP addresses as nouns."],
+        additional_instructions=[
+            "Tag IP addresses as nouns.",
+            ("Tag prefix lengths as adjectives when adjacent to IP addresses in CIDR ranges "
+             "or as nouns if by themselves."),
+        ],
     )))
