@@ -39,7 +39,8 @@ def build_char_vocab():
 
     # 3) Add any extra sets you want, e.g. some basic Unicode punctuation:
     #    “ ” ‘ ’ — … etc., or certain emoji ranges, etc.
-    extra_chars = ["…", "–", "—", "“", "”", "‘", "’", "¶", "§", "€", "£", "¥", "•", "±", "×", "÷", "°", "©", "®"]
+    extra_chars = ["…", "–", "—", "“", "”", "‘", "’", "¶", "§", "€", "£", "¥", "₽", "₹", "₩", "•", "±", "×", "÷", "°",
+                   "²", "©", "®", "─", "│", "╱"]
     for ch in extra_chars:
         if ch not in char2idx:
             char2idx[ch] = current_index
@@ -351,6 +352,7 @@ if __name__ == "__main__":
     from datetime import datetime
     from nltk.corpus import words
     from sklearn.model_selection import train_test_split
+    import argparse
     import os
     import tensorflow.keras as keras
 
@@ -358,13 +360,10 @@ if __name__ == "__main__":
     from observability.logging import setup_logging
     setup_logging()
 
-    _char2idx, _idx2char = build_char_vocab()
-
-    _label2idx = {"B": 0, "I": 1, "E": 2, "S": 3}
-    _idx2label = {v: k for k, v in _label2idx.items()}
-
-    words_corpus = [[w] for w in words.words()]
-    logger.info(f"english_words_corpus[:10]: {words_corpus[:10]}")
+    arg_parser = argparse.ArgumentParser(description="Train a tokenization model.")
+    arg_parser.add_argument("--words-corpus", action="store_true", default=False,
+                            help="Use words corpus.")
+    args = arg_parser.parse_args()
 
     sample_corpus = [
         ["Hello", ",", "world", "!"],
@@ -424,28 +423,18 @@ if __name__ == "__main__":
         sample_corpus.append(naive_tokens)
 
     ##
-    # Prepare training data
+    # Prepare model
+
+    _char2idx, _idx2char = build_char_vocab()
+
+    _label2idx = {"B": 0, "I": 1, "E": 2, "S": 3}
+    _idx2label = {v: k for k, v in _label2idx.items()}
 
     VOCAB_SIZE = len(_char2idx)  # number of distinct characters, including [PAD], [UNK], etc.
     EMBED_DIM = 64  # dimensionality of the character embedding
     LSTM_UNITS = 128  # number of units in the LSTM (per direction)
     NUM_CLASSES = 4  # for B, I, E, S labels
     MAX_SEQ_LEN = 140  # Same as max_len parameter of chunk_text_by_whitespace()
-
-    # Word list data set
-
-    word_corpus_kit = process_corpus(
-        words_corpus, MAX_SEQ_LEN, _char2idx, _idx2char, _label2idx, _idx2label,
-        name="word_corpus")
-
-    # Sample corpus data set
-
-    sample_corpus_kit = process_corpus(
-        sample_corpus, MAX_SEQ_LEN, _char2idx, _idx2char, _label2idx, _idx2label,
-        name="sample_corpus")
-
-    ##
-    # Prepare model
 
     model_dir = "/src/models/germ/tokenizer"
     model_files = [f for f in os.listdir(model_dir)]
@@ -497,7 +486,24 @@ if __name__ == "__main__":
     model_files.sort()
 
     ##
+    # Prepare training data
+
+    # Word list data set
+    if args.words_corpus:
+        words_corpus = [[w] for w in words.words()]
+        logger.info(f"english_words_corpus[:10]: {words_corpus[:10]}")
+
+        word_corpus_kit = process_corpus(
+            words_corpus, MAX_SEQ_LEN, _char2idx, _idx2char, _label2idx, _idx2label,
+            name="word_corpus")
+        fit_and_test(tokenizer_model, word_corpus_kit, epochs=1, batch_size=16)
+        tokenizer_model.save(f"{model_dir}/{datetime.now().strftime("%Y%m%d%H%M%S")}.keras")
+
+    # Sample corpus data set
+    sample_corpus_kit = process_corpus(
+        sample_corpus, MAX_SEQ_LEN, _char2idx, _idx2char, _label2idx, _idx2label,
+        name="sample_corpus")
+
+    ##
     # Train the model
-    fit_and_test(tokenizer_model, word_corpus_kit)
-    tokenizer_model.save(f"{model_dir}/{datetime.now().strftime("%Y%m%d%H%M%S")}.keras")
     fit_and_test(tokenizer_model, sample_corpus_kit)
