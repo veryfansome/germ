@@ -38,19 +38,30 @@ def build_char_vocab():
             current_index += 1
 
     # 3) Add any extra sets you want, e.g. some basic Unicode punctuation:
-    #    “ ” ‘ ’ — … etc., or certain emoji ranges, etc.
-    extra_chars = ["…", "–", "—", "“", "”", "‘", "’", "¶", "§", "€", "£", "¥", "₽", "₹", "₩", "•", "±", "×", "÷", "°",
-                   "²", "©", "®", "─", "│", "╱"]
+    #    “ ” ‘ ’ — … etc.
+    extra_chars = ["…", "–", "—", "“", "”", "‘", "’", "′", "″", "•", "¶", "§",
+                   "€", "£", "¥", "₽", "₹", "₩",
+                   "±", "°", "²", "³", "·", "×", "÷", "∠", "√", "∞", "∂", "∑", "∏", "∫", "∇", "≠", "≤", "≥", "≈", "≡",
+                   "α", "β", "γ", "δ", "ε", "θ", "λ", "μ", "π", "σ", "φ", "ω",
+                   "µ",  # Engineering micro (U+00B5) is separate from greek one (U+03BC) above.
+                   "→", "←", "↑", "↓",
+                   "©", "®", "♥", "★", "✓",
+                   "─", "│", "╱"]
     for ch in extra_chars:
         if ch not in char2idx:
             char2idx[ch] = current_index
             idx2char[current_index] = ch
             current_index += 1
 
-    # 4) If you want a few emojis, add them. The selection below should be thought of as emoji classes. Additional
-    #    preprocessing can expand coverage of more emojis without bloating the embedding matrix. Convert similar emojis
-    #    to one of the ones below.
-    emojis = ["😄", "😞", "😡", "😜", "😂", "😍", "👍", "👎", "🎉"]
+    # 4) Common emojis
+    emojis = [
+        "✉️", "✏️", "✨", "❤️", "⭐", "🌈", "🌍", "🌎", "🌏", "🌟", "🌮", "🌯", "🍀", "🍇", "🍉", "🍎", "🍏", "🍔",
+        "🍕", "🍜", "🍟", "🍣", "🍷", "🍺", "🍿", "🎁", "🎂", "🎉", "🎶", "🏅", "🏆", "🐱", "🐶", "🐾", "👀", "👍",
+        "👎", "👏", "👏", "💃", "💎", "💔", "💕", "💖", "💞", "💥", "💪", "💬", "💯", "📅", "📨", "📷", "🔥", "🕺",
+        "🗯️", "😂", "😄", "😅", "😇", "😉", "😊", "😍", "😎", "😏", "😘", "😜", "😞", "😡", "😢", "😭", "😴", "😷",
+        "🙄", "🙌", "🙏", "🚀", "🤑", "🤒", "🤔", "🤗", "🤝", "🤝", "🤟", "🤣", "🤤", "🤦", "🤩", "🤪", "🤭", "🤮",
+        "🤯", "🤳", "🤷", "🥇", "🥈", "🥉", "🥰", "🥲", "🥳", "🥵", "🥶", "🥺", "🦄", "🦋"
+    ]
     for emo in emojis:
         if emo not in char2idx:
             char2idx[emo] = current_index
@@ -356,12 +367,15 @@ if __name__ == "__main__":
     import os
     import tensorflow.keras as keras
 
+    from bot.lang.corpus.numbers import generate_numbers_corpus
     from bot.lang.dependencies import words
     from observability.logging import setup_logging
     setup_logging()
 
     arg_parser = argparse.ArgumentParser(description="Train a tokenization model.")
-    arg_parser.add_argument("--words-corpus", action="store_true", default=False,
+    arg_parser.add_argument("--numbers", action="store_true", default=False,
+                            help="Use numbers corpus.")
+    arg_parser.add_argument("--words", action="store_true", default=False,
                             help="Use words corpus.")
     args = arg_parser.parse_args()
 
@@ -489,14 +503,24 @@ if __name__ == "__main__":
     # Prepare training data
 
     # Word list data set
-    if args.words_corpus:
+    if args.words:
         words_corpus = [[w] for w in words.words()]
-        logger.info(f"english_words_corpus[:10]: {words_corpus[:10]}")
+        logger.info(f"words_corpus[:10]: {words_corpus[:10]}")
 
-        word_corpus_kit = process_corpus(
+        words_corpus_kit = process_corpus(
             words_corpus, MAX_SEQ_LEN, _char2idx, _idx2char, _label2idx, _idx2label,
-            name="word_corpus")
-        fit_and_test(tokenizer_model, word_corpus_kit, epochs=1, batch_size=16)
+            name="words_corpus")
+        fit_and_test(tokenizer_model, words_corpus_kit, epochs=1, batch_size=16)
+        tokenizer_model.save(f"{model_dir}/{datetime.now().strftime("%Y%m%d%H%M%S")}.keras")
+
+    if args.numbers:
+        numbers_corpus = generate_numbers_corpus()
+        logger.info(f"numbers_corpus[:10]: {numbers_corpus[:10]}")
+
+        numbers_corpus_kit = process_corpus(
+            numbers_corpus, MAX_SEQ_LEN, _char2idx, _idx2char, _label2idx, _idx2label,
+            name="numbers_corpus")
+        fit_and_test(tokenizer_model, numbers_corpus_kit, epochs=1, batch_size=16)
         tokenizer_model.save(f"{model_dir}/{datetime.now().strftime("%Y%m%d%H%M%S")}.keras")
 
     # Sample corpus data set
