@@ -209,7 +209,7 @@ suffixed_blobs = {
 suffixed_symbol_pattern = re.compile("(" + ("|".join([re.escape(symbol) for symbol in suffixed_blobs.keys()])) + ")$")
 
 
-def generate_numbers_corpus(num_examples=236_736):  # Same as number of english words in nltk word corpus
+def generate_corpus(num_examples=236_736):  # Same as number of english words in nltk word corpus
     """
     Generates a list of num_examples random numeric strings representative
     of typical digit-based data (int, decimal, fraction) with optional attached symbols/units.
@@ -412,5 +412,5 @@ def tokenize_example_text(example: str):
 
 
 if __name__ == '__main__':
-    numeric_data = generate_numbers_corpus(10_000)  # e.g., 10k for testing
+    numeric_data = generate_corpus(10_000)  # e.g., 10k for testing
     print(numeric_data[:100])  # Inspect the first few

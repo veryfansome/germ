@@ -367,7 +367,7 @@ if __name__ == "__main__":
     import os
     import tensorflow.keras as keras
 
-    from bot.lang.corpus.numbers import generate_numbers_corpus
+    from bot.lang.corpus.numbers import generate_corpus as generate_numbers_corpus
     from bot.lang.dependencies import words
     from observability.logging import setup_logging
     setup_logging()
