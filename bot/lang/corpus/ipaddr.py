@@ -94,20 +94,21 @@ def augment_ipv4_zeros(addr_blob: str):
 
     if ".0" in addr_blob:
         # Examples with wildcards or placeholders
-        for repl in [".*", ".x", ".X"]:
-            for pattern in [
-                r"(\.0)+(?=/)",        # Replace with truncate
-                r"(\.0){1}(?=(/|.0))"  # Replace each
-            ]:
-                repl_addr, _ = re.subn(pattern, repl, addr_blob)
-                augmented_examples.append(repl_addr)
-                repl_addr_sans_mask, _ = split_cidr_mask(repl_addr)
-                augmented_examples.append(repl_addr_sans_mask)
+        #for repl in [".*", ".x", ".X"]:
+        #    for pattern in [
+        #        r"(\.0)+(?=/)",        # Replace with truncate
+        #        r"(\.0){1}(?=(/|.0))"  # Replace each
+        #    ]:
+        #        repl_addr, _ = re.subn(pattern, repl, addr_blob)
+        #        augmented_examples.append(repl_addr)
+        #        repl_addr_sans_mask, _ = split_cidr_mask(repl_addr)
+        #        augmented_examples.append(repl_addr_sans_mask)
 
         # Examples with placeholders
-        randomized_addr = re.sub(r"(\.0){1}(?=(\.0|$))",
-                                 f".{random.choice(list(range(1, 255)))}",
-                                 addr_sans_mask)
+        # TODO: this doing this and it's not desired.
+        # >>> re.sub(r"(\.0){1}(?=(\.0|$))", f".{random.choice(list(range(1, 255)))}", "10.0.0.0")
+        # '10.211.211.211'
+        randomized_addr = re.sub(r"(\.0){1}(?=(\.0|$))", f".{random.choice(list(range(1, 255)))}", addr_sans_mask)
         augmented_examples.append(randomized_addr)
 
     return augmented_examples
