@@ -185,7 +185,7 @@ def augment_ipv4_zeros(addr_blob: str):
     return augmented_examples
 
 
-def generate_corpus(num_examples=60_000):
+def generate_corpus(num_examples=30_000):
     corpus = {f"/{i}": [f"/{i}"] for i in range(1, 129)}  # Covers masks for IPv4 and IPv6
     for mask in ipv4_masks:
         corpus[mask] = [mask]

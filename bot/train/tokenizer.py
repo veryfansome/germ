@@ -39,7 +39,8 @@ def build_char_vocab():
 
     # 3) Add any extra sets you want, e.g. some basic Unicode punctuation:
     #    “ ” ‘ ’ — … etc.
-    extra_chars = ["…", "–", "—", "“", "”", "‘", "’", "′", "″", "•", "¶", "§",
+    extra_chars = ["ā", "á", "č", "ç", "é", "è", "ê", "í", "ñ", "ô", "ö", "š", "ü", "ž",
+                   "…", "–", "—", "“", "”", "‘", "’", "′", "″", "•", "¶", "§",
                    "€", "£", "¥", "₽", "₹", "₩",
                    "±", "°", "²", "³", "·", "×", "÷", "∠", "√", "∞", "∂", "∑", "∏", "∫", "∇", "≠", "≤", "≥", "≈", "≡",
                    "α", "β", "γ", "δ", "ε", "θ", "λ", "μ", "π", "σ", "φ", "ω",
@@ -367,53 +368,23 @@ if __name__ == "__main__":
     import os
     import tensorflow.keras as keras
 
+    from bot.lang.corpus.ipaddrs import generate_corpus as generate_ipaddrs_corpus
     from bot.lang.corpus.numbers import generate_corpus as generate_numbers_corpus
+    from bot.lang.corpus.sentences import examples as sample_corpus
     from bot.lang.dependencies import words
     from observability.logging import setup_logging
     setup_logging()
 
     arg_parser = argparse.ArgumentParser(description="Train a tokenization model.")
+    arg_parser.add_argument("--ipaddrs", action="store_true", default=False,
+                            help="Use IP address corpus.")
     arg_parser.add_argument("--numbers", action="store_true", default=False,
                             help="Use numbers corpus.")
+    arg_parser.add_argument("--pool", action="store_true", default=False,
+                            help="Pool words, numbers, and IP addresses into a single corpus.")
     arg_parser.add_argument("--words", action="store_true", default=False,
                             help="Use words corpus.")
     args = arg_parser.parse_args()
-
-    sample_corpus = [
-        ["Hello", ",", "world", "!"],
-        ["I", "love", "Python", "3.12"],
-        ["You", "can't", "use", "that", "name", "because", ",", "you", "can", "see", "their", "©", "next", "to",
-         "it", "."],
-        ["You", "can", "email", "me", "at", "john@example.com", "."],
-        ["You", "can", "check", "what's", "in", "your", "home", "directory", "by", "running", "`", "ls", "-la", "~/",
-         "`", "."],
-        ["Use", "a", "subnet", "of", "255.255.255.0", "or", "/24", "."],
-        ["My", "router", "is", "located", "at", "192.168.1.1", "with", "a", "subnet", "of", "/23", "."],
-        ["At", "my", "company", ",", "our", "internal", "network", "uses", "10.0.0.0/8"],
-        ["An", "IP", "address", "might", "look", "like", "this", ":", "192.168.1.10", "."],
-        ["Oh", ",", "0.0.0.0/0", "is", "special", "."],
-        ["127.0.0.1", "is", "an", "IPv4", "address", "."],
-        ["The", "address", "127.0.0.1", "is", "often", "referred", "to", "as", "the", "loopback", "address", "."],
-        ["The", "notation", "10.0.0.0/8", "is", "a", "representation", "of", "an", "IP", "address", "and", "its",
-         "associated", "subnet", "mask", "in", "CIDR", "(", "Classless", " Inter-Domain", " Routing", ")",
-         "notation", "."],
-        ["Only", "192.168.x.x", "is", "."],
-        ["The", "entire", "127.x.x.x", "address", "block", "is", "reserved", "for", "loopback", ",", "which",
-         "seems", "like", "a", "colossal", "waste", "."],
-        ["128.0.0.0", "is", "the", "start", "address", "of", "formerly", "\"", "Class", "B", "\"", "."],
-        ["169.254.0.0/16", "(", "169.254.0.0", "–", "169.254.255.255", ")", "has", "been", "reserved", "for",
-         "link-local", "addressing", "(", "RFC", "6890", ")", "."],
-        ["55.255.255.255", "is", "reserved", "for", "limited", "broadcast", "destination", "address", "."],
-        ["A", "/30", "subnet", ",", "such", "as", "10.0.0.0/30", ",", "provides", "just", "four", "addresses", "(",
-         "10.0.0.0", "to", "10.0.0.3", ")", "."],
-        ["It", "allows", "for", "(", "2", "^", "{", "24", "}", "-", "2", ",", "or", "16,777,214", "usable",
-         "addresses", "."],
-        ["First", ",", "you", "need", "to", "`", "terraform", "init", "`", "."],
-        ["To", "become", "the", "root", "user", ",", "you", "can", "run", "`", "sudo", "-i", "`", ",", "but", "that",
-         "may", "not", "be", "allowed", "."],
-        ["To", "quickly", "see", "which", "ports", "are", "up", ",", "you", "can", "use", "`", "netstat", "-plnt",
-         "`", "."],
-    ]
 
     # Chunking texts longer than 140 characters.
     sample_long_text = (
@@ -445,13 +416,15 @@ if __name__ == "__main__":
     _idx2label = {v: k for k, v in _label2idx.items()}
 
     VOCAB_SIZE = len(_char2idx)  # number of distinct characters, including [PAD], [UNK], etc.
+    logger.info(f"vocab_size: {VOCAB_SIZE}")
+
     EMBED_DIM = 64  # dimensionality of the character embedding
     LSTM_UNITS = 128  # number of units in the LSTM (per direction)
     NUM_CLASSES = 4  # for B, I, E, S labels
     MAX_SEQ_LEN = 140  # Same as max_len parameter of chunk_text_by_whitespace()
 
     model_dir = "/src/models/germ/tokenizer"
-    model_files = [f for f in os.listdir(model_dir)]
+    model_files = [f for f in os.listdir(model_dir) if f.endswith(".keras")]
 
     if not model_files:
         # 1) Define Inputs
@@ -493,7 +466,9 @@ if __name__ == "__main__":
         )
     else:
         model_files.sort(reverse=True)  # Descending
-        tokenizer_model = keras.models.load_model(f"{model_dir}/{model_files[0]}")
+        model_file = f"{model_dir}/{model_files[0]}"
+        logger.info(f"loading model from {model_file}")
+        tokenizer_model = keras.models.load_model(model_file)
 
     # 7) Inspect the model
     tokenizer_model.summary()
@@ -521,6 +496,26 @@ if __name__ == "__main__":
             numbers_corpus, MAX_SEQ_LEN, _char2idx, _idx2char, _label2idx, _idx2label,
             name="numbers_corpus")
         fit_and_test(tokenizer_model, numbers_corpus_kit, epochs=1, batch_size=16)
+        tokenizer_model.save(f"{model_dir}/{datetime.now().strftime("%Y%m%d%H%M%S")}.keras")
+
+    if args.ipaddrs:
+        ipaddrs_corpus = generate_ipaddrs_corpus()
+        logger.info(f"ipaddrs_corpus[:10]: {ipaddrs_corpus[:10]}")
+
+        ipaddrs_corpus_kit = process_corpus(
+            ipaddrs_corpus, MAX_SEQ_LEN, _char2idx, _idx2char, _label2idx, _idx2label,
+            name="ipaddrs_corpus")
+        fit_and_test(tokenizer_model, ipaddrs_corpus_kit, epochs=1, batch_size=16)
+        tokenizer_model.save(f"{model_dir}/{datetime.now().strftime("%Y%m%d%H%M%S")}.keras")
+
+    if args.pool:
+        pool_corpus = [[w] for w in words.words()] + generate_numbers_corpus() + generate_ipaddrs_corpus()
+        logger.info(f"pool_corpus[:10]: {pool_corpus[:10]}")
+
+        pool_corpus_kit = process_corpus(
+            pool_corpus, MAX_SEQ_LEN, _char2idx, _idx2char, _label2idx, _idx2label,
+            name="pool_corpus")
+        fit_and_test(tokenizer_model, pool_corpus_kit, epochs=1, batch_size=16)
         tokenizer_model.save(f"{model_dir}/{datetime.now().strftime("%Y%m%d%H%M%S")}.keras")
 
     # Sample corpus data set
