@@ -52,6 +52,20 @@ CREATE UNIQUE INDEX idx_struct_type_att_pub_ident               ON struct_type  
 SELECT update_dt_modified_column('struct_type');
 
 
+CREATE TABLE text_block (
+      text_block_id                  						    SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
+    , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , dt_modified                     							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
+	, signature_uuid											UUID								NOT NULL
+    , text_block_type_id                    					SMALLINT                			NOT NULL
+    , PRIMARY KEY (text_block_id)
+    , CONSTRAINT fk_text_block_struct_type FOREIGN KEY (text_block_type_id) REFERENCES struct_type (struct_type_id)
+)
+;
+CREATE UNIQUE INDEX idx_text_block_signature_uuid               ON text_block                       USING btree (signature_uuid);
+SELECT update_dt_modified_column('text_block');
+
+
 DROP TABLE IF EXISTS top_level_domain CASCADE;
 CREATE TABLE top_level_domain (
       top_level_domain_id                  						SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
