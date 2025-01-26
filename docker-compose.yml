@@ -86,6 +86,8 @@ services:
     networks: [bots]
     container_name: *db-host
     image: postgres:16
+    volumes:
+      - ./:/src
     environment:
       POSTGRES_DB: germ
       POSTGRES_PASSWORD: *db-password
@@ -99,7 +101,6 @@ services:
       - ./:/src
     environment:
       <<: *local-dev
-      WAIT_FOR_AFTER_COMMAND: python -m bot.db.models
       WAIT_FOR_HOST: *db-host
       WAIT_FOR_PORT: 5432
     working_dir: /src
@@ -119,6 +120,7 @@ services:
       - ./:/src
     environment:
       <<: *local-dev
+      PGPASSWORD: ${POSTGRES_PASSWORD:-bacteria4life}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-Ma9icMicr0be}
     working_dir: /src
     command: [ "scripts/db-migrate.sh" ]

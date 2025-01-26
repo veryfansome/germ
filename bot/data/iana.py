@@ -1,10 +1,14 @@
 from datetime import datetime, timezone
+from sqlalchemy import MetaData, Table
 import httpx
 import logging
 
-from bot.db.models import SessionLocal, TopLevelDomainName
+from bot.db.models import SessionLocal, engine
 
 logger = logging.getLogger(__name__)
+
+sql_metadata = MetaData()
+top_level_domain_table = Table('top_level_domain', sql_metadata, autoload_with=engine)
 
 
 class IanaTLDCacher:
@@ -24,8 +28,8 @@ class IanaTLDCacher:
         num_before_load = len(self.known_tld_names)
         try:
             with SessionLocal() as session:
-                for tld_record in session.query(TopLevelDomainName).all():
-                    self.known_tld_names.add(tld_record.top_level_domain_name)
+                for tld_record in session.execute(top_level_domain_table.select()).fetchall():
+                    self.known_tld_names.add(tld_record.name)
             logger.info(f"loaded {len(self.known_tld_names) - num_before_load} TLD records from PostgreSQL")
         except httpx.RequestError as e:
             logger.error("failed to load TLD records from PostgreSQL", e)
@@ -40,16 +44,15 @@ class IanaTLDCacher:
                     if line.startswith("#"):
                         continue
                     tld_name = line.lower()
+
+                    dt_now = datetime.now(timezone.utc)
                     if tld_name not in self.known_tld_names:
                         self.known_tld_names.add(tld_name)
-                        tld_record = TopLevelDomainName(top_level_domain_name=line,
-                                                        time_created=datetime.now(timezone.utc))
-                        session.add(tld_record)
+                        top_level_domain_table.insert().values({"name": tld_name})
                     else:
-                        tld_record = session.query(TopLevelDomainName).filter_by(
-                            top_level_domain_name=tld_name).first()
+                        tld_record = top_level_domain_table.select().where(top_level_domain_table.c.name == tld_name)
                         if tld_record:
-                            tld_record.time_last_validated = datetime.now(timezone.utc)
+                            tld_record.dt_last_verified = dt_now
                 session.commit()
             logger.info(f"added {len(self.known_tld_names) - num_before_load} TLDs from {IanaTLDCacher.data_src_url}")
         except httpx.RequestError as e:

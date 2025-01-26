@@ -68,17 +68,6 @@ class CodeBlock(Base):
     )
 
 
-class DomainName(Base):
-    __tablename__ = "domain_name"
-    domain_name_id = Column(Integer, primary_key=True, autoincrement=True)
-
-    domain_name = Column(String)
-
-    __table_args__ = (
-        Index('idx__domain_name__domain_name', 'domain_name'),  # Secondary index
-    )
-
-
 class Paragraph(Base):
     __tablename__ = "paragraph"
     paragraph_id = Column(Integer, primary_key=True, autoincrement=True)
@@ -104,19 +93,6 @@ class Sentence(Base):
 
     __table_args__ = (
         Index('idx__sentence__sentence_signature', 'sentence_signature'),  # Secondary index
-    )
-
-
-class TopLevelDomainName(Base):
-    __tablename__ = "top_level_domain_name"
-    top_level_domain_name_id = Column(Integer, primary_key=True, autoincrement=True)
-
-    time_created = Column(DateTime(timezone=True))
-    time_last_validated = Column(DateTime(timezone=True))
-    top_level_domain_name = Column(String)
-
-    __table_args__ = (
-        Index('idx__top_level_domain_name__top_level_domain_name', 'top_level_domain_name'),  # Secondary index
     )
 
 
