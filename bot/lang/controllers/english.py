@@ -2,7 +2,7 @@ from starlette.concurrency import run_in_threadpool
 import asyncio
 import inflect
 
-from bot.graph.idea import CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler, idea_graph
+from bot.graph.control_plane import CodeBlockMergeEventHandler, ControlPlane, ParagraphMergeEventHandler, SentenceMergeEventHandler
 from bot.lang.parsers import get_html_soup, strip_html_elements
 from bot.lang.pos import get_pos_tags
 from bot.lang.classifiers import (
@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler):
-    def __init__(self, interval_seconds: int = 30):
+    def __init__(self, control_plane: ControlPlane, interval_seconds: int = 30):
+        self.control_plane = control_plane
         self.interval_seconds = interval_seconds
         self.sentence_merge_artifacts = []
 
@@ -44,11 +45,11 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         logger.info(f"paragraph_text: {paragraph_text}")
         previous_sentence_id = None
         for sentence in split_to_sentences(paragraph_text):
-            _, sentence_id, _ = await idea_graph.add_sentence(sentence)
-            _ = asyncio.create_task(idea_graph.link_paragraph_to_sentence(paragraph_id, sentence_id))
+            _, sentence_id, _ = await self.control_plane.add_sentence(sentence)
+            _ = asyncio.create_task(self.control_plane.link_paragraph_to_sentence(paragraph_id, sentence_id))
             if previous_sentence_id is not None:
                 _ = asyncio.create_task(
-                    idea_graph.link_sentence_to_previous_sentence(previous_sentence_id, sentence_id))
+                    self.control_plane.link_sentence_to_previous_sentence(previous_sentence_id, sentence_id))
 
     async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_parameters):
         logger.info(f"on_sentence_merge: sentence_id={sentence_id}, {sentence_parameters}, {sentence}")
@@ -61,7 +62,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         # TODO: is sorting by connections enough or should we also care about how many are recent?
         # Query semantic categories from graph, sorted by most connections
         semantic_categories = [t["semanticCategory"]["text"]
-                               for t in await idea_graph.get_semantic_category_desc_by_connections()]
+                               for t in await self.control_plane.get_semantic_category_desc_by_connections()]
         logger.debug(f"semantic_categories: {semantic_categories}")
 
         # "artifacts" that can be cached or persisted
@@ -86,10 +87,10 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         last_pos_tag = None
         for idx, word in enumerate(artifacts["pos_tags"]):
             text, tag = word
-            await idea_graph.add_part_of_speech(tag)
+            await self.control_plane.add_part_of_speech(tag)
             if last_pos_tag is not None:
                 task = asyncio.create_task(  # Link in background
-                    idea_graph.link_pos_tag_to_last_pos_tag(tag, idx, last_pos_tag, idx-1, sentence_id))
+                    self.control_plane.link_pos_tag_to_last_pos_tag(tag, idx, last_pos_tag, idx-1, sentence_id))
             last_pos_tag = tag
 
             if tag not in NOUN_POS_TAGS:
@@ -102,15 +103,15 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         logger.info(f"nouns: {nouns}")
         for noun, tag in nouns:
             if tag == "NN":  # Common singular
-                await idea_graph.add_noun_form(noun, noun)
-                await idea_graph.link_noun_form_to_sentence(noun, noun, tag, sentence_id)
+                await self.control_plane.add_noun_form(noun, noun)
+                await self.control_plane.link_noun_form_to_sentence(noun, noun, tag, sentence_id)
             elif tag == "NNP":  # Proper singular
-                await idea_graph.add_proper_noun_form(noun, noun)
-                await idea_graph.link_proper_noun_form_to_sentence(noun, noun, tag, sentence_id)
+                await self.control_plane.add_proper_noun_form(noun, noun)
+                await self.control_plane.link_proper_noun_form_to_sentence(noun, noun, tag, sentence_id)
             elif tag == "NNS":  # Common plural
                 singular = await run_in_threadpool(inflect_engine.singular_noun, noun)
-                await idea_graph.add_noun_form(singular, noun)
-                await idea_graph.link_noun_form_to_sentence(singular, noun, tag, sentence_id)
+                await self.control_plane.add_noun_form(singular, noun)
+                await self.control_plane.link_noun_form_to_sentence(singular, noun, tag, sentence_id)
             else:
                 # TODO: flesh out plural proper noun handling since we can't use inflect
                 logger.info(f"plural proper noun handling is WIP: {noun},{tag}")
@@ -147,16 +148,3 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         #        except Exception as e:
         #            logger.warning(f"failed to add noun: {noun}", e)
         self.sentence_merge_artifacts.append(artifacts)
-
-
-english_controller = EnglishController()
-
-
-async def main():
-    await english_controller.on_periodic_run()
-
-
-if __name__ == "__main__":
-    setup_logging()
-    while True:
-        asyncio.run(main())

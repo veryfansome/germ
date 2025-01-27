@@ -17,6 +17,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
+import asyncio
 import hashlib
 import os
 import subprocess
@@ -25,9 +26,10 @@ import traceback
 from bot.api.models import ChatMessage, ChatSessionSummary, SqlRequest
 from bot.chat.openai_handlers import ChatRoutingEventHandler, ResponseGraphingHandler, UserProfilingHandler
 from bot.db.models import DATABASE_URL, SessionLocal, engine
+from bot.db.neo4j import AsyncNeo4jDriver
 from bot.db.utils import db_stats_job
-from bot.graph.idea import idea_graph
-from bot.lang.controllers.english import english_controller
+from bot.graph.control_plane import ControlPlane
+from bot.lang.controllers.english import EnglishController
 from bot.websocket import (WebSocketConnectionManager,
                            get_chat_session_messages, get_chat_session_summaries,
                            update_chat_session_is_hidden)
@@ -67,7 +69,18 @@ tracer = trace.get_tracer(__name__)
 ##
 # App
 
-websocket_manager = WebSocketConnectionManager()
+neo4j_driver = AsyncNeo4jDriver()
+
+control_plane = ControlPlane(neo4j_driver)
+
+english_controller = EnglishController(control_plane)
+control_plane.add_code_block_merge_event_handler(english_controller)
+control_plane.add_paragraph_merge_event_handler(english_controller)
+control_plane.add_sentence_merge_event_handler(english_controller)
+
+response_grapher = ResponseGraphingHandler(control_plane)
+
+websocket_manager = WebSocketConnectionManager(control_plane)
 
 
 @asynccontextmanager
@@ -78,11 +91,8 @@ async def lifespan(app: FastAPI):
     :param app:
     :return:
     """
-    idea_graph.add_code_block_merge_event_handler(english_controller)
-    idea_graph.add_paragraph_merge_event_handler(english_controller)
-    idea_graph.add_sentence_merge_event_handler(english_controller)
+    await control_plane.initialize()
 
-    response_grapher = ResponseGraphingHandler()
     router = ChatRoutingEventHandler()
     # TODO: maybe this shouldn't happen with every message.
     # user_fact_profiler = UserProfilingHandler({
@@ -93,6 +103,7 @@ async def lifespan(app: FastAPI):
     #    },
     # })
     user_intent_profiler = UserProfilingHandler(
+        control_plane,
         {
             "intent": {
                 "type": "string",
@@ -110,9 +121,14 @@ async def lifespan(app: FastAPI):
     await db_stats_job()  # Warms up DB connections on startup
     websocket_manager.background_thread.start()
     # Started
+
     yield
+
     # Stopping
-    await websocket_manager.disconnect_all()
+    websocket_manager_disconnect_task = asyncio.create_task(websocket_manager.disconnect_all())
+    await neo4j_driver.shutdown()
+
+    await websocket_manager_disconnect_task
     websocket_manager.background_loop.stop()
     websocket_manager.background_thread.join()
     scheduler.shutdown()

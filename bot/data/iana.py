@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import MetaData, Table
+from sqlalchemy import MetaData, Table, update
 import httpx
 import logging
 
@@ -7,8 +7,7 @@ from bot.db.models import SessionLocal, engine
 
 logger = logging.getLogger(__name__)
 
-sql_metadata = MetaData()
-top_level_domain_table = Table('top_level_domain', sql_metadata, autoload_with=engine)
+top_level_domain_table = Table('top_level_domain', MetaData(), autoload_with=engine)
 
 
 class IanaTLDCacher:
@@ -50,9 +49,12 @@ class IanaTLDCacher:
                         self.known_tld_names.add(tld_name)
                         top_level_domain_table.insert().values({"name": tld_name})
                     else:
-                        tld_record = top_level_domain_table.select().where(top_level_domain_table.c.name == tld_name)
+                        tld_stmt = top_level_domain_table.select().where(top_level_domain_table.c.name == tld_name)
+                        tld_record = session.execute(tld_stmt).fetchone()
                         if tld_record:
-                            tld_record.dt_last_verified = dt_now
+                            tld_update_stmt = update(top_level_domain_table).where(
+                                top_level_domain_table.c.name == tld_name).values(dt_last_verified=dt_now)
+                            session.execute(tld_update_stmt)
                 session.commit()
             logger.info(f"added {len(self.known_tld_names) - num_before_load} TLDs from {IanaTLDCacher.data_src_url}")
         except httpx.RequestError as e:

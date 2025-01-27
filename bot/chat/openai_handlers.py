@@ -8,7 +8,7 @@ import json
 import logging
 
 from bot.api.models import ChatRequest, ChatResponse
-from bot.graph.idea import idea_graph
+from bot.graph.control_plane import ControlPlane
 from bot.lang.parsers import extract_markdown_page_elements
 from bot.websocket import WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender
 from observability.annotations import measure_exec_seconds
@@ -191,7 +191,8 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
 
 
 class ResponseGraphingHandler(WebSocketSendEventHandler):
-    def __init__(self):
+    def __init__(self, control_plane: ControlPlane):
+        self.control_plane = control_plane
         self.node_types = {
             "block_code": "CodeBlock",
             "header": "Header",
@@ -227,13 +228,13 @@ class ResponseGraphingHandler(WebSocketSendEventHandler):
             logger.debug(f"markdown element: {element}")
             # `paragraph` and `code_block` are ordered at the top for frequency
             if element[0] == "paragraph":
-                _, paragraph_id, _ = await idea_graph.add_paragraph(element[1])
+                _, paragraph_id, _ = await self.control_plane.add_paragraph(element[1])
                 this_element_attrs = {"paragraph_id": paragraph_id}
             elif element[0] == "block_code":
-                _, code_block_id, _ = await idea_graph.add_code_block(element[2], language=element[1])
+                _, code_block_id, _ = await self.control_plane.add_code_block(element[2], language=element[1])
                 this_element_attrs = {"code_block_id": code_block_id}
             elif element[0] == "header":
-                await idea_graph.add_header(element[1])
+                await self.control_plane.add_header(element[1])
                 this_element_attrs = {"text": element[1]}
             # TODO: List may need its own node type with vertexes to item sentences
             #elif element[0] == "list":
@@ -247,11 +248,11 @@ class ResponseGraphingHandler(WebSocketSendEventHandler):
                 logger.info(f"unsupported element type: {element[0]}")
                 continue
 
-            _ = asyncio.create_task(idea_graph.link_page_element_to_chat_response(
+            _ = asyncio.create_task(self.control_plane.link_page_element_to_chat_response(
                 self.node_types[element[0]], this_element_attrs, chat_response_sent_id))
 
             if last_element_type is not None and last_element_attrs is not None:
-                _ = asyncio.create_task(idea_graph.link_successive_page_elements(
+                _ = asyncio.create_task(self.control_plane.link_successive_page_elements(
                     last_element_type, last_element_attrs,
                     self.node_types[element[0]], this_element_attrs,
                     link_attrs))
@@ -268,7 +269,7 @@ class UserProfileConsumer(ABC):
 
 
 class UserProfilingHandler(WebSocketReceiveEventHandler):
-    def __init__(self, tool_properties_spec,
+    def __init__(self, control_plane: ControlPlane, tool_properties_spec,
                  consumers: list[UserProfileConsumer] = None,
                  model: str = DEFAULT_CHAT_MODEL,
                  post_func: Callable[[str], str] = None,
@@ -276,6 +277,7 @@ class UserProfilingHandler(WebSocketReceiveEventHandler):
                  tool_func_name: str = "",
                  tool_parameter_description: str = ""):
         self.consumers: list[UserProfileConsumer] = consumers if consumers else []
+        self.control_plane = control_plane
         self.model = model
         self.post_func = post_func
         self.tool_properties_spec = tool_properties_spec
@@ -312,9 +314,9 @@ class UserProfilingHandler(WebSocketReceiveEventHandler):
         for profile_name, profile_text in user_profile["profile"].items():
             profile_text = self.post_func(profile_text)
             processed_profile[profile_name] = profile_text
-            _, sentence_id, _ = await idea_graph.add_sentence(profile_text)
+            _, sentence_id, _ = await self.control_plane.add_sentence(profile_text)
             _ = asyncio.create_task(
-                idea_graph.link_reactive_sentence_to_chat_request(chat_request_received_id, sentence_id))
+                self.control_plane.link_reactive_sentence_to_chat_request(chat_request_received_id, sentence_id))
             # Get how many nodes are linked to session
             # If first node, create starts link
         user_profile["profile"] = processed_profile

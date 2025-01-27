@@ -1,20 +1,23 @@
 from abc import ABC, abstractmethod
-from asyncio import Task
 from datetime import datetime, timedelta, timezone
+from sqlalchemy import MetaData, Table, and_
+from sqlalchemy import insert as sql_insert
 from sqlalchemy.future import select as sql_select
 from starlette.concurrency import run_in_threadpool
+from typing import Optional
 import asyncio
-import signal
 import uuid
 
-from bot.graph.semantic_categories import default_semantic_categories
 from bot.lang.classifiers import get_sentence_classifier, split_to_sentences
-from bot.db.models import AsyncSessionLocal, CodeBlock, Paragraph, Sentence
+from bot.db.models import AsyncSessionLocal, Sentence, engine
 from bot.db.neo4j import AsyncNeo4jDriver
 from observability.logging import logging
 from settings.germ_settings import UUID5_NS
 
 logger = logging.getLogger(__name__)
+
+struct_type_table = Table('struct_type', MetaData(), autoload_with=engine)
+text_block_table = Table('text_block', MetaData(), autoload_with=engine)
 
 
 class CodeBlockMergeEventHandler(ABC):
@@ -35,12 +38,32 @@ class SentenceMergeEventHandler(ABC):
         pass
 
 
-class IdeaGraph:
+class ControlPlane:
     def __init__(self, driver: AsyncNeo4jDriver):
         self.driver = driver
+
         self.code_block_merge_event_handlers: list[CodeBlockMergeEventHandler] = []
+        self.code_text_block_type_id: Optional[int] = None
+
         self.paragraph_merge_event_handlers: list[ParagraphMergeEventHandler] = []
+        self.paragraph_text_block_type_id: Optional[int] = None
+
         self.sentence_merge_event_handlers: list[SentenceMergeEventHandler] = []
+
+    async def initialize(self):
+        async with (AsyncSessionLocal() as rdb_session):
+            async with rdb_session.begin():
+                code_text_block_type_stmt = struct_type_table.select().where(
+                    and_(struct_type_table.c.group_name == "text_block_type",
+                         struct_type_table.c.att_pub_ident == "code"))
+                code_text_block_type_record = (await rdb_session.execute(code_text_block_type_stmt)).first()
+                self.code_text_block_type_id = code_text_block_type_record.struct_type_id
+
+                paragraph_text_block_type_stmt = struct_type_table.select().where(
+                    and_(struct_type_table.c.group_name == "text_block_type",
+                         struct_type_table.c.att_pub_ident == "paragraph"))
+                paragraph_text_block_type_record = (await rdb_session.execute(paragraph_text_block_type_stmt)).first()
+                self.paragraph_text_block_type_id = paragraph_text_block_type_record.struct_type_id
 
     async def add_chat_request(self, chat_request_received_id: int):
         time_occurred = round_time_now_down_to_nearst_interval()
@@ -80,15 +103,18 @@ class IdeaGraph:
         code_block_signature = uuid.uuid5(UUID5_NS, code_block)
         async with (AsyncSessionLocal() as rdb_session):
             async with rdb_session.begin():
-                code_block_select_stmt = sql_select(CodeBlock).where(CodeBlock.code_block_signature == code_block_signature)
-                code_block_select_result = await rdb_session.execute(code_block_select_stmt)
-                rdb_record = code_block_select_result.scalars().first()
+                rdb_select_stmt = text_block_table.select().where(text_block_table.c.signature_uuid == code_block_signature)
+                rdb_record = (await rdb_session.execute(rdb_select_stmt)).first()
 
                 # Create record if not found
                 if not rdb_record:
-                    rdb_record = CodeBlock(text=code_block, code_block_signature=code_block_signature)
-                    rdb_session.add(rdb_record)
-                    await rdb_session.commit()
+                    sql_insert_stmt = sql_insert(text_block_table).values({
+                        "signature_uuid": code_block_signature,
+                        "text_block_type_id": self.code_text_block_type_id,
+                    }).returning(text_block_table.c.text_block_id)
+
+                    # Execute the insert and fetch the returned values
+                    rdb_record = (await rdb_session.execute(sql_insert_stmt)).first()
 
         graph_results = await self.driver.query("""
         MERGE (code_block:CodeBlock {text: $text, language: $language, code_block_id: $code_block_id})
@@ -96,7 +122,7 @@ class IdeaGraph:
         """, {
             "text": code_block,
             "language": language,
-            "code_block_id": rdb_record.code_block_id,
+            "code_block_id": rdb_record.text_block_id,
         })
         logger.info(f"code block: {graph_results}")
         async_tasks = []
@@ -107,12 +133,6 @@ class IdeaGraph:
 
     def add_code_block_merge_event_handler(self, handler: CodeBlockMergeEventHandler):
         self.code_block_merge_event_handlers.append(handler)
-
-    async def add_default_semantic_categories(self) -> list[Task]:
-        async_tasks = []
-        for category in default_semantic_categories:
-            async_tasks.append(asyncio.create_task(self.add_semantic_category(category)))
-        return async_tasks
 
     async def add_document(self, name: str, body: str):
         """
@@ -199,29 +219,33 @@ class IdeaGraph:
         paragraph_signature = uuid.uuid5(UUID5_NS, paragraph)
         async with (AsyncSessionLocal() as rdb_session):
             async with rdb_session.begin():
-                paragraph_select_stmt = sql_select(Paragraph).where(Paragraph.paragraph_signature == paragraph_signature)
-                paragraph_select_result = await rdb_session.execute(paragraph_select_stmt)
-                rdb_record = paragraph_select_result.scalars().first()
+                rdb_select_stmt = text_block_table.select().where(
+                    text_block_table.c.signature_uuid == paragraph_signature)
+                rdb_record = (await rdb_session.execute(rdb_select_stmt)).first()
 
                 # Create record if not found
                 if not rdb_record:
-                    rdb_record = Paragraph(text=paragraph, paragraph_signature=paragraph_signature)
-                    rdb_session.add(rdb_record)
-                    await rdb_session.commit()
+                    sql_insert_stmt = sql_insert(text_block_table).values({
+                        "signature_uuid": paragraph_signature,
+                        "text_block_type_id": self.paragraph_text_block_type_id,
+                    }).returning(text_block_table.c.text_block_id)
+
+                    # Execute the insert and fetch the returned values
+                    rdb_record = (await rdb_session.execute(sql_insert_stmt)).first()
 
         graph_results = await self.driver.query("""
         MERGE (paragraph:Paragraph {text: $text, paragraph_id: $paragraph_id})
         RETURN paragraph
         """, {
             "text": paragraph,
-            "paragraph_id": rdb_record.paragraph_id,
+            "paragraph_id": rdb_record.text_block_id,
         })
         logger.info(f"paragraph: {graph_results}")
         async_tasks = []
         for handler in self.paragraph_merge_event_handlers:
             async_tasks.append(asyncio.create_task(
-                handler.on_paragraph_merge(paragraph, rdb_record.paragraph_id)))
-        return graph_results, rdb_record.paragraph_id, async_tasks
+                handler.on_paragraph_merge(paragraph, rdb_record.text_block_id)))
+        return graph_results, rdb_record.text_block_id, async_tasks
 
     def add_paragraph_merge_event_handler(self, handler: ParagraphMergeEventHandler):
         self.paragraph_merge_event_handlers.append(handler)
@@ -524,7 +548,3 @@ def round_time_now_down_to_nearst_interval(interval_minutes: int = 5):
 
 def utc_now():
     return datetime.now(timezone.utc)
-
-
-idea_graph = IdeaGraph(AsyncNeo4jDriver())
-signal.signal(signal.SIGINT, idea_graph.signal_handler)

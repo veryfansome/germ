@@ -12,7 +12,7 @@ import threading
 
 from bot.api.models import ChatMessage, ChatRequest, ChatResponse, ChatSessionSummary
 from bot.db.models import ChatSession, ChatRequestReceived, ChatResponseSent, SessionLocal
-from bot.graph.idea import idea_graph
+from bot.graph.control_plane import ControlPlane
 from settings.germ_settings import WEBSOCKET_CONNECTION_IDLE_TIMEOUT
 from settings.openai_settings import DEFAULT_MINI_MODEL, HTTPX_TIMEOUT
 
@@ -36,10 +36,11 @@ class WebSocketSendEventHandler(ABC):
 
 
 class WebSocketSender:
-    def __init__(self, chat_session_id: int, connection: WebSocket,
+    def __init__(self, control_plane: ControlPlane, chat_session_id: int, connection: WebSocket,
                  send_event_handlers: list[WebSocketSendEventHandler] = None):
         self.chat_session_id = chat_session_id
         self.connection = connection
+        self.control_plane = control_plane
         self.send_event_handlers: list[WebSocketSendEventHandler] = (
             send_event_handlers if send_event_handlers is not None else [])
 
@@ -49,8 +50,9 @@ class WebSocketSender:
             new_chat_response_sent, self.chat_session_id, chat_response,
             chat_request_received_id=None)
 
-        _, time_occurred = await idea_graph.add_chat_response(chat_response_sent_id)
-        await idea_graph.link_chat_response_to_chat_session(chat_response_sent_id, self.chat_session_id, time_occurred)
+        _, time_occurred = await self.control_plane.add_chat_response(chat_response_sent_id)
+        await self.control_plane.link_chat_response_to_chat_session(
+            chat_response_sent_id, self.chat_session_id, time_occurred)
 
         for handler in self.send_event_handlers:
             _ = asyncio.create_task(
@@ -62,10 +64,11 @@ class WebSocketSender:
             new_chat_response_sent, self.chat_session_id, chat_response,
             chat_request_received_id=chat_request_received_id)
 
-        _, time_occurred = await idea_graph.add_chat_response(chat_response_sent_id)
-        await idea_graph.link_chat_response_to_chat_request(
+        _, time_occurred = await self.control_plane.add_chat_response(chat_response_sent_id)
+        await self.control_plane.link_chat_response_to_chat_request(
             chat_request_received_id, chat_response_sent_id, self.chat_session_id, time_occurred)
-        await idea_graph.link_chat_response_to_chat_session(chat_response_sent_id, self.chat_session_id, time_occurred)
+        await self.control_plane.link_chat_response_to_chat_session(
+            chat_response_sent_id, self.chat_session_id, time_occurred)
 
         for handler in self.send_event_handlers:
             _ = asyncio.create_task(
@@ -88,9 +91,10 @@ class WebSocketReceiveEventHandler(ABC):
 
 
 class WebSocketConnectionManager:
-    def __init__(self):
+    def __init__(self, control_plane: ControlPlane):
         self.active_connections: dict[int, WebSocket] = {}
         self.background_loop = asyncio.new_event_loop()
+        self.control_plane = control_plane
         self.receive_event_handlers: list[WebSocketReceiveEventHandler] = []
         self.send_event_handlers: list[WebSocketSendEventHandler] = []
         self.session_monitors: list[SessionMonitor] = []
@@ -125,7 +129,7 @@ class WebSocketConnectionManager:
         await ws.accept()
         self.active_connections[chat_session_id] = ws
         METRIC_CHAT_SESSIONS_IN_PROGRESS.inc()
-        task = asyncio.create_task(idea_graph.add_chat_session(chat_session_id))
+        _ = asyncio.create_task(self.control_plane.add_chat_session(chat_session_id))
         return chat_session_id
 
     async def disconnect(self, chat_session_id: int):
@@ -143,7 +147,8 @@ class WebSocketConnectionManager:
 
     async def monitor_chat_session(self, chat_session_id: int, ws: WebSocket):
         async def _monitor_chat_session():
-            ws_sender = WebSocketSender(chat_session_id, ws, send_event_handlers=self.send_event_handlers)
+            ws_sender = WebSocketSender(self.control_plane, chat_session_id, ws,
+                                        send_event_handlers=self.send_event_handlers)
             while chat_session_id in self.active_connections:
                 await asyncio.sleep(15)
                 logger.info(f"chat session {chat_session_id} is active")
@@ -157,11 +162,13 @@ class WebSocketConnectionManager:
 
         chat_request_received_id = await run_in_threadpool(
             new_chat_request_received, chat_session_id, chat_request)
-        _, time_occurred = await idea_graph.add_chat_request(chat_request_received_id)
+        _, time_occurred = await self.control_plane.add_chat_request(chat_request_received_id)
         _ = asyncio.create_task(
-            idea_graph.link_chat_request_to_chat_session(chat_request_received_id, chat_session_id, time_occurred))
+            self.control_plane.link_chat_request_to_chat_session(
+                chat_request_received_id, chat_session_id, time_occurred))
 
-        ws_sender = WebSocketSender(chat_session_id, connection, send_event_handlers=self.send_event_handlers)
+        ws_sender = WebSocketSender(self.control_plane, chat_session_id, connection,
+                                    send_event_handlers=self.send_event_handlers)
         for handler in self.receive_event_handlers:
             _ = asyncio.create_task(
                 handler.on_receive(chat_session_id, chat_request_received_id, chat_request, ws_sender))

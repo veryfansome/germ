@@ -56,30 +56,6 @@ class ChatResponseSent(Base):
     )
 
 
-class CodeBlock(Base):
-    __tablename__ = "code_block"
-    code_block_id = Column(Integer, primary_key=True, autoincrement=True)
-
-    code_block_signature = Column(UUID)
-    text = Column(String)
-
-    __table_args__ = (
-        Index('idx__code_block__code_block_signature', 'code_block_signature'),  # Secondary index
-    )
-
-
-class Paragraph(Base):
-    __tablename__ = "paragraph"
-    paragraph_id = Column(Integer, primary_key=True, autoincrement=True)
-
-    paragraph_signature = Column(UUID)
-    text = Column(String)
-
-    __table_args__ = (
-        Index('idx__paragraph__paragraph_signature', 'paragraph_signature'),  # Secondary index
-    )
-
-
 class Sentence(Base):
     __tablename__ = "sentence"
     sentence_id = Column(Integer, primary_key=True, autoincrement=True)

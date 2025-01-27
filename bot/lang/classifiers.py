@@ -2,7 +2,6 @@ from nltk.tokenize import sent_tokenize
 from openai import OpenAI
 import json
 
-from bot.graph.semantic_categories import default_semantic_categories
 from observability.logging import logging
 
 logger = logging.getLogger(__name__)
@@ -108,69 +107,6 @@ class OpenAITextClassifier:
         return self.tool_properties_spec
 
 
-def get_noun_modifier_classifier(semantic_categories: list[str] = default_semantic_categories) -> OpenAITextClassifier:
-    return OpenAITextClassifier({
-        "modifiers": {
-            "type": "array",
-            "description": ("List of all modifier words in the the noun phrase, "
-                            f"given that semantic categories include: {semantic_categories}."),
-            "items": {
-                "type": "object",
-                "description": "A modifier word from the phrase.",
-                "properties": {
-                    "modifier": {
-                        "type": "string",
-                        "description": "Modifier word."
-                    },
-                    "noun": {
-                        "type": "string",
-                        "description": "What is the noun this modifier modify?"
-                    },
-                }
-            }
-        }},
-        system_message=("Analyze the provided noun phrase as it appears in the text and look for the underlying "
-                        "words being modified. Focus how modifier words in the phrase affects the text's meaning and "
-                        "intention, then populate the modifiers parameter array for the store_modifiers tool."),
-        tool_name="store_modifiers",
-        tool_description="Store generated modifier classifications.",
-        tool_parameter_description="Modifier classifications to be stored.",
-    )
-
-
-def get_sentence_nouns_classifier(semantic_categories: list[str] = default_semantic_categories) -> OpenAITextClassifier:
-    return OpenAITextClassifier({
-        "nouns": {
-            "type": "array",
-            "description": "List of all nouns identified in the text.",
-            "items": {
-                "type": "object",
-                "description": "A noun from the text.",
-                "properties": {
-                    "noun": {
-                        "type": "string",
-                        "description": "Noun word."
-                    },
-                    "plurality": {
-                        "type": "string",
-                        "enum": ["singular", "plural"],
-                    },
-                    "semanticCategory": {
-                        "type": "string",
-                        "description": "What kind of thing is this noun?",
-                        "enum": semantic_categories
-                    },
-                }
-            }
-        }},
-        system_message=("Analyze the nouns from the text, focusing on how each affects meaning and intention, "
-                        "then populate the nouns parameter array for the store_nouns tool."),
-        tool_name="store_nouns",
-        tool_description="Store generated noun classifications.",
-        tool_parameter_description="Noun classifications to be stored.",
-    )
-
-
 def get_sentence_classifier(additional_parameters=None):
     return OpenAITextClassifier({
         "functional_type": {
@@ -188,26 +124,6 @@ def get_sentence_classifier(additional_parameters=None):
         },
         **(additional_parameters if additional_parameters else {}),
     })
-
-
-def get_single_noun_classifier(semantic_categories: list[str] = default_semantic_categories) -> OpenAITextClassifier:
-    return OpenAITextClassifier({
-        "plurality": {
-            "type": "string",
-            "enum": ["singular", "plural"],
-        },
-        "semanticCategory": {
-            "type": "string",
-            "description": "What kind of thing is this noun?",
-            "enum": semantic_categories
-        }},
-        system_message=("Analyze the provided noun's use in the text, focusing on how it affects meaning and "
-                        "intention, then populate the plurality and semanticCategory parameters for the "
-                        "store_noun_classification tool."),
-        tool_name="store_noun_classification",
-        tool_description="Store generated noun classifications.",
-        tool_parameter_description="Noun classifications to be stored.",
-    )
 
 
 def split_to_sentences(text: str) -> list[str]:
