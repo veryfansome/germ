@@ -287,6 +287,7 @@ class ControlPlane:
         sentence_signature = uuid.uuid5(UUID5_NS, sentence)
         async with (AsyncSessionLocal() as rdb_session):
             async with rdb_session.begin():
+
                 sentence_select_stmt = sql_select(Sentence).where(Sentence.sentence_signature == sentence_signature)
                 sentence_select_result = await rdb_session.execute(sentence_select_stmt)
                 rdb_record = sentence_select_result.scalars().first()

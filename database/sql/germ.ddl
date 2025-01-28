@@ -52,6 +52,7 @@ CREATE UNIQUE INDEX idx_struct_type_att_pub_ident               ON struct_type  
 SELECT update_dt_modified_column('struct_type');
 
 
+DROP TABLE IF EXISTS text_block CASCADE;
 CREATE TABLE text_block (
       text_block_id                  						    SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
     , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
