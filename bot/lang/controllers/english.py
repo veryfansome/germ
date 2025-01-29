@@ -7,7 +7,7 @@ from bot.lang.parsers import get_html_soup, strip_html_elements
 from bot.lang.pos import get_pos_tags
 from bot.lang.classifiers import (
     ADJECTIVE_POS_TAGS, ADVERB_POS_TAGS, NOUN_POS_TAGS, PRONOUN_POS_TAGS, VERB_POS_TAGS, split_to_sentences)
-from observability.logging import logging, setup_logging
+from observability.logging import logging
 
 inflect_engine = inflect.engine()
 logger = logging.getLogger(__name__)

@@ -486,7 +486,7 @@ if __name__ == "__main__":
             words_corpus, MAX_SEQ_LEN, _char2idx, _idx2char, _label2idx, _idx2label,
             name="words_corpus")
         fit_and_test(tokenizer_model, words_corpus_kit, epochs=1, batch_size=16)
-        tokenizer_model.save(f"{model_dir}/{datetime.now().strftime("%Y%m%d%H%M%S")}.keras")
+        tokenizer_model.save(f"{model_dir}/{datetime.now().strftime('%Y%m%d%H%M%S')}.keras")
 
     if args.numbers:
         numbers_corpus = generate_numbers_corpus()
@@ -496,7 +496,7 @@ if __name__ == "__main__":
             numbers_corpus, MAX_SEQ_LEN, _char2idx, _idx2char, _label2idx, _idx2label,
             name="numbers_corpus")
         fit_and_test(tokenizer_model, numbers_corpus_kit, epochs=1, batch_size=16)
-        tokenizer_model.save(f"{model_dir}/{datetime.now().strftime("%Y%m%d%H%M%S")}.keras")
+        tokenizer_model.save(f"{model_dir}/{datetime.now().strftime('%Y%m%d%H%M%S')}.keras")
 
     if args.ipaddrs:
         ipaddrs_corpus = generate_ipaddrs_corpus()
@@ -506,7 +506,7 @@ if __name__ == "__main__":
             ipaddrs_corpus, MAX_SEQ_LEN, _char2idx, _idx2char, _label2idx, _idx2label,
             name="ipaddrs_corpus")
         fit_and_test(tokenizer_model, ipaddrs_corpus_kit, epochs=1, batch_size=16)
-        tokenizer_model.save(f"{model_dir}/{datetime.now().strftime("%Y%m%d%H%M%S")}.keras")
+        tokenizer_model.save(f"{model_dir}/{datetime.now().strftime('%Y%m%d%H%M%S')}.keras")
 
     if args.pool:
         pool_corpus = [[w] for w in words.words()] + generate_numbers_corpus() + generate_ipaddrs_corpus()
@@ -516,7 +516,7 @@ if __name__ == "__main__":
             pool_corpus, MAX_SEQ_LEN, _char2idx, _idx2char, _label2idx, _idx2label,
             name="pool_corpus")
         fit_and_test(tokenizer_model, pool_corpus_kit, epochs=1, batch_size=16)
-        tokenizer_model.save(f"{model_dir}/{datetime.now().strftime("%Y%m%d%H%M%S")}.keras")
+        tokenizer_model.save(f"{model_dir}/{datetime.now().strftime('%Y%m%d%H%M%S')}.keras")
 
     # Sample corpus data set
     sample_corpus_kit = process_corpus(

@@ -1,7 +1,7 @@
-from nltk.tokenize import sent_tokenize
 from openai import OpenAI
 import json
 
+from bot.lang.dependencies import sent_tokenize
 from observability.logging import logging
 
 logger = logging.getLogger(__name__)
