@@ -3,6 +3,7 @@ apscheduler
 asyncpg
 beautifulsoup4
 dataset
+datasets
 dnspython
 fastapi
 flair
