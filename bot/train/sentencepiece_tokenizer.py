@@ -19,7 +19,7 @@ arg_parser.add_argument("--wikipedia", action="store_true", default=False,
                         help="Use wikipedia dataset.")
 args = arg_parser.parse_args()
 
-input_sentence_size = 1_000_000
+input_sentence_size = 3_000_000
 max_line_char_len = 4192
 vocab_size = 100_000
 
@@ -91,7 +91,7 @@ if args.train:
         "--model_type=unigram",
         "--shuffle_input_sentence=true",
         "--split_digits=true",
-        f"--input={','.join(random.sample(corpus_files, 12))}",
+        f"--input={','.join(random.sample(corpus_files, 15))}",
         f"--input_sentence_size={input_sentence_size}",
         f"--max_sentence_length={max_line_char_len}",
         f"--vocab_size={vocab_size}",
@@ -108,3 +108,6 @@ print(sp.EncodeAsPieces("1/2 is equivalent to 0.5 or 50%"))
 print(sp.EncodeAsPieces("John was running so fast, you can just tell he's a runner."))
 print(sp.EncodeAsPieces("He excels at math and competed in the Math Olympiad"))
 print(sp.EncodeAsPieces("Watson was on his way to 221B Baker Street when the robbery occurred."))
+print(sp.EncodeAsPieces("That's Uncopyrightable."))
+print(sp.EncodeAsPieces("She's full of incomprehensibilities."))
+print(sp.EncodeAsPieces("He's a total sesquipedalian."))

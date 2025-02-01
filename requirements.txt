@@ -34,5 +34,6 @@ sentencepiece
 sqlalchemy[asyncio] == 2.0.37
 starlette
 tensorflow
+tiktoken
 transformers
 uvicorn[standard]
