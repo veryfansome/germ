@@ -5,11 +5,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.jaeger.thrift import JaegerExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider, SynchronousMultiSpanProcessor
+from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import SpanKind
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
@@ -50,20 +50,16 @@ logger = logging.getLogger(__name__)
 resource = Resource.create({
     "service.name": germ_settings.SERVICE_NAME,
 })
-multi_span_processor = SynchronousMultiSpanProcessor()
-multi_span_processor.add_span_processor(
-    BatchSpanProcessor(
-        OTLPSpanExporter(
-            endpoint="http://{otlp_host}:{otlp_port}/v1/traces".format(
-                otlp_host=germ_settings.OTLP_HOST,
-                otlp_port=germ_settings.OTLP_PORT,
-            ),
-        )
-    )
+provider = TracerProvider(resource=resource)
+trace.set_tracer_provider(provider)
+
+jaeger_exporter = JaegerExporter(
+    agent_host_name=germ_settings.JAEGER_HOST,
+    agent_port=int(germ_settings.JAEGER_PORT),
 )
-trace.set_tracer_provider(
-    TracerProvider(resource=resource, active_span_processor=multi_span_processor)
-)
+
+span_processor = BatchSpanProcessor(jaeger_exporter)
+provider.add_span_processor(span_processor)
 tracer = trace.get_tracer(__name__)
 
 ##

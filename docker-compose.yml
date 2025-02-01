@@ -11,7 +11,7 @@ services:
     networks: [bots]
     container_name: germ-bot
     depends_on:
-      db-migrate:
+      bot-init:
         condition: service_completed_successfully
       test:
         condition: service_completed_successfully
@@ -43,34 +43,15 @@ services:
       timeout: 9s
       retries: 6
 
-  bot-bg:
-    networks: [bots]
-    container_name: germ-bot-bg
-    depends_on:
-      db-migrate:
-        condition: service_completed_successfully
-      test:
-        condition: service_completed_successfully
-    image: "germ:latest"
-    volumes:
-      - ./:/src:rw
-      - flair-data:/root/.flair
-      - nltk-data:/root/nltk_data
-    environment: *local-dev
-    working_dir: /src
-    command: [
-      "python", "-m", "bot.scheduler", "--english-controller",
-    ]
-
   bot-init:
     networks: [ bots ]
     container_name: germ-bot-init
     depends_on:
-      db-init:
+      db-migrate:
         condition: service_completed_successfully
       jaeger-init:
         condition: service_completed_successfully
-      otel-collector-init:
+      prometheus-init:
         condition: service_completed_successfully
     image: "germ:latest"
     volumes:
@@ -110,7 +91,9 @@ services:
     networks: [ bots ]
     container_name: germ-db-migrate
     depends_on:
-      bot-init:
+      db-init:
+        condition: service_completed_successfully
+      neo4j-init:
         condition: service_completed_successfully
     image: "germ-db-migrate:latest"
     build:
@@ -147,24 +130,7 @@ services:
   jaeger:
     networks: [bots]
     container_name: &jaeger-host germ-jaeger
-    depends_on:
-      prometheus-init:
-        condition: service_completed_successfully
-    image: jaegertracing/all-in-one:latest
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
-      - COLLECTOR_OTLP_GRPC_HOST_PORT=0.0.0.0:4317
-      - COLLECTOR_OTLP_METRICS_ENABLED=true
-      - LOG_LEVEL=warn
-      #- LOG_LEVEL=info
-      #- LOG_LEVEL=debug
-      - METRICS_STORAGE_TYPE=prometheus
-      - PROMETHEUS_SERVER_URL=http://germ-prometheus:9090
-      - PROMETHEUS_QUERY_SUPPORT_SPANMETRICS_CONNECTOR=true
-      - PROMETHEUS_QUERY_NAMESPACE=${PROMETHEUS_QUERY_NAMESPACE:-}
-      - PROMETHEUS_QUERY_DURATION_UNIT=${PROMETHEUS_QUERY_DURATION_UNIT:-}
-      - PROMETHEUS_QUERY_NORMALIZE_CALLS=true
-      - PROMETHEUS_QUERY_NORMALIZE_DURATION=true
+    image: jaegertracing/jaeger:2.2.0
     ports:
       - "16686:16686" # UI
       - "4317:4317" # OTLP over gRPC
@@ -195,28 +161,15 @@ services:
       - "7687:7687" # Bolt
     command: [ "/neo4j-start.sh" ]
 
-  # Has a loose dependency on jaeger - exports data to jaeger but not until bot is up.
-  # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
-  otel-collector:
-    networks: [bots]
-    container_name: &otel-collector-host germ-otel-collector
-    image: otel/opentelemetry-collector-contrib:0.102.0
-    volumes:
-      - ./observability/otel-collector-config-connector.yml:/etc/otelcol/otel-collector-config.yml
-    ports:
-      - "4318:4318" # OTLP over HTTP
-    command:
-      - --config=/etc/otelcol/otel-collector-config.yml
-
-  otel-collector-init:
+  neo4j-init:
     networks: [ bots ]
-    container_name: germ-otel-collector-init
+    container_name: germ-neo4j-init
     image: "germ:latest"
     volumes:
       - ./:/src
     environment:
-      WAIT_FOR_HOST: *otel-collector-host
-      WAIT_FOR_PORT: 4318
+      WAIT_FOR_HOST: *neo4j-host
+      WAIT_FOR_PORT: 7474
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
 
@@ -224,9 +177,6 @@ services:
   prometheus:
     networks: [bots]
     container_name: &prometheus-host germ-prometheus
-    depends_on:
-      otel-collector-init:  # Scrapes otel-collector for span metrics
-        condition: service_completed_successfully
     image: prom/prometheus:v2.52.0
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
@@ -252,11 +202,9 @@ services:
   test:
     networks: [bots]
     container_name: germ-test
-    links: [db, otel-collector]
+    links: [db]
     depends_on:
-      db-init:
-        condition: service_completed_successfully
-      otel-collector-init:
+      bot-init:
         condition: service_completed_successfully
     build:
       context: .

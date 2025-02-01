@@ -1,40 +1,9 @@
 from openai import OpenAI
 import json
 
-from bot.lang.dependencies import sent_tokenize
 from observability.logging import logging
 
 logger = logging.getLogger(__name__)
-
-ADJECTIVE_POS_TAGS = set()
-ADJECTIVE_POS_TAGS.add("JJ")  # Standard, "big"
-ADJECTIVE_POS_TAGS.add("JJR")  # Comparative, "bigger"
-ADJECTIVE_POS_TAGS.add("JJS")  # Superlative, "biggest"
-
-ADVERB_POS_TAGS = set()
-ADVERB_POS_TAGS.add("RB")  # Standard, "quickly", "well"
-ADVERB_POS_TAGS.add("RBR")  # Comparative, "more quickly", "better"
-ADVERB_POS_TAGS.add("RBS")  # Superlative, "most quickly", "best"
-
-NOUN_POS_TAGS = set()
-NOUN_POS_TAGS.add("NN")  # Singular or mass
-NOUN_POS_TAGS.add("NNS")  # Plural
-NOUN_POS_TAGS.add("NNP")  # Singular proper noun
-NOUN_POS_TAGS.add("NNPS")  # Plural proper noun
-
-PRONOUN_POS_TAGS = set()
-PRONOUN_POS_TAGS.add("PRP")  # Personal
-PRONOUN_POS_TAGS.add("PRP$")  # Possessive
-PRONOUN_POS_TAGS.add("WP")  # Wh-pronoun
-PRONOUN_POS_TAGS.add("WP$")  # Possessive wh-pronoun
-
-VERB_POS_TAGS = set()
-VERB_POS_TAGS.add("VB")  # Base form, "to run"
-VERB_POS_TAGS.add("VBD")  # Past tense, "ran"
-VERB_POS_TAGS.add("VBG")  # Gerund or present participle, "running"
-VERB_POS_TAGS.add("VBN")  # past participle, "run"
-VERB_POS_TAGS.add("VBP")  # non-3rd person singular present, "run"
-VERB_POS_TAGS.add("VBZ")  # 3rd person singular present, "runs"
 
 
 class OpenAITextClassifier:
@@ -124,7 +93,3 @@ def get_sentence_classifier(additional_parameters=None):
         },
         **(additional_parameters if additional_parameters else {}),
     })
-
-
-def split_to_sentences(text: str) -> list[str]:
-    return sent_tokenize(text)

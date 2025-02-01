@@ -17,12 +17,14 @@ STARTERKIT_DIR = os.getenv("GERM_STARTERKIT_DIR", "/src/data/germ/starterkit")
 
 # Observability
 
+JAEGER_HOST = os.getenv("GERM_JAEGER_HOST", "germ-jaeger")
+JAEGER_PORT = os.getenv("GERM_JAEGER_PORT", "6831")
 LOG_LEVEL = os.getenv("GERM_LOG_LEVEL", "INFO")
-OTLP_HOST = os.getenv("GERM_OTLP_HOST", "germ-otel-collector")
-OTLP_PORT = os.getenv("GERM_OTLP_PORT", "4318")
 
 # Neo4j
+NEO4J_AUTH = os.getenv("NEO4J_AUTH", "neo4j/oops")
 NEO4J_HOST = os.getenv("GERM_NEO4J_HOST", "germ-neo4j")
+NEO4J_PORT = os.getenv("GERM_NEO4J_PORT", "7687")
 
 # PostgreSQL
 

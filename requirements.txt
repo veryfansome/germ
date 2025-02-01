@@ -6,7 +6,6 @@ dataset
 datasets
 dnspython
 fastapi
-flair
 googletrans
 gunicorn
 httpx
@@ -17,11 +16,12 @@ neo4j
 nltk
 numpy
 openai
-opentelemetry-distro
-opentelemetry-exporter-otlp-proto-http
+opentelemetry-api
+opentelemetry-exporter-jaeger
 opentelemetry-instrumentation-fastapi
 opentelemetry-instrumentation-httpx
 opentelemetry-instrumentation-sqlalchemy
+opentelemetry-sdk
 prometheus_client
 psycopg2-binary
 pydantic

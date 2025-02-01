@@ -1,22 +1,20 @@
 from neo4j import AsyncGraphDatabase
 import asyncio
-import os
 import time
 import uuid
 
 from observability.logging import logging
-from settings.germ_settings import NEO4J_HOST, UUID5_NS
+from settings.germ_settings import NEO4J_AUTH, NEO4J_HOST, NEO4J_PORT, UUID5_NS
 
 logger = logging.getLogger(__name__)
 
-NEO4J_AUTH = os.getenv("NEO4J_AUTH", "neo4j/oops")
 neo4j_auth_parts = NEO4J_AUTH.split("/")
 
 
 class AsyncNeo4jDriver:
     def __init__(self):
         self.driver = AsyncGraphDatabase.driver(
-            f"bolt://{NEO4J_HOST}:7687", auth=(neo4j_auth_parts[0], neo4j_auth_parts[1]))
+            f"bolt://{NEO4J_HOST}:{NEO4J_PORT}", auth=(neo4j_auth_parts[0], neo4j_auth_parts[1]))
         self.query_cache: dict[str, tuple[float, list]] = {}
 
     async def query(self, query, parameters=None):

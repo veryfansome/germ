@@ -8,7 +8,7 @@ from typing import Optional
 import asyncio
 import uuid
 
-from bot.lang.classifiers import get_sentence_classifier, split_to_sentences
+from bot.lang.classifiers import get_sentence_classifier
 from bot.db.models import AsyncSessionLocal, Sentence, engine
 from bot.db.neo4j import AsyncNeo4jDriver
 from observability.logging import logging
@@ -133,41 +133,6 @@ class ControlPlane:
 
     def add_code_block_merge_event_handler(self, handler: CodeBlockMergeEventHandler):
         self.code_block_merge_event_handlers.append(handler)
-
-    async def add_document(self, name: str, body: str):
-        """
-        An article, a poem, or even a chapter of a book.
-
-        :param name:
-        :param body:
-        :return:
-        """
-        document_record = await self.driver.query(
-            "MERGE (d:Document {name: $name}) RETURN d", {"name": name})
-        logger.info(f"document: {document_record}")
-
-        last_sentence_id = None
-        for body_sentence in split_to_sentences(body):
-            _, this_sentence_id, async_tasks = await self.add_sentence(body_sentence)
-
-            sentence_do_document_link_record = await self.driver.query(
-                "MATCH (d:Document {name: $document}), (s:Sentence {sentence_id: $sentence_id}) "
-                "MERGE (d)-[r:CONTAINS]->(s) "
-                "RETURN r", {
-                    "document": name, "sentence_id": this_sentence_id
-                })
-            if last_sentence_id is not None:
-                sentence_to_sentence_link = await self.driver.query(
-                    "MATCH (l:Sentence {sentence_id: $last_id}), (t:Sentence {sentence_id: $this_id}) "
-                    "MERGE (l)-[r:PRECEDES]->(t) "
-                    "RETURN r", {
-                        "last_id": last_sentence_id, "this_id": this_sentence_id,
-                    })
-                logger.info(f"sentence/sentence link: {sentence_to_sentence_link}")
-
-            logger.info(f"sentence link: {sentence_do_document_link_record}")
-            last_sentence_id = this_sentence_id
-        return document_record
 
     async def add_header(self, header: str):
         header = header.strip()
