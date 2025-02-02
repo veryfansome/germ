@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Build latest image
-        run: docker build -t germ:latest -f app.Dockerfile
+        run: docker build -t germ:latest -f app.Dockerfile .
 
       - name: Run tests
         env:
