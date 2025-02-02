@@ -3,12 +3,14 @@ from transformers import (AutoModelForTokenClassification, AutoTokenizer,
                           Trainer, TrainingArguments)
 import logging
 import numpy as np
+import os
 
 logger = logging.getLogger(__name__)
 
 
 class AutoPosTuner:
 
+    checkpoint_dir = "models/germ"
     tag2id = {
         "NN": 0,
         "VBD": 1,
@@ -20,9 +22,9 @@ class AutoPosTuner:
     id2tag = {v: k for k, v in tag2id.items()}
 
     def __init__(self, model, tokenizer,
-                 checkpoint_dir="models/germ",
+                 checkpoint_dir=None,
                  id2tag=None, tag2id=None):
-        self.checkpoint_dir = checkpoint_dir
+        self.checkpoint_dir = AutoPosTuner.checkpoint_dir if checkpoint_dir is None else checkpoint_dir
         self.model = model
         self.tokenizer = tokenizer
 
@@ -124,26 +126,46 @@ def compute_metrics(p):
     return {"accuracy": accuracy}
 
 
+def get_model(model_name_or_path: str):
+    return AutoModelForTokenClassification.from_pretrained(
+        model_name_or_path,
+        num_labels=len(AutoPosTuner.tag2id),
+        id2label=AutoPosTuner.id2tag,
+        label2id=AutoPosTuner.tag2id
+    )
+
+
+def get_tokenizer(model_name_or_path: str):
+    return AutoTokenizer.from_pretrained(
+        model_name_or_path,
+        add_prefix_space=True,
+        use_fast=True,
+    )
+
+
 if __name__ == "__main__":
     from datasets import Dataset, DatasetDict
     from observability.logging import setup_logging
 
     setup_logging()
 
+    deberta_model_name = "microsoft/deberta-base"
     deberta_checkpoint_name = "deberta-pos"
 
     deberta_model = AutoModelForTokenClassification.from_pretrained(
-        "microsoft/deberta-base",
+        deberta_model_name,
         num_labels=len(AutoPosTuner.tag2id),
         id2label=AutoPosTuner.id2tag,
         label2id=AutoPosTuner.tag2id
     )
     deberta_tokenizer = AutoTokenizer.from_pretrained(
-        "microsoft/deberta-base",
+        deberta_model_name,
         add_prefix_space=True,
         use_fast=True,
     )
     pos_tuner = AutoPosTuner(deberta_model, deberta_tokenizer)
+
+    deberta_final_checkpoint_name = f"{pos_tuner.checkpoint_dir}/{deberta_checkpoint_name}/final"
 
     # Suppose your data is in a Python dict format
     train_data = {
@@ -168,5 +190,7 @@ if __name__ == "__main__":
 
     pos_trainer.train()
     pos_trainer.evaluate()
-    pos_trainer.save_model(f"{pos_tuner.checkpoint_dir}/{deberta_checkpoint_name}/final")
+    pos_trainer.save_model(deberta_final_checkpoint_name)
+    deberta_tokenizer.save_pretrained(deberta_final_checkpoint_name)
+
 
