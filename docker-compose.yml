@@ -210,6 +210,7 @@ services:
       - ./:/src
     environment:
       <<: *local-dev
+      SKIP_INTEGRATION_TESTS: ${SKIP_INTEGRATION_TESTS:-true}
       SKIP_TESTS: ${SKIP_TESTS:-true}
     working_dir: /src
     command: ["tests/run.sh"]
