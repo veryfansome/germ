@@ -202,10 +202,6 @@ services:
   test:
     networks: [bots]
     container_name: germ-test
-    links: [pg]
-    depends_on:
-      bot-init:
-        condition: service_completed_successfully
     build:
       context: .
       dockerfile: app.Dockerfile
