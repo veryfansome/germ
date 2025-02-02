@@ -24,12 +24,12 @@ services:
       - flair-data:/root/.flair
       - nltk-data:/root/nltk_data
     environment: &local-dev
-      DB_HOST: &db-host germ-db
+      PG_HOST: &pg-host germ-db
+      POSTGRES_USER: &pg-user ${POSTGRES_USER:-germ}
+      POSTGRES_PASSWORD: &pg-password ${POSTGRES_PASSWORD:-bacteria4life}
+      NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
       HF_HOME: ${HF_HOME:-/src/data/huggingface}
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
-      POSTGRES_PASSWORD: &db-password ${POSTGRES_PASSWORD:-bacteria4life}
-      NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
-      POSTGRES_USER: &db-user ${POSTGRES_USER:-germ}
       SKIP_TESTS: ${SKIP_TESTS:-true}
     working_dir: /src
     command: [
@@ -44,7 +44,7 @@ services:
       retries: 6
 
   bot-init:
-    networks: [ bots ]
+    networks: [bots]
     container_name: germ-bot-init
     depends_on:
       db-migrate:
@@ -63,35 +63,61 @@ services:
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
 
-  db:
+  pg:
     networks: [bots]
-    container_name: *db-host
+    container_name: *pg-host
     image: postgres:16
-    volumes:
-      - ./:/src
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_DB: germ
-      POSTGRES_PASSWORD: *db-password
-      POSTGRES_USER: *db-user
+      POSTGRES_PASSWORD: *pg-password
+      POSTGRES_USER: *pg-user
 
-  db-init:
-    networks: [ bots ]
-    container_name: germ-db-init
+  neo4j:
+    networks: [bots]
+    container_name: *neo4j-host
+    image: neo4j:latest
+    volumes:
+      - ./scripts/neo4j-start.sh:/neo4j-start.sh
+      - ./database_dump/neo4j:/dump  # Persist data
+    environment:
+      NEO4J_AUTH: *neo4j-auth
+    ports:
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
+    command: [ "/neo4j-start.sh" ]
+
+  pg-init:
+    networks: [bots]
+    container_name: germ-pg-init
     image: "germ:latest"
     volumes:
       - ./:/src
     environment:
       <<: *local-dev
-      WAIT_FOR_HOST: *db-host
+      WAIT_FOR_HOST: *pg-host
       WAIT_FOR_PORT: 5432
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
 
+  neo4j-init:
+    networks: [bots]
+    container_name: germ-neo4j-init
+    image: "germ:latest"
+    volumes:
+      - ./:/src
+    environment:
+      WAIT_FOR_HOST: *neo4j-host
+      WAIT_FOR_PORT: 7474
+    working_dir: /src
+    command: [ "scripts/wait-for-port-up.sh" ]
+
   db-migrate:
-    networks: [ bots ]
+    networks: [bots]
     container_name: germ-db-migrate
     depends_on:
-      db-init:
+      pg-init:
         condition: service_completed_successfully
       neo4j-init:
         condition: service_completed_successfully
@@ -133,10 +159,10 @@ services:
     image: jaegertracing/jaeger:2.2.0
     ports:
       - "16686:16686" # UI
-      - "4317:4317" # OTLP over gRPC
+      - "4317:4317"   # OTLP over gRPC
 
   jaeger-init:
-    networks: [ bots ]
+    networks: [bots]
     container_name: germ-jaeger-init
     image: "germ:latest"
     volumes:
@@ -144,32 +170,6 @@ services:
     environment:
       WAIT_FOR_HOST: *jaeger-host
       WAIT_FOR_PORT: 4317
-    working_dir: /src
-    command: [ "scripts/wait-for-port-up.sh" ]
-
-  neo4j:
-    networks: [ bots ]
-    container_name: *neo4j-host
-    image: neo4j:latest
-    volumes:
-      - ./scripts/neo4j-start.sh:/neo4j-start.sh
-      - ./database_dump/neo4j:/dump  # Persist data
-    environment:
-      NEO4J_AUTH: *neo4j-auth
-    ports:
-      - "7474:7474" # HTTP
-      - "7687:7687" # Bolt
-    command: [ "/neo4j-start.sh" ]
-
-  neo4j-init:
-    networks: [ bots ]
-    container_name: germ-neo4j-init
-    image: "germ:latest"
-    volumes:
-      - ./:/src
-    environment:
-      WAIT_FOR_HOST: *neo4j-host
-      WAIT_FOR_PORT: 7474
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
 
@@ -188,7 +188,7 @@ services:
       - --log.level=warn
 
   prometheus-init:
-    networks: [ bots ]
+    networks: [bots]
     container_name: germ-prometheus-init
     image: "germ:latest"
     volumes:
@@ -202,7 +202,7 @@ services:
   test:
     networks: [bots]
     container_name: germ-test
-    links: [db]
+    links: [pg]
     depends_on:
       bot-init:
         condition: service_completed_successfully
