@@ -138,6 +138,7 @@ def extract_href_features(href: str):
                 if ipv4_addr_pattern.search(matched_blob):
                     artifacts["ipv4_address"] = matched_blob
                 elif iana_data.is_possible_public_fqdn(matched_blob):  # Things that look like fqdns can be files
+                    #    ^ Empty if load_tld_cache() not called
                     artifacts["fqdn"] = matched_blob
                 else:
                     guessed_mimetype, _ = mimetypes.guess_type(matched_blob)

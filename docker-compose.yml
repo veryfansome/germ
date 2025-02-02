@@ -11,7 +11,11 @@ services:
     networks: [bots]
     container_name: germ-bot
     depends_on:
-      bot-init:
+      db-migrate:
+        condition: service_completed_successfully
+      jaeger-init:
+        condition: service_completed_successfully
+      prometheus-init:
         condition: service_completed_successfully
       test:
         condition: service_completed_successfully
@@ -26,6 +30,7 @@ services:
     environment: &local-dev
       HF_HOME: ${HF_HOME:-/src/data/huggingface}
       NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
+      NEO4J_HOST: &neo4j-host germ-neo4j
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
       PG_HOST: &pg-host germ-pg
       POSTGRES_PASSWORD: &pg-password ${POSTGRES_PASSWORD:-bacteria4life}
@@ -41,26 +46,6 @@ services:
       interval: 10s
       timeout: 9s
       retries: 6
-
-  bot-init:
-    networks: [bots]
-    container_name: germ-bot-init
-    depends_on:
-      db-migrate:
-        condition: service_completed_successfully
-      jaeger-init:
-        condition: service_completed_successfully
-      prometheus-init:
-        condition: service_completed_successfully
-    image: "germ:latest"
-    volumes:
-      - ./:/src
-    environment:
-      <<: *local-dev
-      WAIT_FOR_HOST: &neo4j-host germ-neo4j
-      WAIT_FOR_PORT: 7474
-    working_dir: /src
-    command: [ "scripts/wait-for-port-up.sh" ]
 
   db-migrate:
     networks: [bots]
@@ -202,10 +187,6 @@ services:
   test:
     networks: [bots]
     container_name: germ-test
-    links: [pg]
-    depends_on:
-      bot-init:
-        condition: service_completed_successfully
     build:
       context: .
       dockerfile: app.Dockerfile
@@ -214,6 +195,7 @@ services:
       - ./:/src
     environment:
       <<: *local-dev
+      SKIP_INTEGRATION_TESTS: ${SKIP_INTEGRATION_TESTS:-true}
       SKIP_TESTS: ${SKIP_TESTS:-true}
     working_dir: /src
     command: ["tests/run.sh"]
