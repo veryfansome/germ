@@ -14,6 +14,7 @@ class AutoPosTuner:
         "VBD": 1,
         "DT": 2,
         "IN": 3,
+        "JJ": 4,
         # etc...
     }
     id2tag = {v: k for k, v in tag2id.items()}
@@ -34,46 +35,73 @@ class AutoPosTuner:
             model=self.model,
             args=TrainingArguments(
                 output_dir=f"{self.checkpoint_dir}/{checkpoint_name}",
-                overwrite_output_dir=True,
-                evaluation_strategy="epoch",
-                save_strategy="epoch",
-                num_train_epochs=3,
-                per_device_train_batch_size=8,
-                per_device_eval_batch_size=8,
+                eval_strategy="epoch",
                 learning_rate=5e-5,
                 logging_dir="logs",
                 logging_steps=50,
+                num_train_epochs=3,
+                overwrite_output_dir=True,
+                per_device_eval_batch_size=8,
+                per_device_train_batch_size=8,
+                save_strategy="epoch",
                 # Add more if needed
             ),
             train_dataset=dataset["train"],
             eval_dataset=dataset["validation"],
             data_collator=self.data_collator,
-            tokenizer=self.tokenizer,
+            #tokenizer=self.tokenizer,
             compute_metrics=compute_metrics,
         )
 
     def tokenize_and_align_labels(self, examples):
-        tokenized_inputs = self.tokenizer(
-            examples["tokens"],
-            truncation=True,
-            is_split_into_words=True
-        )
+        # We'll build lists that accumulate results for the entire batch.
+        all_input_ids = []
+        all_attention_masks = []
+        all_labels = []
 
-        labels = []
-        for i, words in enumerate(examples["tokens"]):
-            word_ids = tokenized_inputs.word_ids(batch_index=i)  # map subwords to word indices
-            label_ids = []
-            for word_id in word_ids:
-                if word_id is None:
-                    # This is a special token like [CLS], [SEP], or padding
-                    label_ids.append(-100)
-                else:
-                    # Align label to the first subword
-                    label_ids.append(self.tag2id[examples["tags"][i][word_id]])
-            labels.append(label_ids)
+        # If `examples["tokens"]` and `examples["tags"]` each contain multiple examples,
+        # we iterate over them in parallel.
+        for tokens, tags in zip(examples["tokens"], examples["tags"]):
+            # Tokenize a *single* example which may produce multiple chunks if >512 tokens.
+            outputs = self.tokenizer(
+                tokens,  # one example's tokens
+                is_split_into_words=True,
+                max_length=512,
+                padding="max_length",
+                return_overflowing_tokens=True,  # enables chunking
+                stride=128,  # 128-token overlap
+                truncation=True,
+            )
 
-        tokenized_inputs["labels"] = labels
-        return tokenized_inputs
+            # Each overflowed chunk is stored in `outputs["input_ids"][i]`, etc.
+            num_chunks = len(outputs["input_ids"])
+
+            for i in range(num_chunks):
+                # For chunk i, get the mapping from subwords back to word indices
+                word_ids = outputs.word_ids(batch_index=i)
+
+                # Build the label ids for this chunk
+                chunk_labels = []
+                for word_id in word_ids:
+                    if word_id is None:
+                        chunk_labels.append(-100)  # special tokens ([CLS], [SEP], padding)
+                    else:
+                        # Map to the appropriate tag index
+                        chunk_labels.append(self.tag2id[tags[word_id]])
+
+                # Accumulate results
+                all_input_ids.append(outputs["input_ids"][i])
+                all_attention_masks.append(outputs["attention_mask"][i])
+                # If your tokenizer returns token_type_ids or other fields, handle them similarly
+                all_labels.append(chunk_labels)
+
+        # Return a dict matching what Hugging Face Datasets expects
+        return {
+            "input_ids": all_input_ids,
+            "attention_mask": all_attention_masks,
+            "labels": all_labels,
+            # If you have token_type_ids or other fields, include them here too
+        }
 
 
 def compute_metrics(p):
@@ -102,13 +130,19 @@ if __name__ == "__main__":
 
     setup_logging()
 
+    deberta_checkpoint_name = "deberta-pos"
+
     deberta_model = AutoModelForTokenClassification.from_pretrained(
         "microsoft/deberta-base",
         num_labels=len(AutoPosTuner.tag2id),
         id2label=AutoPosTuner.id2tag,
         label2id=AutoPosTuner.tag2id
-    ),
-    deberta_tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-base")
+    )
+    deberta_tokenizer = AutoTokenizer.from_pretrained(
+        "microsoft/deberta-base",
+        add_prefix_space=True,
+        use_fast=True,
+    )
     pos_tuner = AutoPosTuner(deberta_model, deberta_tokenizer)
 
     # Suppose your data is in a Python dict format
@@ -128,7 +162,11 @@ if __name__ == "__main__":
     combined_dataset_dict = DatasetDict({"train": train_dataset, "validation": validation_dataset})
 
     # Map the tokenize_and_align_labels function
-    combined_dataset_dict = combined_dataset_dict.map(lambda x: pos_tuner.tokenize_and_align_labels(x), batched=True)
+    combined_dataset_dict = combined_dataset_dict.map(pos_tuner.tokenize_and_align_labels, batched=True)
     combined_dataset_dict.set_format("torch")
-    pos_trainer = pos_tuner.new_trainer(combined_dataset_dict, "deberta-pos")
+    pos_trainer = pos_tuner.new_trainer(combined_dataset_dict, deberta_checkpoint_name)
+
+    pos_trainer.train()
+    pos_trainer.evaluate()
+    pos_trainer.save_model(f"{pos_tuner.checkpoint_dir}/{deberta_checkpoint_name}/final")
 

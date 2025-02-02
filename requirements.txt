@@ -1,3 +1,4 @@
+accelerate>=0.26.0  # Required for using Trainer with PyTorch
 aiohttp
 apscheduler
 asyncpg
@@ -34,6 +35,8 @@ sentencepiece
 sqlalchemy[asyncio] == 2.0.37
 starlette
 tensorflow
+tf-keras  # Required until transformers supports Keras 3
 tiktoken
+torch
 transformers
 uvicorn[standard]
