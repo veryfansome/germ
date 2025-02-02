@@ -24,13 +24,12 @@ services:
       - flair-data:/root/.flair
       - nltk-data:/root/nltk_data
     environment: &local-dev
-      PG_HOST: &pg-host germ-pg
-      POSTGRES_USER: &pg-user ${POSTGRES_USER:-germ}
-      POSTGRES_PASSWORD: &pg-password ${POSTGRES_PASSWORD:-bacteria4life}
-      NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
       HF_HOME: ${HF_HOME:-/src/data/huggingface}
+      NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
-      SKIP_TESTS: ${SKIP_TESTS:-true}
+      PG_HOST: &pg-host germ-pg
+      POSTGRES_PASSWORD: &pg-password ${POSTGRES_PASSWORD:-bacteria4life}
+      POSTGRES_USER: &pg-user ${POSTGRES_USER:-germ}
     working_dir: /src
     command: [
       "gunicorn", "-c", "gunicorn_config.py", "bot.main:bot", "--bind", "0.0.0.0:8000"
@@ -59,56 +58,6 @@ services:
     environment:
       <<: *local-dev
       WAIT_FOR_HOST: &neo4j-host germ-neo4j
-      WAIT_FOR_PORT: 7474
-    working_dir: /src
-    command: [ "scripts/wait-for-port-up.sh" ]
-
-  pg:
-    networks: [bots]
-    container_name: *pg-host
-    image: postgres:16
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_DB: germ
-      POSTGRES_PASSWORD: *pg-password
-      POSTGRES_USER: *pg-user
-
-  neo4j:
-    networks: [bots]
-    container_name: *neo4j-host
-    image: neo4j:latest
-    volumes:
-      - ./scripts/neo4j-start.sh:/neo4j-start.sh
-      - ./database_dump/neo4j:/dump  # Persist data
-    environment:
-      NEO4J_AUTH: *neo4j-auth
-    ports:
-      - "7474:7474" # HTTP
-      - "7687:7687" # Bolt
-    command: [ "/neo4j-start.sh" ]
-
-  pg-init:
-    networks: [bots]
-    container_name: germ-pg-init
-    image: "germ:latest"
-    volumes:
-      - ./:/src
-    environment:
-      <<: *local-dev
-      WAIT_FOR_HOST: *pg-host
-      WAIT_FOR_PORT: 5432
-    working_dir: /src
-    command: [ "scripts/wait-for-port-up.sh" ]
-
-  neo4j-init:
-    networks: [bots]
-    container_name: germ-neo4j-init
-    image: "germ:latest"
-    volumes:
-      - ./:/src
-    environment:
-      WAIT_FOR_HOST: *neo4j-host
       WAIT_FOR_PORT: 7474
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
@@ -173,6 +122,57 @@ services:
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
 
+  neo4j:
+    networks: [bots]
+    container_name: *neo4j-host
+    image: neo4j:latest
+    volumes:
+      - ./scripts/neo4j-start.sh:/neo4j-start.sh
+      - ./database_dump/neo4j:/dump  # Persist data
+    environment:
+      NEO4J_AUTH: *neo4j-auth
+    ports:
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
+    command: [ "/neo4j-start.sh" ]
+
+  neo4j-init:
+    networks: [bots]
+    container_name: germ-neo4j-init
+    image: "germ:latest"
+    volumes:
+      - ./:/src
+    environment:
+      WAIT_FOR_HOST: *neo4j-host
+      WAIT_FOR_PORT: 7474
+    working_dir: /src
+    command: [ "scripts/wait-for-port-up.sh" ]
+
+  pg:
+    networks: [bots]
+    container_name: *pg-host
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: germ
+      POSTGRES_PASSWORD: *pg-password
+      POSTGRES_USER: *pg-user
+
+  pg-init:
+    networks: [bots]
+    container_name: germ-pg-init
+    image: "germ:latest"
+    volumes:
+      - ./:/src
+    environment:
+      <<: *local-dev
+      WAIT_FOR_AFTER_COMMAND: python -m bot.db.models
+      WAIT_FOR_HOST: *pg-host
+      WAIT_FOR_PORT: 5432
+    working_dir: /src
+    command: [ "scripts/wait-for-port-up.sh" ]
+
   # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
   prometheus:
     networks: [bots]
@@ -212,6 +212,8 @@ services:
     image: "germ:latest"
     volumes:
       - ./:/src
-    environment: *local-dev
+    environment:
+      <<: *local-dev
+      SKIP_TESTS: ${SKIP_TESTS:-true}
     working_dir: /src
     command: ["tests/run.sh"]
