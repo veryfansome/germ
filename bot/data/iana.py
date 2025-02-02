@@ -17,9 +17,6 @@ class IanaTLDCacher:
     def __init__(self):
         self.known_tld_names: set[str] = set()
 
-        self.load_from_db()
-        self.load_from_iana()
-
     def is_possible_public_fqdn(self, fqdn: str) -> bool:
         return fqdn.split(".")[-1] in self.known_tld_names
 
@@ -59,3 +56,7 @@ class IanaTLDCacher:
             logger.info(f"added {len(self.known_tld_names) - num_before_load} TLDs from {IanaTLDCacher.data_src_url}")
         except httpx.RequestError as e:
             logger.error("failed to download TLD data from IANA")
+
+    def load_tld_cache(self):
+        self.load_from_db()
+        self.load_from_iana()
