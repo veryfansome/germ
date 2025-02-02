@@ -28,6 +28,6 @@ NEO4J_PORT = os.getenv("GERM_NEO4J_PORT", "7687")
 
 # PostgreSQL
 
-DB_HOST = os.getenv("DB_HOST", "germ-db")
+DB_HOST = os.getenv("DB_HOST", "germ-pg")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "germ")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "bacteria4life")
