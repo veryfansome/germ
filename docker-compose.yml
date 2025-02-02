@@ -24,7 +24,7 @@ services:
       - flair-data:/root/.flair
       - nltk-data:/root/nltk_data
     environment: &local-dev
-      PG_HOST: &pg-host germ-db
+      PG_HOST: &pg-host germ-pg
       POSTGRES_USER: &pg-user ${POSTGRES_USER:-germ}
       POSTGRES_PASSWORD: &pg-password ${POSTGRES_PASSWORD:-bacteria4life}
       NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
