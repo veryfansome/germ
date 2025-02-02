@@ -18,7 +18,7 @@ STARTERKIT_DIR = os.getenv("GERM_STARTERKIT_DIR", "/src/data/germ/starterkit")
 # Observability
 
 JAEGER_HOST = os.getenv("GERM_JAEGER_HOST", "germ-jaeger")
-JAEGER_PORT = os.getenv("GERM_JAEGER_PORT", "6831")
+JAEGER_PORT = os.getenv("GERM_JAEGER_PORT", "4317")
 LOG_LEVEL = os.getenv("GERM_LOG_LEVEL", "INFO")
 
 # Neo4j

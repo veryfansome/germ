@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from opentelemetry import trace
-from opentelemetry.exporter.jaeger.thrift import JaegerExporter
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.resources import Resource
@@ -53,12 +53,13 @@ resource = Resource.create({
 provider = TracerProvider(resource=resource)
 trace.set_tracer_provider(provider)
 
-jaeger_exporter = JaegerExporter(
-    agent_host_name=germ_settings.JAEGER_HOST,
-    agent_port=int(germ_settings.JAEGER_PORT),
+otlp_exporter = OTLPSpanExporter(
+    endpoint=f"{germ_settings.JAEGER_HOST}:{germ_settings.JAEGER_PORT}",
+    insecure=True,
 )
 
-span_processor = BatchSpanProcessor(jaeger_exporter)
+span_processor = BatchSpanProcessor(otlp_exporter)
+
 provider.add_span_processor(span_processor)
 tracer = trace.get_tracer(__name__)
 
