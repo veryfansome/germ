@@ -1,7 +1,6 @@
 import logging
 
-from bot.lang.parsers import (extract_href_features, fqdn_to_proper_noun,
-                              ipv4_addr_to_proper_noun, ipv6_addr_to_proper_noun, resolve_fqdn)
+from bot.lang.parsers import (extract_href_features, fqdn_to_proper_noun, resolve_fqdn)
 
 logger = logging.getLogger(__name__)
 
@@ -194,17 +193,7 @@ def test_extract_href_features():
 
 def test_fqdn_to_proper_noun():
     word = fqdn_to_proper_noun("www.google.com")
-    assert word == "Googledotcom", word
-
-
-def test_ipv4_addr_to_proper_noun():
-    word = ipv4_addr_to_proper_noun("127.0.0.1")
-    assert word == "Onetwosevendotzerodotzerodotone", word
-
-
-def test_ipv6_addr_to_proper_noun():
-    word = ipv6_addr_to_proper_noun("2001:db8::1")
-    assert word == "Twozerozeroonecolondbeightcoloncolonone", word
+    assert word == "GoogleDOTcom", word
 
 
 def test_resolve_fqdn():

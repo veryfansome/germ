@@ -194,46 +194,16 @@ def extract_markdown_page_elements(text: str):
 def fqdn_to_proper_noun(fqdn: str):
     """
     Converts FQDNs to something that looks like a single proper noun. For example, converts www.google.com to
-    "Googledotcom"
+    "GoogleDOTcom"
 
     :param fqdn:
     :return:
     """
-    #return "DOT".join(fqdn.lower().split(".")[-2:]).capitalize()
     return "".join([char.upper() if idx == 0 else char for idx, char in enumerate("DOT".join(fqdn.lower().split(".")[-2:]))])
 
 
 def get_html_soup(text) -> BeautifulSoup:
     return BeautifulSoup(text, 'html.parser')
-
-
-def ipv4_addr_to_proper_noun(addr: str):
-    """
-    Converts IPv4 addresses to something that looks like a single proper noun. For example, converts 127.0.0.1 to
-    "Onetwosevendotzerodotzerodotone"
-
-    :param addr:
-    :return:
-    """
-    tokens = []
-    for char in addr:
-        tokens.append("DOT" if char == "." else inflect_engine.number_to_words(char))
-    #return "".join(tokens).capitalize()
-    return [char.upper() if idx == 0 else char for idx, char in enumerate("".join(tokens))]
-
-
-def ipv6_addr_to_proper_noun(addr: str):
-    """
-    Converts IPv6 addresses to something that looks like a single proper noun. For example, converts 2001:db8::1 to
-    "Twozerozeroonecolondbeightcoloncolonone"
-
-    :param addr:
-    :return:
-    """
-    tokens = []
-    for char in addr:
-        tokens.append("colon" if char == ":" else (inflect_engine.number_to_words(char) if char.isdigit() else char))
-    return "".join(tokens).capitalize()
 
 
 def resolve_fqdn(fqdn: str, nameservers: list[str] = None, timeout: int = 2):
