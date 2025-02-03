@@ -32,6 +32,7 @@ pytest-xdist
 python-dotenv
 scikit-learn
 sentencepiece
+seqeval
 sqlalchemy[asyncio] == 2.0.37
 starlette
 tensorflow
