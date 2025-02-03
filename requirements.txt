@@ -3,6 +3,7 @@ aiohttp
 apscheduler
 asyncpg
 beautifulsoup4
+conllu
 dataset
 datasets
 dnspython
