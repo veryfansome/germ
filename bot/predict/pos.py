@@ -78,12 +78,12 @@ def predict_long_text(model, tokenizer, words, id2tag, device, max_length=512, s
 
 
 if __name__ == "__main__":
-    from bot.train.auto_pos_tuner import AutoPOSTuner, get_model, get_tokenizer
+    from bot.train.auto_ud_pos_tuner import AutoPOSTuner, get_model, get_tokenizer
     from observability.logging import setup_logging
 
     setup_logging()
 
-    deberta_checkpoint_name = "deberta-pos"
+    deberta_checkpoint_name = "deberta-ud-pos"
     deberta_model = get_model(f"{AutoPOSTuner.checkpoint_dir}/{deberta_checkpoint_name}/final")
     deberta_tokenizer = get_tokenizer(f"{AutoPOSTuner.checkpoint_dir}/{deberta_checkpoint_name}/final")
 

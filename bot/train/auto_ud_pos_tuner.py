@@ -1,4 +1,4 @@
-from sklearn.metrics import classification_report, precision_recall_fscore_support
+from sklearn.metrics import precision_recall_fscore_support
 from transformers import (AutoModelForTokenClassification, AutoTokenizer,
                           DataCollatorForTokenClassification,
                           Trainer, TrainingArguments)
@@ -9,17 +9,9 @@ logger = logging.getLogger(__name__)
 
 
 class AutoPOSTuner:
-
     checkpoint_dir = "models/germ"
-    tag2id = {
-        "NN": 0,
-        "VBD": 1,
-        "DT": 2,
-        "IN": 3,
-        "JJ": 4,
-        # etc...
-    }
-    id2tag = {v: k for k, v in tag2id.items()}
+    tag2id = {}  # to be updated from UD training data
+    id2tag = {}
 
     def __init__(self, model, tokenizer,
                  checkpoint_dir=None,
@@ -51,7 +43,6 @@ class AutoPOSTuner:
             train_dataset=dataset["train"],
             eval_dataset=dataset["validation"],
             data_collator=self.data_collator,
-            #tokenizer=self.tokenizer,
             compute_metrics=compute_metrics,
         )
 
@@ -61,10 +52,8 @@ class AutoPOSTuner:
         all_attention_masks = []
         all_labels = []
 
-        # If `examples["tokens"]` and `examples["tags"]` each contain multiple examples,
-        # we iterate over them in parallel.
-        for tokens, tags in zip(examples["tokens"], examples["tags"]):
-            # Tokenize a *single* example which may produce multiple chunks if >512 tokens.
+        # Process each example in the batch.
+        for tokens, tags in zip(examples["tokens"], examples["xpos"]):
             outputs = self.tokenizer(
                 tokens,  # one example's tokens
                 is_split_into_words=True,
@@ -75,9 +64,8 @@ class AutoPOSTuner:
                 truncation=True,
             )
 
-            # Each overflowed chunk is stored in `outputs["input_ids"][i]`, etc.
+            # Process each overflowed chunk.
             num_chunks = len(outputs["input_ids"])
-
             for i in range(num_chunks):
                 # For chunk i, get the mapping from subwords back to word indices
                 word_ids = outputs.word_ids(batch_index=i)
@@ -88,21 +76,20 @@ class AutoPOSTuner:
                     if word_id is None:
                         chunk_labels.append(-100)  # special tokens ([CLS], [SEP], padding)
                     else:
-                        # Map to the appropriate tag index
-                        chunk_labels.append(self.tag2id[tags[word_id]])
-
-                # Accumulate results
+                        token_tag = tags[word_id]
+                        if token_tag is None:
+                            # If the token tag is missing, ignore this token.
+                            chunk_labels.append(-100)
+                        else:
+                            chunk_labels.append(self.tag2id[token_tag])
                 all_input_ids.append(outputs["input_ids"][i])
                 all_attention_masks.append(outputs["attention_mask"][i])
-                # If your tokenizer returns token_type_ids or other fields, handle them similarly
                 all_labels.append(chunk_labels)
 
-        # Return a dict matching what Hugging Face Datasets expects
         return {
             "input_ids": all_input_ids,
             "attention_mask": all_attention_masks,
             "labels": all_labels,
-            # If you have token_type_ids or other fields, include them here too
         }
 
 
@@ -167,12 +154,7 @@ def compute_metrics(p):
 
 def generate_classification_report(true_labels, true_predictions, id2tag):
     """
-    Generate a detailed classification report using scikit-learn's classification_report.
-
-    Parameters:
-      - true_labels: a list or numpy array of true label ids.
-      - true_predictions: a list or numpy array of predicted label ids.
-      - id2tag: dictionary mapping label id to label string.
+    Generate a classification report mapping integer labels back to tag names.
     """
     from sklearn.metrics import classification_report
 
@@ -203,66 +185,95 @@ def get_tokenizer(model_name_or_path: str):
 
 
 if __name__ == "__main__":
-    from datasets import Dataset, DatasetDict
+    from datasets import concatenate_datasets, load_dataset, DatasetDict
     from observability.logging import setup_logging
 
     setup_logging()
 
+    # 1. Load UD datasets: en_ewt and en_gum.
+    loaded_datasets = []
+
+    for dataset_name in [
+        # 89 total unique classes
+        "en_ewt",     # 50 classes
+        "en_gum",     # 45 classes
+        "en_partut",  # 38 classes
+    ]:
+        downloaded_ds = load_dataset("universal_dependencies", dataset_name)
+        loaded_datasets.append(downloaded_ds)
+        for split in downloaded_ds.keys():
+            logger.info(f"{dataset_name} {split}: {len(downloaded_ds[split])}")
+
+    test_dataset = concatenate_datasets([ds["test"] for ds in loaded_datasets if "test" in ds])
+    train_dataset = concatenate_datasets([ds["train"] for ds in loaded_datasets if "train" in ds])
+    validation_dataset = concatenate_datasets([ds["validation"] for ds in loaded_datasets if "validation" in ds])
+    logger.info(f"Test dataset size: {len(test_dataset)}")
+    logger.info(f"Train dataset size: {len(train_dataset)}")
+    logger.info(f"Validation dataset size: {len(validation_dataset)}")
+
+    # 2. Build the POS tag mappings from the combined data (train, validation, test).
+    unique_tags = set()
+    for ds in [train_dataset, validation_dataset, test_dataset]:
+        # Use "xpos" labels
+        for tags in ds["xpos"]:
+            if tags is None:
+                continue
+            for tag in tags:
+                if tag is not None:
+                    unique_tags.add(tag)
+    unique_tags = sorted(unique_tags)
+    logger.info(f"Unique tag count: {len(unique_tags)}")
+    logger.info(f"Unique tags: {unique_tags}")
+
+    tag2id = {tag: i for i, tag in enumerate(unique_tags)}
+    id2tag = {i: tag for tag, i in tag2id.items()}
+
+    # Update the AutoPOSTuner class variables so that the model gets the correct number of labels.
+    AutoPOSTuner.tag2id = tag2id
+    AutoPOSTuner.id2tag = id2tag
+
+    # 3. Initialize model and tokenizer.
     deberta_model_name = "microsoft/deberta-base"
-    deberta_checkpoint_name = "deberta-pos"
+    deberta_checkpoint_name = "deberta-ud-pos"
+    # Final checkpoint path
+    deberta_final_checkpoint_name = f"models/germ/{deberta_checkpoint_name}/final"
 
     deberta_model = get_model(deberta_model_name)
     deberta_tokenizer = get_tokenizer(deberta_model_name)
     pos_tuner = AutoPOSTuner(deberta_model, deberta_tokenizer)
 
-    deberta_final_checkpoint_name = f"{pos_tuner.checkpoint_dir}/{deberta_checkpoint_name}/final"
+    # 4. Combine the UD training and validation splits into a DatasetDict.
+    combined_dataset_dict = DatasetDict({
+        "train": train_dataset,
+        "validation": validation_dataset,
+    })
 
-    # Suppose your data is in a Python dict format
-    train_data = {
-        "tokens": [["The", "cat", "sat"], ["A", "big", "dog", "ran"]],
-        "tags":   [["DT",  "NN",  "VBD"], ["DT", "JJ",  "NN",  "VBD"]]
-    }
-    train_dataset = Dataset.from_dict(train_data)
-
-    validation_data = {
-        "tokens": [["Another", "sentence"]],
-        "tags":   [["DT", "NN"]]
-    }
-    validation_dataset = Dataset.from_dict(validation_data)
-
-    # Combine into a DatasetDict if you want
-    combined_dataset_dict = DatasetDict({"train": train_dataset, "validation": validation_dataset})
-
-    # Map the tokenize_and_align_labels function
+    # 5. Tokenize and align labels. The function now uses the "xpos" field.
     combined_dataset_dict = combined_dataset_dict.map(pos_tuner.tokenize_and_align_labels, batched=True)
     combined_dataset_dict.set_format("torch")
-    pos_trainer = pos_tuner.new_trainer(combined_dataset_dict, deberta_checkpoint_name)
 
+    # 6. Create and run the Trainer.
+    pos_trainer = pos_tuner.new_trainer(combined_dataset_dict, deberta_checkpoint_name)
     pos_trainer.train()
     pos_trainer.evaluate()
 
     # -----------------------------
     # Additional Analysis: Generate Classification Report
     # -----------------------------
-
-    # Run predictions on the validation dataset.
-    predictions_output = pos_trainer.predict(combined_dataset_dict["validation"])
-    predictions = predictions_output.predictions
-    labels = predictions_output.label_ids
+    test_predictions_output = pos_trainer.predict(test_dataset)
+    test_predictions = test_predictions_output.predictions
+    test_prediction_labels = test_predictions_output.label_ids
 
     flat_predictions = []
     flat_labels = []
-    # Flatten predictions and labels while ignoring -100.
-    for pred_seq, label_seq in zip(predictions, labels):
-        for pred, label in zip(np.argmax(pred_seq, axis=-1), label_seq):
-            if label != -100:
-                flat_predictions.append(pred)
-                flat_labels.append(label)
+    for test_pred_seq, test_label_seq in zip(test_predictions, test_prediction_labels):
+        for test_pred, test_label in zip(np.argmax(test_pred_seq, axis=-1), test_label_seq):
+            if test_label != -100:
+                flat_predictions.append(test_pred)
+                flat_labels.append(test_label)
 
-    # Generate and show the classification report.
     generate_classification_report(flat_labels, flat_predictions, AutoPOSTuner.id2tag)
 
+    # Save the final model and tokenizer.
     pos_trainer.save_model(deberta_final_checkpoint_name)
     deberta_tokenizer.save_pretrained(deberta_final_checkpoint_name)
-
-
