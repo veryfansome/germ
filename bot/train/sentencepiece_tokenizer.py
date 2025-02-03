@@ -21,7 +21,7 @@ args = arg_parser.parse_args()
 
 input_sentence_size = 3_000_000
 max_line_char_len = 4192
-vocab_size = 100_000
+vocab_size = 1_000_000
 
 corpus_dir = "data/germ/text"
 corpus_file_prefix = f"{corpus_dir}/sentencepiece_corpus"
