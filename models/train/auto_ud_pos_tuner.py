@@ -187,16 +187,24 @@ def get_tokenizer(model_name_or_path: str):
 if __name__ == "__main__":
     from datasets import concatenate_datasets, load_dataset, DatasetDict
     from observability.logging import setup_logging
+    import argparse
 
     setup_logging()
+
+    arg_parser = argparse.ArgumentParser(description='Build a graph of ideas.')
+    arg_parser.add_argument("--from-base", help='Load a base model.',
+                            action="store_true", default=False)
+    arg_parser.add_argument("--train", help='Train model using loaded examples.',
+                            action="store_true", default=False)
+    args = arg_parser.parse_args()
 
     # 1. Load UD datasets: en_ewt and en_gum.
     loaded_datasets = []
 
     for dataset_name in [
         # 89 total unique classes
-        "en_ewt",     # 50 classes
-        "en_gum",     # 45 classes
+        #"en_ewt",     # 50 classes
+        #"en_gum",     # 45 classes
         "en_partut",  # 38 classes
     ]:
         downloaded_ds = load_dataset("universal_dependencies", dataset_name)
@@ -236,10 +244,15 @@ if __name__ == "__main__":
     deberta_model_name = "microsoft/deberta-base"
     deberta_checkpoint_name = "deberta-ud-pos"
     # Final checkpoint path
-    deberta_final_checkpoint_name = f"models/germ/{deberta_checkpoint_name}/final"
+    deberta_final_checkpoint_path = f"models/germ/{deberta_checkpoint_name}/final"
 
-    deberta_model = get_model(deberta_model_name)
-    deberta_tokenizer = get_tokenizer(deberta_model_name)
+    if args.from_base:
+        deberta_model = get_model(deberta_model_name)
+        deberta_tokenizer = get_tokenizer(deberta_model_name)
+    else:
+        deberta_model = get_model(deberta_final_checkpoint_path)
+        deberta_tokenizer = get_tokenizer(deberta_final_checkpoint_path)
+
     pos_tuner = AutoPOSTuner(deberta_model, deberta_tokenizer)
 
     # 4. Combine the UD training and validation splits into a DatasetDict.
@@ -254,12 +267,22 @@ if __name__ == "__main__":
 
     # 6. Create and run the Trainer.
     pos_trainer = pos_tuner.new_trainer(combined_dataset_dict, deberta_checkpoint_name)
-    pos_trainer.train()
-    pos_trainer.evaluate()
+
+    if args.train:
+        pos_trainer.train()
+        pos_trainer.evaluate()
+
+        # Save the final model and tokenizer.
+        pos_trainer.save_model(deberta_final_checkpoint_path)
+        deberta_tokenizer.save_pretrained(deberta_final_checkpoint_path)
 
     # -----------------------------
     # Additional Analysis: Generate Classification Report
     # -----------------------------
+    # Map the test dataset using the same tokenize_and_align_labels function.
+    test_dataset = test_dataset.map(pos_tuner.tokenize_and_align_labels, batched=True)
+    test_dataset.set_format("torch")
+
     test_predictions_output = pos_trainer.predict(test_dataset)
     test_predictions = test_predictions_output.predictions
     test_prediction_labels = test_predictions_output.label_ids
@@ -273,7 +296,3 @@ if __name__ == "__main__":
                 flat_labels.append(test_label)
 
     generate_classification_report(flat_labels, flat_predictions, AutoPOSTuner.id2tag)
-
-    # Save the final model and tokenizer.
-    pos_trainer.save_model(deberta_final_checkpoint_name)
-    deberta_tokenizer.save_pretrained(deberta_final_checkpoint_name)
