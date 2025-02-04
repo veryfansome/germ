@@ -179,23 +179,26 @@
     }
 
     let ws;
-    let wsIsConnected = false;
     let wsConnectionAttemptInProgress = false;
     const wsReconnectInterval = 5000; // 5 seconds
     function wsConnect() {
         ws = new WebSocket(`ws://${host}:${port}/chat`);
         wsConnectionAttemptInProgress = true
         ws.onopen = () => {
-            wsIsConnected = true;
             wsConnectionAttemptInProgress = false
             console.log('WebSocket connected');
         };
         ws.onclose = (event) => {
-            wsIsConnected = false;
             wsConnectionAttemptInProgress = false
             const loadingIndicator = getLoadingIndicator();
             loadingIndicator.remove(); // Stop showing loading indicator if error
             console.log('WebSocket connection closed:', event);
+        };
+        ws.onerror = (event) => {
+            wsConnectionAttemptInProgress = false
+            const loadingIndicator = getLoadingIndicator();
+            loadingIndicator.remove(); // Stop showing loading indicator if error
+            console.log('WebSocket connection errored:', event);
         };
     }
     async function sendMessage() {
@@ -231,14 +234,35 @@
         ws.send(JSON.stringify({ messages: finalChatCompletionMessageList }));
     }
     wsConnect();
-    setInterval(() => {
-        if (!wsIsConnected && !wsConnectionAttemptInProgress) {
-            console.log("Not connected, connecting...")
-            wsConnect();
-        } else {
-            console.log("Connected")
+    function reconnectIfDisconnected() {
+        switch (ws.readyState) {
+            case WebSocket.CONNECTING:
+                console.log('WebSocket is connecting...');
+                break;
+            case WebSocket.OPEN:
+                console.log('WebSocket is open.');
+                break;
+            case WebSocket.CLOSING:
+                console.log('WebSocket is closing...');
+                break;
+            case WebSocket.CLOSED:
+                console.log('WebSocket is closed.');
+                if (!wsConnectionAttemptInProgress) {
+                    console.log('Reconnecting...');
+                    wsConnect();
+                }
+                break;
+            default:
+                console.log('Unknown WebSocket state.');
+                break;
         }
-    }, wsReconnectInterval);
+    }
+    setInterval(reconnectIfDisconnected, wsReconnectInterval);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            reconnectIfDisconnected()
+        }
+    });
     </script>
 </body>
 </html>
