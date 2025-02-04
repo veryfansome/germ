@@ -28,7 +28,7 @@ services:
       - flair-data:/root/.flair
       - nltk-data:/root/nltk_data
     environment: &local-dev
-      HF_HOME: ${HF_HOME:-/src/data/huggingface}
+      HF_HOME: &hf-home ${HF_HOME:-/src/data/huggingface}
       NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
       NEO4J_HOST: &neo4j-host germ-neo4j
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
@@ -106,6 +106,38 @@ services:
       WAIT_FOR_PORT: 4317
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
+
+  models:
+    networks: [bots]
+    container_name: germ-models
+    depends_on:
+      jaeger-init:
+        condition: service_completed_successfully
+      prometheus-init:
+        condition: service_completed_successfully
+      test:
+        condition: service_completed_successfully
+    build:
+      context: .
+      dockerfile: app.Dockerfile
+    image: "germ:latest"
+    volumes:
+      - ./:/src:rw
+      - flair-data:/root/.flair
+      - nltk-data:/root/nltk_data
+    environment:
+      HF_HOME: *hf-home
+    working_dir: /src
+    command: [
+      "gunicorn", "-c", "gunicorn_config.py", "models.main:model_service", "--bind", "0.0.0.0:9000"
+    ]
+    ports:
+      - "9001:9000"
+    healthcheck:
+      test: ["CMD", "curl", "-s", "localhost:9000/healthz"]
+      interval: 10s
+      timeout: 9s
+      retries: 6
 
   neo4j:
     networks: [bots]

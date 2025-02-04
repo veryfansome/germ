@@ -5,17 +5,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.trace import SpanKind
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from starlette.concurrency import run_in_threadpool
-from starlette.middleware.base import RequestResponseEndpoint
-from starlette.requests import Request
 from starlette.responses import Response
 import asyncio
 import hashlib
@@ -34,7 +27,7 @@ from bot.websocket import (WebSocketConnectionManager,
                            get_chat_session_messages, get_chat_session_summaries,
                            update_chat_session_is_hidden)
 from observability.logging import logging, setup_logging
-from settings import germ_settings
+from observability.tracing import setup_tracing
 
 scheduler = AsyncIOScheduler()
 
@@ -47,20 +40,7 @@ logger = logging.getLogger(__name__)
 ##
 # Tracing
 
-resource = Resource.create({
-    "service.name": germ_settings.SERVICE_NAME,
-})
-provider = TracerProvider(resource=resource)
-trace.set_tracer_provider(provider)
-
-otlp_exporter = OTLPSpanExporter(
-    endpoint=f"{germ_settings.JAEGER_HOST}:{germ_settings.JAEGER_PORT}",
-    insecure=True,
-)
-
-span_processor = BatchSpanProcessor(otlp_exporter)
-
-provider.add_span_processor(span_processor)
+setup_tracing("bot-service")
 tracer = trace.get_tracer(__name__)
 
 ##
@@ -142,20 +122,6 @@ if os.path.exists("bot/static/tests"):
 # Enabled instrumentation
 FastAPIInstrumentor.instrument_app(bot)
 SQLAlchemyInstrumentor().instrument(engine=engine)
-
-
-##
-# Middleware
-
-
-@bot.middleware("http")
-async def dispatch(request: Request, call_next: RequestResponseEndpoint) -> Response:
-    with tracer.start_as_current_span(f"{request.method} {request.url}", kind=SpanKind.SERVER) as span:
-        response = await call_next(request)
-        span.set_attribute("http.method", request.method)
-        span.set_attribute("http.url", str(request.url))
-        span.set_attribute("http.status_code", response.status_code)
-        return response
 
 
 ##
