@@ -108,6 +108,4 @@ if __name__ == "__main__":
                                        max_length=512, stride=128)
 
     # Print results.
-    print("Predictions:")
-    for word, tag in predicted_tags:
-        print(f"{word} -> {tag}")
+    print(f"Predictions: {predicted_tags}")

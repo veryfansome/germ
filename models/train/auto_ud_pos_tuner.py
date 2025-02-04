@@ -167,12 +167,10 @@ def generate_classification_report(true_labels, true_predictions, id2tag):
     return report
 
 
-def get_model(model_name_or_path: str):
+def get_model(model_name_or_path: str, **kwargs):
     return AutoModelForTokenClassification.from_pretrained(
         model_name_or_path,
-        num_labels=len(AutoPOSTuner.tag2id),
-        id2label=AutoPOSTuner.id2tag,
-        label2id=AutoPOSTuner.tag2id
+        **kwargs,
     )
 
 
@@ -247,10 +245,16 @@ if __name__ == "__main__":
     deberta_final_checkpoint_path = f"models/germ/{deberta_checkpoint_name}/final"
 
     if args.from_base:
-        deberta_model = get_model(deberta_model_name)
+        deberta_model = get_model(deberta_model_name,
+                                  num_labels=len(AutoPOSTuner.tag2id),
+                                  id2label=AutoPOSTuner.id2tag,
+                                  label2id=AutoPOSTuner.tag2id)
         deberta_tokenizer = get_tokenizer(deberta_model_name)
     else:
-        deberta_model = get_model(deberta_final_checkpoint_path)
+        deberta_model = get_model(deberta_final_checkpoint_path,
+                                  num_labels=len(AutoPOSTuner.tag2id),
+                                  id2label=AutoPOSTuner.id2tag,
+                                  label2id=AutoPOSTuner.tag2id)
         deberta_tokenizer = get_tokenizer(deberta_final_checkpoint_path)
 
     pos_tuner = AutoPOSTuner(deberta_model, deberta_tokenizer)
