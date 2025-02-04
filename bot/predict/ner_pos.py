@@ -120,7 +120,7 @@ def report_state_dict_mismatch(model, checkpoint_path):
 
 
 if __name__ == "__main__":
-    from bot.train.auto_ner_pos_joint_tuner import JointPosNerTuner, get_joint_model, get_tokenizer
+    from models.train import JointPosNerTuner, get_joint_model, get_tokenizer
     from observability.logging import setup_logging
 
     setup_logging()

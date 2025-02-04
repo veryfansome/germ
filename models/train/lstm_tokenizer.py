@@ -1,9 +1,8 @@
 from tf_keras import layers, models
 import logging
 import numpy as np
-import re
 
-from bot.train.naive_tokenizer import naive_tokenization
+from models.train.naive_tokenizer import naive_tokenization
 
 logger = logging.getLogger(__name__)
 
