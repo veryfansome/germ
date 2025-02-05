@@ -31,7 +31,10 @@ services:
       HF_HOME: &hf-home ${HF_HOME:-/src/data/huggingface}
       NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
       NEO4J_HOST: &neo4j-host germ-neo4j
-      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4o}
+      OPENAI_IMAGE_MODEL: ${OPENAI_IMAGE_MODEL:-dall-e-3}
+      OPENAI_MINI_MODEL: ${OPENAI_MINI_MODEL:-gpt-4o-mini}
       PG_HOST: &pg-host germ-pg
       POSTGRES_PASSWORD: &pg-password ${POSTGRES_PASSWORD:-bacteria4life}
       POSTGRES_USER: &pg-user ${POSTGRES_USER:-germ}

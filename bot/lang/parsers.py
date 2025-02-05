@@ -10,12 +10,14 @@ import os
 import re
 
 from bot.data.iana import IanaTLDCacher
-from bot.data.url import ipv4_addr_pattern, ipv6_addr_pattern
 
 logger = logging.getLogger(__name__)
 
 iana_data = IanaTLDCacher()
 inflect_engine = inflect.engine()
+
+ipv4_addr_pattern = re.compile(r"^(?P<ipv4_addr>(\d{1,3}\.){3}\d{1,3})")
+ipv6_addr_pattern = re.compile(r"^(?P<ipv6_addr>\[[0-9a-zA-Z:%]{3,39}])")
 
 
 class MarkdownPageElementExtractor(mistune.HTMLRenderer):

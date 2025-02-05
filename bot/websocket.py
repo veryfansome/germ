@@ -14,7 +14,7 @@ from bot.api.models import ChatMessage, ChatRequest, ChatResponse, ChatSessionSu
 from bot.db.models import ChatSession, ChatRequestReceived, ChatResponseSent, SessionLocal
 from bot.graph.control_plane import ControlPlane
 from settings.germ_settings import WEBSOCKET_CONNECTION_IDLE_TIMEOUT
-from settings.openai_settings import DEFAULT_MINI_MODEL, HTTPX_TIMEOUT
+from settings.openai_settings import MINI_MODEL, HTTPX_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -274,8 +274,7 @@ def update_chat_session_summary(chat_session_id: int):
                         "What was your response?"
                     ))
                 }]),
-                model=DEFAULT_MINI_MODEL, n=1,
-                temperature=0.0,
+                model=MINI_MODEL, n=1,
                 timeout=HTTPX_TIMEOUT)
             with SessionLocal() as session:
                 cs = session.query(ChatSession).filter_by(chat_session_id=chat_session_id).first()

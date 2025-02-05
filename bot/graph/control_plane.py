@@ -22,7 +22,7 @@ text_block_table = Table('text_block', MetaData(), autoload_with=engine)
 
 class CodeBlockMergeEventHandler(ABC):
     @abstractmethod
-    async def on_code_block_merge(self, code_block: str, code_block_id: int):
+    async def on_code_block_merge(self, code_block: str, text_block_id: int):
         pass
 
 
@@ -128,8 +128,8 @@ class ControlPlane:
         async_tasks = []
         for handler in self.code_block_merge_event_handlers:
             async_tasks.append(asyncio.create_task(
-                handler.on_code_block_merge(code_block, rdb_record.code_block_id)))
-        return graph_results, rdb_record.code_block_id, async_tasks
+                handler.on_code_block_merge(code_block, rdb_record.text_block_id)))
+        return graph_results, rdb_record.text_block_id, async_tasks
 
     def add_code_block_merge_event_handler(self, handler: CodeBlockMergeEventHandler):
         self.code_block_merge_event_handlers.append(handler)
