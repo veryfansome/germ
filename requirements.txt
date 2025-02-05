@@ -8,6 +8,7 @@ dataset
 datasets
 dnspython
 fastapi
+google-cloud-storage
 googletrans
 gunicorn
 httpx
