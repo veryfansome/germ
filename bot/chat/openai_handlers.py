@@ -12,7 +12,7 @@ from bot.graph.control_plane import ControlPlane
 from bot.lang.parsers import extract_markdown_page_elements
 from bot.websocket import WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender
 from observability.annotations import measure_exec_seconds
-from settings.openai_settings import (DEFAULT_CHAT_MODEL, DEFAULT_MINI_MODEL, DEFAULT_ROUTING_MODEL,
+from settings.openai_settings import (CHAT_MODEL, MINI_MODEL, ROUTING_MODEL,
                                       ENABLED_CHAT_MODELS, ENABLED_IMAGE_MODELS, HTTPX_TIMEOUT)
 
 logger = logging.getLogger(__name__)
@@ -34,15 +34,14 @@ class RoutableChatEventHandler(WebSocketReceiveEventHandler, ABC):
 
 
 class ChatModelEventHandler(RoutableChatEventHandler):
-    def __init__(self, model: str = DEFAULT_CHAT_MODEL):
+    def __init__(self, model: str = CHAT_MODEL):
         self.function_name = f"use_{model}"
         self.function_settings = {
             "type": "function",
             "function": {
                 "name": self.function_name,
                 "description": " ".join((
-                    f"Use {model} to generate a reply if the user asks for {model}",
-                    f"or if conversation is intellectual or technical in nature.",
+                    f"Use {model} to generate a reply if the user asks for {model}.",
                 )),
                 "parameters": {},
             },
@@ -52,10 +51,14 @@ class ChatModelEventHandler(RoutableChatEventHandler):
     def do_chat_completion(self, chat_request: ChatRequest) -> ChatCompletion:
         with OpenAI() as client:
             return client.chat.completions.create(
-                messages=[message.model_dump() for message in chat_request.messages],
+                messages=[message.model_dump() for message in chat_request.messages] + [
+                    {
+                        "role": "system",
+                        "content": "Use markdown format."
+                    }
+                ],
                 model=self.model,
-                n=1, temperature=chat_request.temperature,
-                timeout=HTTPX_TIMEOUT)
+                n=1, timeout=HTTPX_TIMEOUT)
 
     def get_function_name(self):
         return self.function_name
@@ -68,7 +71,7 @@ class ChatModelEventHandler(RoutableChatEventHandler):
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await run_in_threadpool(self.do_chat_completion, chat_request)
-        task = asyncio.create_task(ws_sender.return_chat_response(
+        _ = asyncio.create_task(ws_sender.return_chat_response(
             chat_request_received_id, ChatResponse(
                 content=completion.choices[0].message.content,
                 model=completion.model)))
@@ -82,7 +85,7 @@ class ImageModelEventHandler(RoutableChatEventHandler):
             "function": {
                 "name": self.function_name,
                 "description": " ".join((
-                    f"Use {model} to generate an image if {model} is likely to achieve good results.",
+                    f"Use {model} to generate an image.",
                 )),
                 "parameters": {},
             },
@@ -132,7 +135,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
     if the situation calls for other tools.
     """
 
-    def __init__(self, model: str = DEFAULT_ROUTING_MODEL):
+    def __init__(self, model: str = ROUTING_MODEL):
         super().__init__(model)
         self.model: str = model
         self.tools: dict[str, RoutableChatEventHandler] = {}
@@ -149,7 +152,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await run_in_threadpool(self.do_chat_completion, chat_request)
         if completion is None:
-            task = asyncio.create_task(ws_sender.return_chat_response(
+            _ = asyncio.create_task(ws_sender.return_chat_response(
                 chat_request_received_id,
                 ChatResponse(content="Sorry, I'm unable to access my language model.")))
             return
@@ -165,7 +168,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
             else:
                 logger.error("completion content and tool_calls are both missing", completion)
                 completion.choices[0].message.content = "Strange... I don't have a response"
-        task = asyncio.create_task(ws_sender.return_chat_response(
+        _ = asyncio.create_task(ws_sender.return_chat_response(
             chat_request_received_id,
             ChatResponse(
                 content=completion.choices[0].message.content,
@@ -176,10 +179,14 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
         try:
             with OpenAI() as client:
                 return client.chat.completions.create(
-                    messages=[message.model_dump() for message in chat_request.messages],
+                    messages=[message.model_dump() for message in chat_request.messages] + [
+                        {
+                            "role": "system",
+                            "content": "Use markdown format."
+                        }
+                    ],
                     model=self.model,
-                    n=1, temperature=chat_request.temperature,
-                    tools=tools,
+                    n=1, tools=tools,
                     timeout=HTTPX_TIMEOUT)
         except Exception as e:
             logger.error(e)
@@ -271,7 +278,7 @@ class UserProfileConsumer(ABC):
 class UserProfilingHandler(WebSocketReceiveEventHandler):
     def __init__(self, control_plane: ControlPlane, tool_properties_spec,
                  consumers: list[UserProfileConsumer] = None,
-                 model: str = DEFAULT_CHAT_MODEL,
+                 model: str = CHAT_MODEL,
                  post_func: Callable[[str], str] = None,
                  tool_func_description: str = "",
                  tool_func_name: str = "",
@@ -329,8 +336,7 @@ class UserProfilingHandler(WebSocketReceiveEventHandler):
         with OpenAI() as client:
             completion = client.chat.completions.create(
                 messages=[message.model_dump() for message in chat_request.messages if message.role != "system"],
-                model=self.model,
-                n=1, temperature=0,
+                model=self.model, n=1,
                 tool_choice={
                     "type": "function",
                     "function": {"name": self.tool_func_name}
@@ -361,7 +367,7 @@ def generate_image_model_inputs(chat_request: ChatRequest):
                 "content": "The user wants an image."
             }] + [message.model_dump() for message in chat_request.messages]),
 
-            model=DEFAULT_MINI_MODEL, n=1, temperature=chat_request.temperature,
+            model=MINI_MODEL, n=1,
             tool_choice={
                 "type": "function",
                 "function": {"name": "generate_image"}

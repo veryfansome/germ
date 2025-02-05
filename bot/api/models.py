@@ -19,7 +19,6 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     system_message: Optional[str] = ""
-    temperature: Optional[float] = 0.0
 
 
 class ChatResponse(ChatMessage):
