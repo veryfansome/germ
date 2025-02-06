@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class AutoPOSTuner:
     checkpoint_dir = "models/germ"
-    tag2id = {}  # to be updated from UD training data
+    tag2id = {}  # to be updated from CoNLL training data
     id2tag = {}
 
     def __init__(self, model, tokenizer,
@@ -38,7 +38,6 @@ class AutoPOSTuner:
                 per_device_eval_batch_size=8,
                 per_device_train_batch_size=8,
                 save_strategy="epoch",
-                # Add more if needed
             ),
             train_dataset=dataset["train"],
             eval_dataset=dataset["validation"],
@@ -47,13 +46,13 @@ class AutoPOSTuner:
         )
 
     def tokenize_and_align_labels(self, examples):
-        # We'll build lists that accumulate results for the entire batch.
+        # We will accumulate all results over a batch.
         all_input_ids = []
         all_attention_masks = []
         all_labels = []
 
         # Process each example in the batch.
-        for tokens, tags in zip(examples["tokens"], examples["xpos"]):
+        for tokens, tags in zip(examples["tokens"], examples["pos_tags"]):
             outputs = self.tokenizer(
                 tokens,  # one example's tokens
                 is_split_into_words=True,
@@ -81,7 +80,11 @@ class AutoPOSTuner:
                             # If the token tag is missing, ignore this token.
                             chunk_labels.append(-100)
                         else:
-                            chunk_labels.append(self.tag2id[token_tag])
+                            # If token_tag is already an int (from a ClassLabel), use it directly.
+                            if isinstance(token_tag, int):
+                                chunk_labels.append(token_tag)
+                            else:
+                                chunk_labels.append(self.tag2id[token_tag])
                 all_input_ids.append(outputs["input_ids"][i])
                 all_attention_masks.append(outputs["attention_mask"][i])
                 all_labels.append(chunk_labels)
@@ -136,16 +139,10 @@ def compute_metrics(p):
     )
 
     return {
-        # We compute accuracy as the mean of correctly predicted tokens over all non-ignored tokens.
         "accuracy": accuracy,
-        # Macro-averaging: Computes the metrics for each label independently and then takes the average—this gives
-        # equal weight to each class.
         "precision_macro": precision_macro,
         "recall_macro": recall_macro,
         "f1_macro": f1_macro,
-        # Micro-averaging: Aggregates the contributions of all classes to compute the metrics—this is typically useful
-        # when you have class imbalance. The parameter zero_division=0 ensures that if a class has no predicted samples
-        # (which could otherwise lead to a division by zero), the score is set to 0.
         "precision_micro": precision_micro,
         "recall_micro": recall_micro,
         "f1_micro": f1_micro,
@@ -158,7 +155,7 @@ def generate_classification_report(true_labels, true_predictions, id2tag):
     """
     from sklearn.metrics import classification_report
 
-    # Convert label ids to their tag names.
+    # Convert label ids to tag names.
     true_tags = [id2tag[label] for label in true_labels]
     pred_tags = [id2tag[pred] for pred in true_predictions]
 
@@ -183,111 +180,107 @@ def get_tokenizer(model_name_or_path: str):
 
 
 if __name__ == "__main__":
-    from datasets import concatenate_datasets, load_dataset, DatasetDict
-    from observability.logging import setup_logging
     import argparse
+    from datasets import DatasetDict, DownloadConfig, concatenate_datasets, load_dataset
+    from observability.logging import setup_logging
 
     setup_logging()
 
-    arg_parser = argparse.ArgumentParser(description='Build a graph of ideas.')
-    arg_parser.add_argument("--from-base", help='Load a base model.',
-                            action="store_true", default=False)
-    arg_parser.add_argument("--train", help='Train model using loaded examples.',
-                            action="store_true", default=False)
-    args = arg_parser.parse_args()
+    parser = argparse.ArgumentParser(description='Train a CoNLL-based POS tagger.')
+    parser.add_argument("--from-base", help="Load a base model.",
+                        action="store_true", default=False)
+    parser.add_argument("--train", help="Train model using loaded examples.",
+                        action="store_true", default=False)
+    args = parser.parse_args()
 
-    # 1. Load UD datasets: en_ewt and en_gum.
-    loaded_datasets = []
+    # 1. Load CoNLL datasets
 
-    for dataset_name in [
-        # 89 total unique classes
-        #"en_ewt",     # 50 classes
-        #"en_gum",     # 45 classes
-        "en_partut",  # 38 classes
-    ]:
-        downloaded_ds = load_dataset("universal_dependencies", dataset_name)
-        loaded_datasets.append(downloaded_ds)
-        for split in downloaded_ds.keys():
-            logger.info(f"{dataset_name} {split}: {len(downloaded_ds[split])}")
+    conll_dataset_name = "conll2000"
+    #conll_dataset_name = "conll2003"
+    #conll_dataset_name = "english_v4"
+    #conll_dataset_name = "english_v12"
 
-    test_dataset = concatenate_datasets([ds["test"] for ds in loaded_datasets if "test" in ds])
-    train_dataset = concatenate_datasets([ds["train"] for ds in loaded_datasets if "train" in ds])
-    validation_dataset = concatenate_datasets([ds["validation"] for ds in loaded_datasets if "validation" in ds])
-    logger.info(f"Test dataset size: {len(test_dataset)}")
-    logger.info(f"Train dataset size: {len(train_dataset)}")
-    logger.info(f"Validation dataset size: {len(validation_dataset)}")
+    ds = load_dataset(conll_dataset_name)
+    #ds = load_dataset("ontonotes/conll2012_ontonotesv5", conll_dataset_name,
+    #                  download_config=DownloadConfig(max_retries=3, resume_download=True))
 
-    # 2. Build the POS tag mappings from the combined data (train, validation, test).
-    unique_tags = set()
-    for ds in [train_dataset, validation_dataset, test_dataset]:
-        # Use "xpos" labels
-        for tags in ds["xpos"]:
-            if tags is None:
-                continue
-            for tag in tags:
-                if tag is not None:
-                    unique_tags.add(tag)
-    unique_tags = sorted(unique_tags)
-    logger.info(f"Unique tag count: {len(unique_tags)}")
-    logger.info(f"Unique tags: {unique_tags}")
+    logger.info(f"Train set size: {len(ds['train'])}")
+    logger.info(f"Test set size: {len(ds['test'])}")
+    logger.info(f"Validation set size: {len(ds['validation']) if 'validation' in ds else 0}")
 
-    tag2id = {tag: i for i, tag in enumerate(unique_tags)}
+    # Note: conll2000 only provides train and test splits.
+    # For our training procedure, we split the original train split to create our own train/validation splits.
+    if conll_dataset_name == "conll2000":
+        split_datasets = ds["train"].train_test_split(test_size=0.1, seed=42)
+        train_dataset = split_datasets["train"]
+        validation_dataset = split_datasets["test"]
+    else:
+        train_dataset = ds["train"]
+        validation_dataset = ds["validation"]
+
+    # Use the provided test split as a final held out test set.
+    test_dataset = ds["test"]
+    dataset_dict = DatasetDict({
+        "train": train_dataset,
+        "validation": validation_dataset
+    })
+
+    #  Build the POS Tag Mappings
+    logger.info(f"Unique tag count: {len(train_dataset.features['pos_tags'].feature.names)}")
+    logger.info(f"Unique tags: {train_dataset.features['pos_tags'].feature.names}")
+
+    tag2id = {tag: i for i, tag in enumerate(train_dataset.features['pos_tags'].feature.names)}
     id2tag = {i: tag for tag, i in tag2id.items()}
 
-    # Update the AutoPOSTuner class variables so that the model gets the correct number of labels.
+    # Update class-level variables of AutoPOSTuner.
     AutoPOSTuner.tag2id = tag2id
     AutoPOSTuner.id2tag = id2tag
 
-    # 3. Initialize model and tokenizer.
-    deberta_model_name = "microsoft/deberta-base"
-    deberta_checkpoint_name = "deberta-ud-pos"
-    # Final checkpoint path
-    deberta_final_checkpoint_path = f"models/germ/{deberta_checkpoint_name}/final"
+    # Initialize Model and Tokenizer
+    transformer_model = "microsoft/deberta-base"
+    checkpoint_name = "deberta-pos-conll"
+    final_checkpoint_path = f"models/germ/{checkpoint_name}/final"
 
     if args.from_base:
-        deberta_model = get_model(deberta_model_name,
-                                  num_labels=len(AutoPOSTuner.tag2id),
-                                  id2label=AutoPOSTuner.id2tag,
-                                  label2id=AutoPOSTuner.tag2id)
-        deberta_tokenizer = get_tokenizer(deberta_model_name)
+        model = get_model(transformer_model,
+                          num_labels=len(tag2id),
+                          id2label=id2tag,
+                          label2id=tag2id)
+        tokenizer = get_tokenizer(transformer_model)
     else:
-        deberta_model = get_model(deberta_final_checkpoint_path,
-                                  num_labels=len(AutoPOSTuner.tag2id),
-                                  id2label=AutoPOSTuner.id2tag,
-                                  label2id=AutoPOSTuner.tag2id)
-        deberta_tokenizer = get_tokenizer(deberta_final_checkpoint_path)
+        model = get_model(final_checkpoint_path,
+                          num_labels=len(tag2id),
+                          id2label=id2tag,
+                          label2id=tag2id)
+        tokenizer = get_tokenizer(final_checkpoint_path)
 
-    pos_tuner = AutoPOSTuner(deberta_model, deberta_tokenizer)
+    pos_tuner = AutoPOSTuner(model, tokenizer)
 
-    # 4. Combine the UD training and validation splits into a DatasetDict.
-    combined_dataset_dict = DatasetDict({
-        "train": train_dataset,
-        "validation": validation_dataset,
-    })
+    # Tokenize and Align Labels
+    # Note: Our tokenize function now uses the “pos_tags” field.
+    dataset_dict = dataset_dict.map(pos_tuner.tokenize_and_align_labels, batched=True)
+    dataset_dict.set_format("torch")
 
-    # 5. Tokenize and align labels. The function now uses the "xpos" field.
-    combined_dataset_dict = combined_dataset_dict.map(pos_tuner.tokenize_and_align_labels, batched=True)
-    combined_dataset_dict.set_format("torch")
+    # Create Trainer
+    trainer = pos_tuner.new_trainer(dataset_dict, checkpoint_name)
 
-    # 6. Create and run the Trainer.
-    pos_trainer = pos_tuner.new_trainer(combined_dataset_dict, deberta_checkpoint_name)
-
+    # Train Model
     if args.train:
-        pos_trainer.train()
-        pos_trainer.evaluate()
+        trainer.train()
+        trainer.evaluate()
 
         # Save the final model and tokenizer.
-        pos_trainer.save_model(deberta_final_checkpoint_path)
-        deberta_tokenizer.save_pretrained(deberta_final_checkpoint_path)
+        trainer.save_model(final_checkpoint_path)
+        tokenizer.save_pretrained(final_checkpoint_path)
 
     # -----------------------------
-    # Additional Analysis: Generate Classification Report
+    #   Additional Analysis on Test Set
     # -----------------------------
-    # Map the test dataset using the same tokenize_and_align_labels function.
+    # Process the test dataset using the tokenize and align function.
     test_dataset = test_dataset.map(pos_tuner.tokenize_and_align_labels, batched=True)
     test_dataset.set_format("torch")
 
-    test_predictions_output = pos_trainer.predict(test_dataset)
+    test_predictions_output = trainer.predict(test_dataset)
     test_predictions = test_predictions_output.predictions
     test_prediction_labels = test_predictions_output.label_ids
 
@@ -299,4 +292,4 @@ if __name__ == "__main__":
                 flat_predictions.append(test_pred)
                 flat_labels.append(test_label)
 
-    generate_classification_report(flat_labels, flat_predictions, AutoPOSTuner.id2tag)
+    generate_classification_report(flat_labels, flat_predictions, id2tag)

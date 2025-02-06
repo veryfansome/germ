@@ -112,7 +112,7 @@ def merge_ner_predictions(predictions):
 
 if __name__ == "__main__":
     # Adjust the import path according to your project structure.
-    from models.train.auto_ner_tuner import get_model, get_tokenizer
+    from models.train.auto_tuner_ner import get_model, get_tokenizer
     from observability.logging import setup_logging
 
     setup_logging()
