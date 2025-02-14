@@ -99,7 +99,7 @@ class ImageModelEventHandler(RoutableChatEventHandler):
             return f"[![{image_model_inputs['prompt']}]({submission.data[0].url})]({submission.data[0].url})"
         except Exception as e:
             logger.error(e)
-            return f"[![Failed to generate image](/static/oops_image.jpg)](/static/oops_image.jpg)"
+            return f"[![Failed to generate image](/static/assets/oops_image.jpg)](/static/assets/oops_image.jpg)"
 
     def get_function_name(self):
         return self.function_name

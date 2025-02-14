@@ -91,7 +91,7 @@ The use of ::after with a background image could affect the readability of text.
 Ensure the opacity is low enough to not interfere with the text but still visible.
 */
 #chatbox::after {
-    background-image: url("/static/logo.webp");
+    background-image: url("/static/assets/logo.webp");
     background-position: center; /* Center the background image */
     background-repeat: no-repeat; /* Prevent the background image from repeating */
     background-size: contain; /* Adjust the size of the background image */

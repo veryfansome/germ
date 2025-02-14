@@ -148,13 +148,13 @@ async def get_chat_session_message_list(chat_session_id: int) -> list[ChatMessag
 
 @bot.get("/favicon.ico", include_in_schema=False)
 async def get_favicon():
-    file_path = os.path.join(os.path.dirname(__file__), 'static', 'favicon.ico')
+    file_path = os.path.join(os.path.dirname(__file__), "static", "assets", "favicon.ico")
     return FileResponse(file_path)
 
 
 @bot.get("/", include_in_schema=False)
 async def get_landing():
-    file_path = os.path.join(os.path.dirname(__file__), 'static', 'index.html')
+    file_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
     return FileResponse(file_path)
 
 
