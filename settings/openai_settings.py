@@ -1,13 +1,15 @@
 import os
 
 CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o")
-MINI_MODEL = os.getenv("OPENAI_MINI_MODEL", "gpt-4o-mini")
 IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "dall-e-3")
+MINI_MODEL = os.getenv("OPENAI_MINI_MODEL", "gpt-4o-mini")
+REASONING_MODEL = os.getenv("OPENAI_REASONING_MODEL", "o1")
 ROUTING_MODEL = MINI_MODEL
 ENABLED_CHAT_MODELS = (
-    CHAT_MODEL,
+    *([] if not CHAT_MODEL else [CHAT_MODEL]),
+    *([] if not REASONING_MODEL else [REASONING_MODEL]),
 )
 ENABLED_IMAGE_MODELS = (
-    IMAGE_MODEL,
+    *([] if not IMAGE_MODEL else [IMAGE_MODEL]),
 )
 HTTPX_TIMEOUT = 30

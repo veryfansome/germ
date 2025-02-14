@@ -40,9 +40,8 @@ class ChatModelEventHandler(RoutableChatEventHandler):
             "type": "function",
             "function": {
                 "name": self.function_name,
-                "description": " ".join((
-                    f"Use {model} to generate a reply if the user asks for {model}.",
-                )),
+                "description": (f"Use {model} to generate a better zero-shot response "
+                                f"or if the user specifically asks for {model}."),
                 "parameters": {},
             },
         }
@@ -52,10 +51,8 @@ class ChatModelEventHandler(RoutableChatEventHandler):
         with OpenAI() as client:
             return client.chat.completions.create(
                 messages=[message.model_dump() for message in chat_request.messages] + [
-                    {
-                        "role": "system",
-                        "content": "Use markdown format."
-                    }
+                    {"role": "system",
+                     "content": "Answer in valid Markdown format only."}
                 ],
                 model=self.model,
                 n=1, timeout=HTTPX_TIMEOUT)
@@ -78,7 +75,7 @@ class ChatModelEventHandler(RoutableChatEventHandler):
 
 
 class ImageModelEventHandler(RoutableChatEventHandler):
-    def __init__(self, model: str):
+    def __init__(self, model: str, httpx_timeout: float = 90):
         self.function_name = f"use_{model}"
         self.function_settings = {
             "type": "function",
@@ -90,6 +87,7 @@ class ImageModelEventHandler(RoutableChatEventHandler):
                 "parameters": {},
             },
         }
+        self.httpx_timeout = httpx_timeout
         self.model = model
 
     def generate_markdown_image(self, chat_request: ChatRequest):
@@ -116,15 +114,73 @@ class ImageModelEventHandler(RoutableChatEventHandler):
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         markdown_image = await run_in_threadpool(self.generate_markdown_image, chat_request)
-        task = asyncio.create_task(
+        _ = asyncio.create_task(
             ws_sender.return_chat_response(
                 chat_request_received_id,
                 ChatResponse(content=markdown_image, model=self.model)))
 
 
+class ReasoningChatModelEventHandler(RoutableChatEventHandler):
+    def __init__(self, model: str = CHAT_MODEL, httpx_timeout: float = 120):
+        self.function_name = f"use_{model}"
+        self.function_settings = {
+            "type": "function",
+            "function": {
+                "name": self.function_name,
+                "description": (f"Use {model} to generate a better zero-shot response with reasoning "
+                                f"or if the user specifically asks for {model}."),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "reasoning_effort": {
+                            "type": "string",
+                            "description": "Guidance on how many reasoning tokens to generate before responding.",
+                            "enum": ["low", "medium", "high"],
+                        },
+                    },
+                    "required": ["reasoning_effort"]
+                },
+            },
+        }
+        self.httpx_timeout = httpx_timeout
+        self.model = model
+
+    # TODO: Explore use of threads instead.
+    def do_chat_completion(self, chat_request: ChatRequest) -> ChatCompletion:
+        with OpenAI() as client:
+            return client.chat.completions.create(
+                messages=[message.model_dump() for message in chat_request.messages] + [
+                    {"role": "system",
+                     "content": "Answer in valid Markdown format only."}
+                ],
+                model=self.model,
+                n=1, timeout=self.httpx_timeout,
+                reasoning_effort=chat_request.parameters["reasoning_effort"],
+            )
+
+    def get_function_name(self):
+        return self.function_name
+
+    def get_function_settings(self):
+        return self.function_settings
+
+    @measure_exec_seconds(use_logging=True, use_prometheus=True)
+    async def on_receive(self,
+                         chat_session_id: int, chat_request_received_id: int,
+                         chat_request: ChatRequest, ws_sender: WebSocketSender):
+        completion = await run_in_threadpool(self.do_chat_completion, chat_request)
+        _ = asyncio.create_task(ws_sender.return_chat_response(
+            chat_request_received_id, ChatResponse(
+                content=completion.choices[0].message.content,
+                model=f"{completion.model}[{'|'.join([f'{k}:{v}' for k, v in chat_request.parameters.items()])}]")))
+
+
 USER_FACING_CHAT_HANDLERS: dict[str, RoutableChatEventHandler] = {}
 for m in ENABLED_CHAT_MODELS:
-    USER_FACING_CHAT_HANDLERS[m] = ChatModelEventHandler(m)
+    if m.startswith("gpt-"):
+        USER_FACING_CHAT_HANDLERS[m] = ChatModelEventHandler(m)
+    elif m.startswith("o1") or m.startswith("o3"):
+        USER_FACING_CHAT_HANDLERS[m] = ReasoningChatModelEventHandler(m)
 for m in ENABLED_IMAGE_MODELS:
     USER_FACING_CHAT_HANDLERS[m] = ImageModelEventHandler(m)
 
@@ -159,7 +215,8 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
         elif completion.choices[0].message.content is None:
             if completion.choices[0].message.tool_calls is not None:
                 for tool_call in completion.choices[0].message.tool_calls:
-                    task = asyncio.create_task(
+                    chat_request.parameters = json.loads(tool_call.function.arguments)
+                    _ = asyncio.create_task(
                         self.tools[tool_call.function.name].on_receive(
                             chat_session_id, chat_request_received_id, chat_request, ws_sender
                         )
@@ -180,10 +237,10 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
             with OpenAI() as client:
                 return client.chat.completions.create(
                     messages=[message.model_dump() for message in chat_request.messages] + [
-                        {
-                            "role": "system",
-                            "content": "Use markdown format."
-                        }
+                        {"role": "system",
+                         "content": "Reply if trivial or use a single more appropriate tool."},
+                        {"role": "system",
+                         "content": "Answer in valid Markdown format only."},
                     ],
                     model=self.model,
                     n=1, tools=tools,
@@ -238,7 +295,8 @@ class ResponseGraphingHandler(WebSocketSendEventHandler):
                 _, paragraph_id, _ = await self.control_plane.add_paragraph(element[1])
                 this_element_attrs = {"paragraph_id": paragraph_id}
             elif element[0] == "block_code":
-                _, code_block_id, _ = await self.control_plane.add_code_block(element[2], language=element[1])
+                _, code_block_id, _ = await self.control_plane.add_code_block(
+                    element[2], language=str(element[1]))
                 this_element_attrs = {"code_block_id": code_block_id}
             elif element[0] == "header":
                 await self.control_plane.add_header(element[1])

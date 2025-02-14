@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Union
 
 
 class ChatBookmark(BaseModel):
@@ -18,7 +18,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
-    system_message: Optional[str] = ""
+    parameters: Optional[dict[str, str]] = None
 
 
 class ChatResponse(ChatMessage):
