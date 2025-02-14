@@ -97,7 +97,7 @@ function getAssistantMessageBox(name, content, iconClass = "fa fa-virus") {
     const assistantMessageBox = document.createElement('div');
     assistantMessageBox.className = 'assistant-message-box';
     assistantMessageBox.innerHTML = `<i class="chat-metadata ${iconClass}"></i><b class="chat-metadata">${name}:</b>`;
-    assistantMessageBox.innerHTML += `${marked.parse(`${content}`)}</br>`;
+    assistantMessageBox.innerHTML += `${marked.parse(content)}</br>`;
     assistantMessageBox.innerHTML += `<i class="chat-metadata">${new Date().toLocaleTimeString()}</i> | `;
     return assistantMessageBox;
 }
