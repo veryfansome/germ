@@ -1,5 +1,6 @@
 accelerate>=0.26.0  # Required for using Trainer with PyTorch
 aiohttp
+aiofiles
 apscheduler
 asyncpg
 beautifulsoup4

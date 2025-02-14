@@ -11,6 +11,7 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 from typing import List
+import aiofiles
 import asyncio
 import hashlib
 import os
@@ -217,13 +218,13 @@ async def post_upload(files: List[UploadFile] = File(...)):
     for file in files:
         save_path = os.path.join(germ_settings.UPLOAD_FOLDER, file.filename)
         try:
-            with open(save_path, "wb") as f:
+            async with aiofiles.open(save_path, "wb") as f:
                 chunk_size = 1024 * 1024
                 while True:
                     chunk = await file.read(chunk_size)
                     if not chunk:
                         break
-                    f.write(chunk)
+                    await f.write(chunk)
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
         saved_files.append(file.filename)
