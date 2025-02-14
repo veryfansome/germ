@@ -69,6 +69,7 @@ class ChatModelEventHandler(RoutableChatEventHandler):
         completion = await self.do_chat_completion(chat_request)
         _ = asyncio.create_task(ws_sender.return_chat_response(
             chat_request_received_id, ChatResponse(
+                complete=True,
                 content=completion.choices[0].message.content,
                 model=completion.model)))
 
@@ -115,7 +116,7 @@ class ImageModelEventHandler(RoutableChatEventHandler):
         _ = asyncio.create_task(
             ws_sender.return_chat_response(
                 chat_request_received_id,
-                ChatResponse(content=markdown_image, model=self.model)))
+                ChatResponse(complete=True, content=markdown_image, model=self.model)))
 
 
 class ReasoningChatModelEventHandler(RoutableChatEventHandler):
@@ -167,6 +168,7 @@ class ReasoningChatModelEventHandler(RoutableChatEventHandler):
         completion = await self.do_chat_completion(chat_request)
         _ = asyncio.create_task(ws_sender.return_chat_response(
             chat_request_received_id, ChatResponse(
+                complete=True,
                 content=completion.choices[0].message.content,
                 model=f"{completion.model}[{'|'.join([f'{k}:{v}' for k, v in chat_request.parameters.items()])}]")))
 
@@ -202,11 +204,14 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
     async def on_receive(self,
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
+        if chat_request.uploaded_filenames:
+            logger.info(f"uploaded file: {chat_request.uploaded_filenames}")
+
         completion = await self.do_chat_completion(chat_request)
         if completion is None:
             _ = asyncio.create_task(ws_sender.return_chat_response(
                 chat_request_received_id,
-                ChatResponse(content="Sorry, I'm unable to access my language model.")))
+                ChatResponse(complete=True, content="Sorry, I'm unable to access my language model.")))
             return
         elif completion.choices[0].message.content is None:
             if completion.choices[0].message.tool_calls is not None:
@@ -217,13 +222,22 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                             chat_session_id, chat_request_received_id, chat_request, ws_sender
                         )
                     )
+                    # Let user know you're delegating
+                    _ = asyncio.create_task(ws_sender.return_chat_response(
+                        chat_request_received_id,
+                        ChatResponse(
+                            complete=False,
+                            content="One moment.",
+                            model=completion.model)))
                 return
             else:
                 logger.error("completion content and tool_calls are both missing", completion)
                 completion.choices[0].message.content = "Strange... I don't have a response"
+        # Return completed response
         _ = asyncio.create_task(ws_sender.return_chat_response(
             chat_request_received_id,
             ChatResponse(
+                complete=True,
                 content=completion.choices[0].message.content,
                 model=completion.model)))
 
