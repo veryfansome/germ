@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from openai import OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 from starlette.concurrency import run_in_threadpool
 from typing import Callable, Optional
@@ -8,6 +7,7 @@ import json
 import logging
 
 from bot.api.models import ChatRequest, ChatResponse
+from bot.chat import async_openai_client
 from bot.graph.control_plane import ControlPlane
 from bot.lang.parsers import extract_markdown_page_elements
 from bot.websocket import WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender
@@ -47,15 +47,14 @@ class ChatModelEventHandler(RoutableChatEventHandler):
         }
         self.model = model
 
-    def do_chat_completion(self, chat_request: ChatRequest) -> ChatCompletion:
-        with OpenAI() as client:
-            return client.chat.completions.create(
-                messages=[message.model_dump() for message in chat_request.messages] + [
-                    {"role": "system",
-                     "content": "Answer in valid Markdown format only."}
-                ],
-                model=self.model,
-                n=1, timeout=HTTPX_TIMEOUT)
+    async def do_chat_completion(self, chat_request: ChatRequest) -> ChatCompletion:
+        return await async_openai_client.chat.completions.create(
+            messages=[message.model_dump() for message in chat_request.messages] + [
+                {"role": "system",
+                 "content": "Answer in valid Markdown format only."}
+            ],
+            model=self.model,
+            n=1, timeout=HTTPX_TIMEOUT)
 
     def get_function_name(self):
         return self.function_name
@@ -67,7 +66,7 @@ class ChatModelEventHandler(RoutableChatEventHandler):
     async def on_receive(self,
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
-        completion = await run_in_threadpool(self.do_chat_completion, chat_request)
+        completion = await self.do_chat_completion(chat_request)
         _ = asyncio.create_task(ws_sender.return_chat_response(
             chat_request_received_id, ChatResponse(
                 content=completion.choices[0].message.content,
@@ -90,15 +89,14 @@ class ImageModelEventHandler(RoutableChatEventHandler):
         self.httpx_timeout = httpx_timeout
         self.model = model
 
-    def generate_markdown_image(self, chat_request: ChatRequest):
-        image_model_inputs = generate_image_model_inputs(chat_request)
+    async def generate_markdown_image(self, chat_request: ChatRequest):
+        image_model_inputs = await generate_image_model_inputs(chat_request)
         try:
-            with OpenAI() as client:
-                submission = client.images.generate(
-                    prompt=image_model_inputs['prompt'], model=self.model, n=1,
-                    size=image_model_inputs['size'], style=image_model_inputs['style'],
-                    timeout=HTTPX_TIMEOUT)
-                return f"[![{image_model_inputs['prompt']}]({submission.data[0].url})]({submission.data[0].url})"
+            submission = await async_openai_client.images.generate(
+                prompt=image_model_inputs['prompt'], model=self.model, n=1,
+                size=image_model_inputs['size'], style=image_model_inputs['style'],
+                timeout=HTTPX_TIMEOUT)
+            return f"[![{image_model_inputs['prompt']}]({submission.data[0].url})]({submission.data[0].url})"
         except Exception as e:
             logger.error(e)
             return f"[![Failed to generate image](/static/oops_image.jpg)](/static/oops_image.jpg)"
@@ -113,7 +111,7 @@ class ImageModelEventHandler(RoutableChatEventHandler):
     async def on_receive(self,
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
-        markdown_image = await run_in_threadpool(self.generate_markdown_image, chat_request)
+        markdown_image = await self.generate_markdown_image(chat_request)
         _ = asyncio.create_task(
             ws_sender.return_chat_response(
                 chat_request_received_id,
@@ -145,18 +143,16 @@ class ReasoningChatModelEventHandler(RoutableChatEventHandler):
         self.httpx_timeout = httpx_timeout
         self.model = model
 
-    # TODO: Explore use of threads instead.
-    def do_chat_completion(self, chat_request: ChatRequest) -> ChatCompletion:
-        with OpenAI() as client:
-            return client.chat.completions.create(
-                messages=[message.model_dump() for message in chat_request.messages] + [
-                    {"role": "system",
-                     "content": "Answer in valid Markdown format only."}
-                ],
-                model=self.model,
-                n=1, timeout=self.httpx_timeout,
-                reasoning_effort=chat_request.parameters["reasoning_effort"],
-            )
+    async def do_chat_completion(self, chat_request: ChatRequest) -> ChatCompletion:
+        return await async_openai_client.chat.completions.create(
+            messages=[message.model_dump() for message in chat_request.messages] + [
+                {"role": "system",
+                 "content": "Answer in valid Markdown format only."}
+            ],
+            model=self.model,
+            n=1, timeout=self.httpx_timeout,
+            **chat_request.parameters,
+        )
 
     def get_function_name(self):
         return self.function_name
@@ -168,7 +164,7 @@ class ReasoningChatModelEventHandler(RoutableChatEventHandler):
     async def on_receive(self,
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
-        completion = await run_in_threadpool(self.do_chat_completion, chat_request)
+        completion = await self.do_chat_completion(chat_request)
         _ = asyncio.create_task(ws_sender.return_chat_response(
             chat_request_received_id, ChatResponse(
                 content=completion.choices[0].message.content,
@@ -206,7 +202,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
     async def on_receive(self,
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
-        completion = await run_in_threadpool(self.do_chat_completion, chat_request)
+        completion = await self.do_chat_completion(chat_request)
         if completion is None:
             _ = asyncio.create_task(ws_sender.return_chat_response(
                 chat_request_received_id,
@@ -231,20 +227,19 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                 content=completion.choices[0].message.content,
                 model=completion.model)))
 
-    def do_chat_completion(self, chat_request: ChatRequest) -> Optional[ChatCompletion]:
+    async def do_chat_completion(self, chat_request: ChatRequest) -> Optional[ChatCompletion]:
         tools = [t.get_function_settings() for t in self.tools.values()]
         try:
-            with OpenAI() as client:
-                return client.chat.completions.create(
-                    messages=[message.model_dump() for message in chat_request.messages] + [
-                        {"role": "system",
-                         "content": "Reply if trivial or use a single more appropriate tool."},
-                        {"role": "system",
-                         "content": "Answer in valid Markdown format only."},
-                    ],
-                    model=self.model,
-                    n=1, tools=tools,
-                    timeout=HTTPX_TIMEOUT)
+            return await async_openai_client.chat.completions.create(
+                messages=[message.model_dump() for message in chat_request.messages] + [
+                    {"role": "system",
+                     "content": "Reply if trivial or use a single more appropriate tool."},
+                    {"role": "system",
+                     "content": "Answer in valid Markdown format only."},
+                ],
+                model=self.model,
+                n=1, tools=tools,
+                timeout=HTTPX_TIMEOUT)
         except Exception as e:
             logger.error(e)
         return None
@@ -374,7 +369,7 @@ class UserProfilingHandler(WebSocketReceiveEventHandler):
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self, chat_session_id: int, chat_request_received_id: id,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
-        user_profile = await run_in_threadpool(self.process_chat_request, chat_session_id, chat_request)
+        user_profile = await self.process_chat_request(chat_session_id, chat_request)
         processed_profile = {}
         for profile_name, profile_text in user_profile["profile"].items():
             profile_text = self.post_func(profile_text)
@@ -390,26 +385,25 @@ class UserProfilingHandler(WebSocketReceiveEventHandler):
                 consumer.on_new_user_profile(
                     user_profile, chat_session_id, chat_request_received_id, chat_request, ws_sender))
 
-    def process_chat_request(self, chat_session_id: int, chat_request: ChatRequest):
-        with OpenAI() as client:
-            completion = client.chat.completions.create(
-                messages=[message.model_dump() for message in chat_request.messages if message.role != "system"],
-                model=self.model, n=1,
-                tool_choice={
-                    "type": "function",
-                    "function": {"name": self.tool_func_name}
-                },
-                tools=[self.tool],
-                timeout=HTTPX_TIMEOUT)
-            profile_parameters = json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
-            user_profile = {
-                "chat_session_id": chat_session_id,
-                "system_messages": [
-                    message.model_dump() for message in chat_request.messages if message.role == "system"],
-                "messages": chat_request.messages,
-                "profile": profile_parameters,
-            }
-            return user_profile
+    async def process_chat_request(self, chat_session_id: int, chat_request: ChatRequest):
+        completion = await async_openai_client.chat.completions.create(
+            messages=[message.model_dump() for message in chat_request.messages if message.role != "system"],
+            model=self.model, n=1,
+            tool_choice={
+                "type": "function",
+                "function": {"name": self.tool_func_name}
+            },
+            tools=[self.tool],
+            timeout=HTTPX_TIMEOUT)
+        profile_parameters = json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
+        user_profile = {
+            "chat_session_id": chat_session_id,
+            "system_messages": [
+                message.model_dump() for message in chat_request.messages if message.role == "system"],
+            "messages": chat_request.messages,
+            "profile": profile_parameters,
+        }
+        return user_profile
 
 
 ##
@@ -417,44 +411,43 @@ class UserProfilingHandler(WebSocketReceiveEventHandler):
 
 
 @measure_exec_seconds(use_logging=True, use_prometheus=True)
-def generate_image_model_inputs(chat_request: ChatRequest):
-    with OpenAI() as client:
-        completion = client.chat.completions.create(
-            messages=([{
-                "role": "system",
-                "content": "The user wants an image."
-            }] + [message.model_dump() for message in chat_request.messages]),
+async def generate_image_model_inputs(chat_request: ChatRequest):
+    completion = await async_openai_client.chat.completions.create(
+        messages=([{
+            "role": "system",
+            "content": "The user wants an image."
+        }] + [message.model_dump() for message in chat_request.messages]),
 
-            model=MINI_MODEL, n=1,
-            tool_choice={
-                "type": "function",
-                "function": {"name": "generate_image"}
-            },
-            tools=[{
-                "type": "function",
-                "function": {
-                    "name": "generate_image",
-                    "description": "Return a generated image, given a text prompt, image size, and style.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "prompt": {
-                                "type": "string",
-                                "description": "The text prompt for the image model."
-                            },
-                            "size": {
-                                "type": "string",
-                                "enum": ["1024x1024", "1024x1792", "1792x1024"],
-                            },
-                            "style": {
-                                "type": "string",
-                                "enum": ["natural", "vivid"],
-                            },
+        model=MINI_MODEL, n=1,
+        tool_choice={
+            "type": "function",
+            "function": {"name": "generate_image"}
+        },
+        tools=[{
+            "type": "function",
+            "function": {
+                "name": "generate_image",
+                "description": "Return a generated image, given a text prompt, image size, and style.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "The text prompt for the image model."
                         },
-                        "required": ["prompt", "size", "style"],
-                        "additionalProperties": False,
+                        "size": {
+                            "type": "string",
+                            "enum": ["1024x1024", "1024x1792", "1792x1024"],
+                        },
+                        "style": {
+                            "type": "string",
+                            "enum": ["natural", "vivid"],
+                        },
                     },
-                }
-            }],
-            timeout=HTTPX_TIMEOUT)
-        return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
+                    "required": ["prompt", "size", "style"],
+                    "additionalProperties": False,
+                },
+            }
+        }],
+        timeout=HTTPX_TIMEOUT)
+    return json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
