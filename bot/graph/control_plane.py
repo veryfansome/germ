@@ -16,9 +16,6 @@ from settings.germ_settings import UUID5_NS
 
 logger = logging.getLogger(__name__)
 
-struct_type_table = Table('struct_type', MetaData(), autoload_with=engine)
-text_block_table = Table('text_block', MetaData(), autoload_with=engine)
-
 
 class CodeBlockMergeEventHandler(ABC):
     @abstractmethod
@@ -41,6 +38,8 @@ class SentenceMergeEventHandler(ABC):
 class ControlPlane:
     def __init__(self, driver: AsyncNeo4jDriver):
         self.driver = driver
+        self.struct_type_table = None
+        self.text_block_table = None
 
         self.code_block_merge_event_handlers: list[CodeBlockMergeEventHandler] = []
         self.code_text_block_type_id: Optional[int] = None
@@ -51,17 +50,19 @@ class ControlPlane:
         self.sentence_merge_event_handlers: list[SentenceMergeEventHandler] = []
 
     async def initialize(self):
+        self.struct_type_table = Table('struct_type', MetaData(), autoload_with=engine)
+        self.text_block_table = Table('text_block', MetaData(), autoload_with=engine)
         async with (AsyncSessionLocal() as rdb_session):
             async with rdb_session.begin():
-                code_text_block_type_stmt = struct_type_table.select().where(
-                    and_(struct_type_table.c.group_name == "text_block_type",
-                         struct_type_table.c.att_pub_ident == "code"))
+                code_text_block_type_stmt = self.struct_type_table.select().where(
+                    and_(self.struct_type_table.c.group_name == "text_block_type",
+                         self.struct_type_table.c.att_pub_ident == "code"))
                 code_text_block_type_record = (await rdb_session.execute(code_text_block_type_stmt)).first()
                 self.code_text_block_type_id = code_text_block_type_record.struct_type_id
 
-                paragraph_text_block_type_stmt = struct_type_table.select().where(
-                    and_(struct_type_table.c.group_name == "text_block_type",
-                         struct_type_table.c.att_pub_ident == "paragraph"))
+                paragraph_text_block_type_stmt = self.struct_type_table.select().where(
+                    and_(self.struct_type_table.c.group_name == "text_block_type",
+                         self.struct_type_table.c.att_pub_ident == "paragraph"))
                 paragraph_text_block_type_record = (await rdb_session.execute(paragraph_text_block_type_stmt)).first()
                 self.paragraph_text_block_type_id = paragraph_text_block_type_record.struct_type_id
 
@@ -103,15 +104,16 @@ class ControlPlane:
         code_block_signature = uuid.uuid5(UUID5_NS, code_block)
         async with (AsyncSessionLocal() as rdb_session):
             async with rdb_session.begin():
-                rdb_select_stmt = text_block_table.select().where(text_block_table.c.signature_uuid == code_block_signature)
+                rdb_select_stmt = self.text_block_table.select().where(
+                    self.text_block_table.c.signature_uuid == code_block_signature)
                 rdb_record = (await rdb_session.execute(rdb_select_stmt)).first()
 
                 # Create record if not found
                 if not rdb_record:
-                    sql_insert_stmt = sql_insert(text_block_table).values({
+                    sql_insert_stmt = sql_insert(self.text_block_table).values({
                         "signature_uuid": code_block_signature,
                         "text_block_type_id": self.code_text_block_type_id,
-                    }).returning(text_block_table.c.text_block_id)
+                    }).returning(self.text_block_table.c.text_block_id)
 
                     # Execute the insert and fetch the returned values
                     rdb_record = (await rdb_session.execute(sql_insert_stmt)).first()
@@ -184,16 +186,16 @@ class ControlPlane:
         paragraph_signature = uuid.uuid5(UUID5_NS, paragraph)
         async with (AsyncSessionLocal() as rdb_session):
             async with rdb_session.begin():
-                rdb_select_stmt = text_block_table.select().where(
-                    text_block_table.c.signature_uuid == paragraph_signature)
+                rdb_select_stmt = self.text_block_table.select().where(
+                    self.text_block_table.c.signature_uuid == paragraph_signature)
                 rdb_record = (await rdb_session.execute(rdb_select_stmt)).first()
 
                 # Create record if not found
                 if not rdb_record:
-                    sql_insert_stmt = sql_insert(text_block_table).values({
+                    sql_insert_stmt = sql_insert(self.text_block_table).values({
                         "signature_uuid": paragraph_signature,
                         "text_block_type_id": self.paragraph_text_block_type_id,
-                    }).returning(text_block_table.c.text_block_id)
+                    }).returning(self.text_block_table.c.text_block_id)
 
                     # Execute the insert and fetch the returned values
                     rdb_record = (await rdb_session.execute(sql_insert_stmt)).first()
