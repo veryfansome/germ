@@ -236,6 +236,8 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                      "content": "Reply if trivial or use a single more appropriate tool."},
                     {"role": "system",
                      "content": "Answer in valid Markdown format only."},
+                    {"role": "system",
+                     "content": "Don't generate code. Always use a tool if code is needed."},
                 ],
                 model=self.model,
                 n=1, tools=tools,

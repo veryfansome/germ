@@ -1,6 +1,6 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Path, WebSocket
+from fastapi import FastAPI, File, HTTPException, Path, UploadFile, WebSocket, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
@@ -10,6 +10,7 @@ from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
+from typing import List
 import asyncio
 import hashlib
 import os
@@ -28,6 +29,7 @@ from bot.websocket import (WebSocketConnectionManager,
                            update_chat_session_is_hidden)
 from observability.logging import logging, setup_logging
 from observability.tracing import setup_tracing
+from settings import germ_settings
 
 scheduler = AsyncIOScheduler()
 
@@ -207,6 +209,25 @@ async def post_postgres_query(payload: SqlRequest,
         os.remove(query_file)
         logger.error("%s: trace: %s", e, traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@bot.post("/upload")
+async def post_upload(files: List[UploadFile] = File(...)):
+    saved_files = []
+    for file in files:
+        save_path = os.path.join(germ_settings.UPLOAD_FOLDER, file.filename)
+        try:
+            with open(save_path, "wb") as f:
+                chunk_size = 1024 * 1024
+                while True:
+                    chunk = await file.read(chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        saved_files.append(file.filename)
+    return {"files_saved": saved_files}
 
 
 @bot.websocket("/chat")

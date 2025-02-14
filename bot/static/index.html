@@ -26,7 +26,14 @@
         <span id="error-popup-message-text"></span>
     </div>
     <div id="chatbox"></div>
+    <div id="selected-files-container"></div>
     <div id="input-container">
+        <div class="attachment-button-container">
+            <button type="button" id="attachment-button">
+                <i class="fas fa-paperclip"></i>
+            </button>
+            <input type="file" id="file-input" style="display: none;" multiple>
+        </div>
         <div id="bookmarks-popup-menu" class="bookmarks-popup-menu">
             <ul id="bookmarks-popup-menu-ul"></ul>
         </div>
@@ -112,11 +119,60 @@
     const refreshSettingsPopup = () => {
         systemChatMessageInput.placeholder = `Type a system message...`;
     };
-    initPopup(refreshSettingsPopup, "settings")
+    initPopup(refreshSettingsPopup, "settings");
 
     // Text input area
     let submittedText = [];
     initTextArea(submittedText, sendMessage);
+
+    // File attachments
+    const attachmentButton = document.getElementById('attachment-button');
+    const fileInput = document.getElementById('file-input');
+    const selectedFilesContainer = document.getElementById('selected-files-container');
+
+    // We'll store the user-selected files in this array
+    let attachedFiles = [];
+    // A function to render the “attached files” area
+    function renderAttachedFiles() {
+        // Clear out any existing file “chips”
+        selectedFilesContainer.innerHTML = '';
+
+        // For each file in the array, create a small element with a remove button
+        attachedFiles.forEach((file, index) => {
+            const fileItem = document.createElement('div');
+            fileItem.classList.add('selected-file-item');
+            fileItem.textContent = file.name;
+
+            // Create the “X” button to remove this file
+            const removeBtn = document.createElement('button');
+            removeBtn.classList.add('remove-file-button');
+            removeBtn.textContent = 'X';
+            removeBtn.addEventListener('click', () => {
+                // Remove this file from the array
+                attachedFiles.splice(index, 1);
+                // Re-render after removal
+                renderAttachedFiles();
+            });
+
+            fileItem.appendChild(removeBtn);
+            selectedFilesContainer.appendChild(fileItem);
+        });
+    }
+    // When the user clicks the paperclip button, programmatically click the hidden file input
+    attachmentButton.addEventListener('click', () => {
+        fileInput.click();
+    });
+    // When file input changes (i.e., user selects new files), show them above the text box
+    fileInput.addEventListener('change', () => {
+        for (const file of fileInput.files) {
+            attachedFiles.push(file);
+        }
+        // Reset the file input so selecting the same file again triggers `change`
+        fileInput.value = '';
+
+        // Re-render the attachments list
+        renderAttachedFiles();
+    });
 
     let chatCompletionMessageList = [];
     if ('chat_session_id' in queryParams) {
@@ -202,6 +258,31 @@
         };
     }
     async function sendMessage() {
+        // Upload any attached files
+        if (attachedFiles.length > 0) {
+            const formData = new FormData();
+            attachedFiles.forEach((f) => {
+                formData.append('files', f);
+            });
+
+            try {
+                // Adjust /upload to your actual endpoint
+                const uploadResponse = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (!uploadResponse.ok) {
+                    console.error('File upload failed:', uploadResponse.statusText);
+                }
+                // On success, possibly clear the attachments
+                attachedFiles = [];
+                renderAttachedFiles();
+            } catch (error) {
+                console.error('Error uploading files:', error);
+            }
+        }
+
+        // Upload any attached files
         const message = document.getElementById('input').value;
         submittedText.push(message);
         document.getElementById('input').value = '';
