@@ -71,6 +71,11 @@ textarea {
     padding: 10px;
     resize: vertical;
 }
+#attachment-button {
+    cursor: pointer;
+    padding: 3px; /* Adjust padding if needed */
+    width: 100%; /* Set equal width */
+}
 #chatbox {
     background-color: #fffefa; /* Slightly yellowish? */
     border: 1px solid #ccc;
@@ -137,6 +142,13 @@ Ensure the opacity is low enough to not interfere with the text but still visibl
     display: flex;
     padding: 10px;
 }
+/* Container that shows selected filenames or file info */
+#selected-files-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin: 5px 0;
+}
 #system-chat-message-input {
     box-sizing: border-box;
     flex: 1;
@@ -178,6 +190,12 @@ elements. Ensure the parent elements manage the layout appropriately.
     max-width: 90%;
     min-width: 25%;
 }
+/* A small container to hold the attach button and the hidden file input */
+.attachment-button-container {
+    position: relative;
+    margin-right: 10px;
+}
+
 /**
 Button container to position buttons vertically
 `width: 5% might be too small or too large depending on screen size. Consider using relative units like em or
@@ -258,6 +276,26 @@ rem for better responsiveness.
 }
 .bookmarks-popup-menu i:hover {
     color: #a60101ff;
+}
+.remove-file-button {
+    background: none;
+    border: none;
+    color: #666;
+    cursor: pointer;
+    font-weight: bold;
+    margin-left: 1px;
+    font-size: 1em;
+}
+.remove-file-button:hover {
+    color: #a00;
+}
+.selected-file-item {
+    background-color: #f0f0f0;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 5px;
+    margin-left: 0.25%;
+    font-size: 0.9em;
 }
 .settings-popup-menu {
     max-height: 90%;
