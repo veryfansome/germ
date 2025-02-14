@@ -30,6 +30,7 @@ prometheus_client
 psycopg2-binary
 pydantic
 pytest
+pytest-asyncio
 pytest-cov
 pytest-xdist
 python-dotenv

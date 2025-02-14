@@ -1,6 +1,6 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, File, HTTPException, Path, UploadFile, WebSocket, UploadFile
+from fastapi import FastAPI, File, HTTPException, Path, UploadFile, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
@@ -8,7 +8,6 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 from typing import List
 import aiofiles
@@ -99,7 +98,6 @@ async def lifespan(app: FastAPI):
 
     # DB stats
     await db_stats_job()  # Warms up DB connections on startup
-    websocket_manager.background_thread.start()
     # Started
 
     yield
@@ -107,10 +105,7 @@ async def lifespan(app: FastAPI):
     # Stopping
     websocket_manager_disconnect_task = asyncio.create_task(websocket_manager.disconnect_all())
     await neo4j_driver.shutdown()
-
     await websocket_manager_disconnect_task
-    websocket_manager.background_loop.stop()
-    websocket_manager.background_thread.join()
     scheduler.shutdown()
 
 
@@ -133,17 +128,17 @@ SQLAlchemyInstrumentor().instrument(engine=engine)
 
 @bot.delete("/chat/session/{chat_session_id}")
 async def delete_chat_session_bookmark(chat_session_id: int):
-    return await run_in_threadpool(update_chat_session_is_hidden, chat_session_id)
+    return await update_chat_session_is_hidden(chat_session_id)
 
 
 @bot.get("/chat/sessions")
 async def get_chat_session_list() -> list[ChatSessionSummary]:
-    return await run_in_threadpool(get_chat_session_summaries)
+    return await get_chat_session_summaries()
 
 
 @bot.get("/chat/session/{chat_session_id}")
 async def get_chat_session_message_list(chat_session_id: int) -> list[ChatMessage]:
-    return await run_in_threadpool(get_chat_session_messages, chat_session_id)
+    return await get_chat_session_messages(chat_session_id)
 
 
 @bot.get("/favicon.ico", include_in_schema=False)
@@ -235,5 +230,4 @@ async def post_upload(files: List[UploadFile] = File(...)):
 async def websocket_chat(ws: WebSocket):
     chat_session_id = await websocket_manager.connect(ws)
     logger.info(f"starting session {chat_session_id}")
-    await websocket_manager.monitor_chat_session(chat_session_id, ws)
     await websocket_manager.conduct_chat_session(chat_session_id)

@@ -73,4 +73,5 @@ class Sentence(Base):
 
 
 # Create the tables in the database
-Base.metadata.create_all(bind=engine)
+if __name__ == "__main__":
+    Base.metadata.create_all(bind=engine)

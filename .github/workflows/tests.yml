@@ -45,7 +45,11 @@ jobs:
           cat > .env <<EOF
           HF_HOME=$HF_HOME
           OPENAI_API_KEY=$OPENAI_API_KEY
-          POSTGRES_USER=germ
+          OPENAI_CHAT_MODEL=gpt-4o
+          OPENAI_IMAGE_MODEL=dall-e-3
+          OPENAI_MINI_MODEL=gpt-4o-mini
+          OPENAI_REASONING_MODEL=o1
           POSTGRES_PASSWORD=bacteria4life
+          POSTGRES_USER=germ
           EOF
           docker compose run test

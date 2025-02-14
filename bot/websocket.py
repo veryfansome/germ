@@ -1,17 +1,16 @@
 from abc import ABC, abstractmethod
 from fastapi import WebSocket
-from openai import OpenAI
 from prometheus_client import Gauge
+from sqlalchemy.future import select as sql_select
 from sqlalchemy.sql import desc
-from starlette.concurrency import run_in_threadpool
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 import asyncio
 import datetime
 import logging
-import threading
 
 from bot.api.models import ChatMessage, ChatRequest, ChatResponse, ChatSessionSummary
-from bot.db.models import ChatSession, ChatRequestReceived, ChatResponseSent, SessionLocal
+from bot.chat import async_openai_client
+from bot.db.models import AsyncSessionLocal, ChatSession, ChatRequestReceived, ChatResponseSent
 from bot.graph.control_plane import ControlPlane
 from settings.germ_settings import WEBSOCKET_CONNECTION_IDLE_TIMEOUT
 from settings.openai_settings import MINI_MODEL, HTTPX_TIMEOUT
@@ -46,9 +45,8 @@ class WebSocketSender:
 
     async def send_chat_response(self, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
-        chat_response_sent_id = await run_in_threadpool(
-            new_chat_response_sent, self.chat_session_id, chat_response,
-            chat_request_received_id=None)
+        chat_response_sent_id = await new_chat_response_sent(
+            self.chat_session_id, chat_response, chat_request_received_id=None)
 
         _, time_occurred = await self.control_plane.add_chat_response(chat_response_sent_id)
         await self.control_plane.link_chat_response_to_chat_session(
@@ -60,9 +58,8 @@ class WebSocketSender:
 
     async def return_chat_response(self, chat_request_received_id: int, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
-        chat_response_sent_id = await run_in_threadpool(
-            new_chat_response_sent, self.chat_session_id, chat_response,
-            chat_request_received_id=chat_request_received_id)
+        chat_response_sent_id = await new_chat_response_sent(
+            self.chat_session_id, chat_response, chat_request_received_id=chat_request_received_id)
 
         _, time_occurred = await self.control_plane.add_chat_response(chat_response_sent_id)
         await self.control_plane.link_chat_response_to_chat_request(
@@ -93,16 +90,11 @@ class WebSocketReceiveEventHandler(ABC):
 class WebSocketConnectionManager:
     def __init__(self, control_plane: ControlPlane):
         self.active_connections: dict[int, WebSocket] = {}
-        self.background_loop = asyncio.new_event_loop()
+        self.monitor_tasks: dict[int, tuple[asyncio.Task, asyncio.Event]] = {}
         self.control_plane = control_plane
         self.receive_event_handlers: list[WebSocketReceiveEventHandler] = []
         self.send_event_handlers: list[WebSocketSendEventHandler] = []
         self.session_monitors: list[SessionMonitor] = []
-
-        def run_event_loop(loop):
-            asyncio.set_event_loop(loop)
-            loop.run_forever()
-        self.background_thread = threading.Thread(target=run_event_loop, args=(self.background_loop,))
 
     def add_send_event_handler(self, handler: WebSocketSendEventHandler):
         self.send_event_handlers.append(handler)
@@ -125,43 +117,67 @@ class WebSocketConnectionManager:
             await self.disconnect(chat_session_id)
 
     async def connect(self, ws: WebSocket) -> int:
-        chat_session_id = await run_in_threadpool(new_chat_session)
+        chat_session_id = await new_chat_session()
         await ws.accept()
         self.active_connections[chat_session_id] = ws
+
+        # Create and store a cancellation event, and start a monitor task
+        cancel_event = asyncio.Event()
+        monitor_task = asyncio.create_task(self.monitor_chat_session(chat_session_id, ws, cancel_event))
+        self.monitor_tasks[chat_session_id] = (monitor_task, cancel_event)
+
         METRIC_CHAT_SESSIONS_IN_PROGRESS.inc()
         _ = asyncio.create_task(self.control_plane.add_chat_session(chat_session_id))
         return chat_session_id
 
     async def disconnect(self, chat_session_id: int):
         ws = self.active_connections.pop(chat_session_id, None)
-        if ws.state == WebSocketState.CONNECTED or ws.state == WebSocketState.CONNECTING:
+
+        # Signal the monitor coroutine to exit
+        if chat_session_id in self.monitor_tasks:
+            monitor_task, cancel_event = self.monitor_tasks.pop(chat_session_id)
+            cancel_event.set()   # Tell the monitor loop to exit
+            await monitor_task
+
+        if ws and ws.state in [WebSocketState.CONNECTED, WebSocketState.CONNECTING]:
             logger.info(f"disconnecting session {chat_session_id}, socket state: connected=%s connecting=%s",
                         ws.state == WebSocketState.CONNECTED, ws.state == WebSocketState.CONNECTING)
             await ws.close()
+
         METRIC_CHAT_SESSIONS_IN_PROGRESS.dec()
-        await run_in_threadpool(update_chat_session_time_stopped, chat_session_id)
-        await run_in_threadpool(update_chat_session_summary, chat_session_id)
+        await update_chat_session_time_stopped(chat_session_id)
+        await update_chat_session_summary(chat_session_id)
 
     async def disconnect_all(self):
         await asyncio.gather(*[self.disconnect(chat_session_id) for chat_session_id in self.active_connections])
 
-    async def monitor_chat_session(self, chat_session_id: int, ws: WebSocket):
-        async def _monitor_chat_session():
-            ws_sender = WebSocketSender(self.control_plane, chat_session_id, ws,
-                                        send_event_handlers=self.send_event_handlers)
-            while chat_session_id in self.active_connections:
-                await asyncio.sleep(15)
-                logger.info(f"chat session {chat_session_id} is active")
-                for monitor in self.session_monitors:
-                    task = asyncio.create_task(monitor.on_tick(chat_session_id, ws_sender))
-        asyncio.run_coroutine_threadsafe(_monitor_chat_session(), self.background_loop)
+    async def monitor_chat_session(self, chat_session_id: int, ws: WebSocket, cancel_event: asyncio.Event):
+        """
+        Runs in the background to do periodic or event-driven checks.
+        Closes automatically when cancel_event is set.
+        """
+        ws_sender = WebSocketSender(self.control_plane, chat_session_id, ws,
+                                    send_event_handlers=self.send_event_handlers)
+        try:
+            while not cancel_event.is_set():
+                # Wait for either 15s or the event to be set, whichever comes first.
+                try:
+                    await asyncio.wait_for(asyncio.shield(cancel_event.wait()), timeout=15.0)
+                except asyncio.TimeoutError:
+                    logger.info(f"chat session {chat_session_id} is still active")
+                    for monitor in self.session_monitors:
+                        asyncio.create_task(monitor.on_tick(chat_session_id, ws_sender))
+        except asyncio.CancelledError:
+            logger.info(f"Session monitor for {chat_session_id} was cancelled.")
+        finally:
+            # Clean-up logic if needed
+            pass
 
     async def receive(self, chat_session_id: int):
         connection: WebSocket = self.active_connections[chat_session_id]
-        chat_request = ChatRequest.parse_obj(await connection.receive_json())
+        chat_request = ChatRequest.model_validate(await connection.receive_json())
 
-        chat_request_received_id = await run_in_threadpool(
-            new_chat_request_received, chat_session_id, chat_request)
+        chat_request_received_id = await new_chat_request_received(chat_session_id, chat_request)
         _, time_occurred = await self.control_plane.add_chat_request(chat_request_received_id)
         _ = asyncio.create_task(
             self.control_plane.link_chat_request_to_chat_session(
@@ -174,124 +190,145 @@ class WebSocketConnectionManager:
                 handler.on_receive(chat_session_id, chat_request_received_id, chat_request, ws_sender))
 
 
-def get_chat_session_messages(chat_session_id: int) -> list[ChatMessage]:
+async def get_chat_session_messages(chat_session_id: int) -> list[ChatMessage]:
     messages: list[ChatMessage] = []
-    with SessionLocal() as session:
-        response_sent = session.query(ChatResponseSent).filter_by(
-            chat_session_id=chat_session_id
-        ).order_by(
-            desc(ChatResponseSent.chat_response_sent_id)
-        ).first()
-        if response_sent:
-            if response_sent.chat_request_received_id is not None:
-                request_received = session.query(ChatRequestReceived).join(ChatResponseSent).filter(
-                    ChatRequestReceived.chat_request_received_id == ChatResponseSent.chat_request_received_id,
-                    ChatResponseSent.chat_response_sent_id == response_sent.chat_response_sent_id
-                ).one_or_none()
-                if request_received:
-                    for m in ChatRequest.parse_obj(request_received.chat_request).messages:
-                        messages.append(m)
-            messages.append(
-                ChatResponse.parse_obj(response_sent.chat_response))
+    async with (AsyncSessionLocal() as rdb_session):
+        async with rdb_session.begin():
+            response_sent_select_stmt = sql_select(ChatResponseSent).where(
+                ChatResponseSent.chat_session_id == chat_session_id
+            ).order_by(
+                desc(ChatResponseSent.chat_response_sent_id)
+            )
+            response_sent_select_result = await rdb_session.execute(response_sent_select_stmt)
+            response_sent_record = response_sent_select_result.scalars().first()
+            if response_sent_record:
+                if response_sent_record.chat_request_received_id is not None:
+
+                    request_received_select_stmt = sql_select(ChatRequestReceived).join(ChatResponseSent).filter(
+                        ChatRequestReceived.chat_request_received_id == ChatResponseSent.chat_request_received_id,
+                        ChatResponseSent.chat_response_sent_id == response_sent_record.chat_response_sent_id
+                    )
+                    request_received_select_result = await rdb_session.execute(request_received_select_stmt)
+                    request_received_record = request_received_select_result.scalars().one_or_none()
+                    if request_received_record:
+                        for m in ChatRequest.model_validate(request_received_record.chat_request).messages:
+                            messages.append(m)
+                messages.append(
+                    ChatResponse.model_validate(response_sent_record.chat_response))
     return messages
 
 
-def get_chat_session_summaries() -> list[ChatSessionSummary]:
-    cs_list = []
-    with SessionLocal() as session:
-        results = session.query(ChatSession).filter(
-            ChatSession.is_hidden.is_(False),
-            ChatSession.summary.is_not(None),
-            ChatSession.time_stopped.is_not(None),
-        ).all()
-        for cs in results:
-            cs_list.append(ChatSessionSummary(
-                chat_session_id=cs.chat_session_id,
-                summary=cs.summary,
-                time_started=cs.time_started,
-                time_stopped=cs.time_stopped,
-            ))
+async def get_chat_session_summaries() -> list[ChatSessionSummary]:
+    cs_list: list[ChatSessionSummary] = []
+    async with (AsyncSessionLocal() as rdb_session):
+        async with rdb_session.begin():
+            chat_session_select_stmt = sql_select(ChatSession).where(
+                ChatSession.is_hidden.is_(False),
+                ChatSession.summary.is_not(None),
+                ChatSession.time_stopped.is_not(None))
+            chat_session_select_result = await rdb_session.execute(chat_session_select_stmt)
+            chat_session_records = chat_session_select_result.scalars().all()
+            for cs in chat_session_records:
+                cs_list.append(ChatSessionSummary(
+                    chat_session_id=cs.chat_session_id,
+                    summary=cs.summary,
+                    time_started=cs.time_started,
+                    time_stopped=cs.time_stopped,
+                ))
     return cs_list
 
 
-def new_chat_request_received(chat_session_id: int, chat_request: ChatRequest) -> int:
-    with SessionLocal() as session:
-        stored_request = ChatRequestReceived(
-            chat_session_id=chat_session_id,
-            chat_request=chat_request.model_dump(),
-            time_received=datetime.datetime.now(datetime.timezone.utc),
-        )
-        session.add(stored_request)
-        session.commit()
-        return stored_request.chat_request_received_id
+async def new_chat_request_received(chat_session_id: int, chat_request: ChatRequest) -> int:
+    async with (AsyncSessionLocal() as rdb_session):
+        async with rdb_session.begin():
+            rdb_record = ChatRequestReceived(
+                chat_session_id=chat_session_id,
+                chat_request=chat_request.model_dump(),
+                time_received=datetime.datetime.now(datetime.timezone.utc),
+            )
+            rdb_session.add(rdb_record)
+            await rdb_session.commit()
+            return rdb_record.chat_request_received_id
 
 
-def new_chat_response_sent(chat_session_id: int, chat_response: ChatResponse,
+async def new_chat_response_sent(chat_session_id: int, chat_response: ChatResponse,
                            chat_request_received_id: int = None) -> int:
-    with SessionLocal() as session:
-        stored_response = ChatResponseSent(
-            chat_session_id=chat_session_id,
-            chat_response=chat_response.model_dump(),
-            time_sent=datetime.datetime.now(datetime.timezone.utc),
-        ) if chat_request_received_id is None else ChatResponseSent(
-            chat_session_id=chat_session_id,
-            chat_request_received_id=chat_request_received_id,
-            chat_response=chat_response.model_dump(),
-            time_sent=datetime.datetime.now(datetime.timezone.utc),
-        )
-        session.add(stored_response)
-        session.commit()
-        return stored_response.chat_response_sent_id
+    async with (AsyncSessionLocal() as rdb_session):
+        async with rdb_session.begin():
+            rdb_record = ChatResponseSent(
+                chat_session_id=chat_session_id,
+                chat_response=chat_response.model_dump(),
+                time_sent=datetime.datetime.now(datetime.timezone.utc),
+            ) if chat_request_received_id is None else ChatResponseSent(
+                chat_session_id=chat_session_id,
+                chat_request_received_id=chat_request_received_id,
+                chat_response=chat_response.model_dump(),
+                time_sent=datetime.datetime.now(datetime.timezone.utc),
+            )
+            rdb_session.add(rdb_record)
+            await rdb_session.commit()
+            return rdb_record.chat_response_sent_id
 
 
-def new_chat_session() -> int:
-    with SessionLocal() as session:
-        cs = ChatSession(time_started=datetime.datetime.now(datetime.timezone.utc))
-        session.add(cs)
-        session.commit()
-        return cs.chat_session_id
+async def new_chat_session() -> int:
+    async with (AsyncSessionLocal() as rdb_session):
+        async with rdb_session.begin():
+            rdb_record = ChatSession(time_started=datetime.datetime.now(datetime.timezone.utc))
+            rdb_session.add(rdb_record)
+            await rdb_session.commit()
+            return rdb_record.chat_session_id
 
 
-def update_chat_session_is_hidden(chat_session_id: int):
-    with SessionLocal() as session:
-        cs = session.query(ChatSession).filter_by(chat_session_id=chat_session_id).first()
-        if cs:
-            cs.is_hidden = True
-            session.commit()
-        else:
-            logger.error(f"ChatSession.chat_session_id == {chat_session_id} not found")
+async def update_chat_session_is_hidden(chat_session_id: int):
+    async with (AsyncSessionLocal() as rdb_session):
+        async with rdb_session.begin():
+            chat_session_select_stmt = sql_select(ChatSession).where(ChatSession.chat_session_id == chat_session_id)
+            chat_session_select_result = await rdb_session.execute(chat_session_select_stmt)
+            chat_session_record = chat_session_select_result.scalars().first()
+            if chat_session_record:
+                chat_session_record.is_hidden = True
+                await rdb_session.commit()
+            else:
+                logger.error(f"ChatSession.chat_session_id == {chat_session_id} not found")
 
 
-def update_chat_session_summary(chat_session_id: int):
-    messages = get_chat_session_messages(chat_session_id)
-    if len(messages) > 1:  # A conversation should have at least a message and a reply
-        with OpenAI() as client:
-            completion = client.chat.completions.create(
-                messages=([m.model_dump() for m in messages] + [{
-                    "role": "user", "content": " ".join((
-                        "Summarize this conversation using no more than 20 words.",
-                        "What did the I want?",
-                        "What was your response?"
-                    ))
-                }]),
-                model=MINI_MODEL, n=1,
-                timeout=HTTPX_TIMEOUT)
-            with SessionLocal() as session:
-                cs = session.query(ChatSession).filter_by(chat_session_id=chat_session_id).first()
-                if cs:
-                    cs.summary = completion.choices[0].message.content
-                    session.commit()
+async def update_chat_session_summary(chat_session_id: int) -> int:
+    messages = await get_chat_session_messages(chat_session_id)
+    message_cnt = len(messages)
+    if message_cnt > 1:  # A conversation should have at least a message and a reply
+        completion = await async_openai_client.chat.completions.create(
+            messages=([m.model_dump() for m in messages] + [{
+                "role": "user", "content": " ".join((
+                    "Summarize this conversation using no more than 20 words.",
+                    "What did the I want?",
+                    "What was your response?"
+                ))
+            }]),
+            model=MINI_MODEL, n=1,
+            timeout=HTTPX_TIMEOUT)
+        async with (AsyncSessionLocal() as rdb_session):
+            async with rdb_session.begin():
+                chat_session_select_stmt = sql_select(ChatSession).where(ChatSession.chat_session_id == chat_session_id)
+                chat_session_select_result = await rdb_session.execute(chat_session_select_stmt)
+                chat_session_record = chat_session_select_result.scalars().first()
+                if chat_session_record:
+                    chat_session_record.summary = completion.choices[0].message.content
+                    await rdb_session.commit()
                 else:
                     logger.error(f"ChatSession.chat_session_id == {chat_session_id} not found")
     else:
         logger.info("skipped adding chat session summary")
+    return message_cnt
 
 
-def update_chat_session_time_stopped(chat_session_id: int):
-    with SessionLocal() as session:
-        cs = session.query(ChatSession).filter_by(chat_session_id=chat_session_id).first()
-        if cs:
-            cs.time_stopped = datetime.datetime.now(datetime.timezone.utc)
-            session.commit()
-        else:
-            logger.error(f"ChatSession.chat_session_id == {chat_session_id} not found")
+async def update_chat_session_time_stopped(chat_session_id: int):
+    async with (AsyncSessionLocal() as rdb_session):
+        async with rdb_session.begin():
+            chat_session_select_stmt = sql_select(ChatSession).where(ChatSession.chat_session_id == chat_session_id)
+            chat_session_select_result = await rdb_session.execute(chat_session_select_stmt)
+            chat_session_record = chat_session_select_result.scalars().first()
+            if chat_session_record:
+                chat_session_record.time_stopped = datetime.datetime.now(datetime.timezone.utc)
+                await rdb_session.commit()
+            else:
+                logger.error(f"ChatSession.chat_session_id == {chat_session_id} not found")
