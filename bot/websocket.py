@@ -7,7 +7,6 @@ from starlette.websockets import WebSocketDisconnect, WebSocketState
 import asyncio
 import datetime
 import logging
-import threading
 
 from bot.api.models import ChatMessage, ChatRequest, ChatResponse, ChatSessionSummary
 from bot.chat import async_openai_client

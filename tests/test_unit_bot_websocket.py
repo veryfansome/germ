@@ -1,10 +1,9 @@
+from starlette.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocketState
 from unittest.mock import MagicMock, patch, AsyncMock
 import asyncio
 import datetime
 import pytest
-
-from starlette.websockets import WebSocketState
-from starlette.websockets import WebSocketDisconnect
 
 from bot.websocket import (
     ChatMessage,
@@ -24,6 +23,18 @@ from bot.websocket import (
     update_chat_session_summary,
     update_chat_session_time_stopped
 )
+
+
+@pytest.fixture(autouse=True)
+def no_db_connection(monkeypatch):
+    # Create a dummy session that behaves as an async context manager.
+    dummy_session = MagicMock()
+    dummy_session.__aenter__.return_value = dummy_session
+    dummy_session.__aexit__.return_value = False
+    dummy_session.commit = AsyncMock()
+    dummy_session.execute = AsyncMock()
+    # Patch the AsyncSessionLocal in the module where it's imported
+    monkeypatch.setattr("bot.websocket.AsyncSessionLocal", lambda: dummy_session)
 
 
 @pytest.mark.asyncio
