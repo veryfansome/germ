@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from fastapi import WebSocket
+from httpx._client import ClientState
 from prometheus_client import Gauge
 from sqlalchemy.future import select as sql_select
 from sqlalchemy.sql import desc
@@ -139,8 +140,9 @@ class WebSocketConnectionManager:
             cancel_event.set()   # Tell the monitor loop to exit
             await monitor_task
 
-        logger.info(f"disconnecting session {chat_session_id}")
-        await ws.close()
+        logger.info(f"disconnecting session {chat_session_id} {ws.client_state}")
+        if ws.client_state == WebSocketState.CONNECTED:
+            await ws.close()
 
         METRIC_CHAT_SESSIONS_IN_PROGRESS.dec()
         await update_chat_session_time_stopped(chat_session_id)

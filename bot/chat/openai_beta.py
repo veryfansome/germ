@@ -49,7 +49,7 @@ class AssistantHelper:
                 assistant_id=assistant.id,
                 thread_id=thread.id,
                 event_handler=ThreadEventHandler(
-                    assistant, chat_session_id, chat_request_received_id,
+                    assistant, thread, chat_session_id, chat_request_received_id,
                     chat_request, ws_sender),
             ) as stream:
                 try:
@@ -101,12 +101,13 @@ class AssistantHelper:
 
 
 class ThreadEventHandler(AsyncAssistantEventHandler):
-    def __init__(self, assistant, chat_session_id: int, chat_request_received_id: int,
+    def __init__(self, assistant, thread, chat_session_id: int, chat_request_received_id: int,
                  chat_request: ChatRequest, ws_sender: WebSocketSender):
         self.assistant = assistant
         self.chat_request = chat_request
         self.chat_request_received_id = chat_request_received_id
         self.chat_session_id = chat_session_id
+        self.thread = thread
         self.ws_sender = ws_sender
         super().__init__()
 
@@ -122,6 +123,7 @@ class ThreadEventHandler(AsyncAssistantEventHandler):
 
     @override
     async def on_message_done(self, message) -> None:
+        logger.info(f"on_message_done: {message}")
         _ = asyncio.create_task(
             self.ws_sender.return_chat_response(
                 self.chat_request_received_id,
