@@ -115,7 +115,7 @@ class ThreadEventHandler(AsyncAssistantEventHandler):
         _ = asyncio.create_task(
             self.ws_sender.return_chat_response(
                 self.chat_request_received_id,
-                ChatResponse(complete=True,
+                ChatResponse(complete=False,
                              content=f"One moment. I'm using my `{tool_call.type}` tool.",
                              model=self.assistant.model)))
         await super().on_tool_call_created(tool_call)
