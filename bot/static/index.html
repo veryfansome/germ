@@ -176,6 +176,22 @@
         // Re-render the attachments list
         renderAttachedFiles();
     });
+    // Drag and drop
+    document.body.addEventListener('dragenter', (event) => {
+        event.preventDefault();
+    });
+    document.body.addEventListener('dragover', (event) => {
+        event.preventDefault();
+    });
+    document.body.addEventListener('drop', (event) => {
+        event.preventDefault();
+        const files = event.dataTransfer.files;
+        if (files.length > 0) {
+            fileInput.files = files;
+            // Trigger any event handlers you have for file selection
+            fileInput.dispatchEvent(new Event('change'));
+        }
+    });
 
     let chatCompletionMessageList = [];
     if ('chat_session_id' in queryParams) {

@@ -42,7 +42,7 @@ async def test_connect_disconnect_basic():
     mock_ws = MagicMock()
     mock_ws.accept = AsyncMock()
     mock_ws.close = AsyncMock()
-    mock_ws.state = WebSocketState.CONNECTED  # << Add this line
+    mock_ws.client_state = WebSocketState.CONNECTED  # << Add this line
     mock_control_plane = MagicMock()
     mock_control_plane.add_chat_session = AsyncMock(return_value=None)
 
