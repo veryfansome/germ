@@ -139,10 +139,8 @@ class WebSocketConnectionManager:
             cancel_event.set()   # Tell the monitor loop to exit
             await monitor_task
 
-        if ws and ws.state in [WebSocketState.CONNECTED, WebSocketState.CONNECTING]:
-            logger.info(f"disconnecting session {chat_session_id}, socket state: connected=%s connecting=%s",
-                        ws.state == WebSocketState.CONNECTED, ws.state == WebSocketState.CONNECTING)
-            await ws.close()
+        logger.info(f"disconnecting session {chat_session_id}")
+        await ws.close()
 
         METRIC_CHAT_SESSIONS_IN_PROGRESS.dec()
         await update_chat_session_time_stopped(chat_session_id)
