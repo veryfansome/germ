@@ -246,8 +246,8 @@
     let wsConnectionAttemptInProgress = false;
     const wsReconnectInterval = 5000; // 5 seconds
     function wsConnect() {
-        ws = new WebSocket(`ws://${host}:${port}/chat`);
         wsConnectionAttemptInProgress = true
+        ws = new WebSocket(`ws://${host}:${port}/chat`);
         ws.onopen = () => {
             wsConnectionAttemptInProgress = false
             console.log('WebSocket connected');
