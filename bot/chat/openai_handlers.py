@@ -7,7 +7,7 @@ import json
 import logging
 
 from bot.api.models import ChatRequest, ChatResponse
-from bot.chat import async_openai_client
+from bot.chat import async_openai_client, openai_beta
 from bot.graph.control_plane import ControlPlane
 from bot.lang.parsers import extract_markdown_page_elements
 from bot.websocket import WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender
@@ -189,8 +189,9 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
     if the situation calls for other tools.
     """
 
-    def __init__(self, model: str = ROUTING_MODEL):
+    def __init__(self, model: str = ROUTING_MODEL, assistant_helper: openai_beta.AssistantHelper = None):
         super().__init__(model)
+        self.assistant_helper= assistant_helper
         self.model: str = model
         self.tools: dict[str, RoutableChatEventHandler] = {}
         for chat_handler in USER_FACING_CHAT_HANDLERS.values():
@@ -206,40 +207,42 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         if chat_request.uploaded_filenames:
             logger.info(f"uploaded file: {chat_request.uploaded_filenames}")
-
-        completion = await self.do_chat_completion(chat_request)
-        if completion is None:
+            _ = asyncio.create_task(self.assistant_helper.handle_in_a_thread(
+                chat_session_id, chat_request_received_id, chat_request, ws_sender))
+        else:
+            completion = await self.do_chat_completion(chat_request)
+            if completion is None:
+                _ = asyncio.create_task(ws_sender.return_chat_response(
+                    chat_request_received_id,
+                    ChatResponse(complete=True, content="Sorry, I'm unable to access my language model.")))
+                return
+            elif completion.choices[0].message.content is None:
+                if completion.choices[0].message.tool_calls is not None:
+                    for tool_call in completion.choices[0].message.tool_calls:
+                        chat_request.parameters = json.loads(tool_call.function.arguments)
+                        _ = asyncio.create_task(
+                            self.tools[tool_call.function.name].on_receive(
+                                chat_session_id, chat_request_received_id, chat_request, ws_sender
+                            )
+                        )
+                        # Let user know you're delegating
+                        _ = asyncio.create_task(ws_sender.return_chat_response(
+                            chat_request_received_id,
+                            ChatResponse(
+                                complete=False,
+                                content="One moment.",
+                                model=completion.model)))
+                    return
+                else:
+                    logger.error("completion content and tool_calls are both missing", completion)
+                    completion.choices[0].message.content = "Strange... I don't have a response"
+            # Return completed response
             _ = asyncio.create_task(ws_sender.return_chat_response(
                 chat_request_received_id,
-                ChatResponse(complete=True, content="Sorry, I'm unable to access my language model.")))
-            return
-        elif completion.choices[0].message.content is None:
-            if completion.choices[0].message.tool_calls is not None:
-                for tool_call in completion.choices[0].message.tool_calls:
-                    chat_request.parameters = json.loads(tool_call.function.arguments)
-                    _ = asyncio.create_task(
-                        self.tools[tool_call.function.name].on_receive(
-                            chat_session_id, chat_request_received_id, chat_request, ws_sender
-                        )
-                    )
-                    # Let user know you're delegating
-                    _ = asyncio.create_task(ws_sender.return_chat_response(
-                        chat_request_received_id,
-                        ChatResponse(
-                            complete=False,
-                            content="One moment.",
-                            model=completion.model)))
-                return
-            else:
-                logger.error("completion content and tool_calls are both missing", completion)
-                completion.choices[0].message.content = "Strange... I don't have a response"
-        # Return completed response
-        _ = asyncio.create_task(ws_sender.return_chat_response(
-            chat_request_received_id,
-            ChatResponse(
-                complete=True,
-                content=completion.choices[0].message.content,
-                model=completion.model)))
+                ChatResponse(
+                    complete=True,
+                    content=completion.choices[0].message.content,
+                    model=completion.model)))
 
     async def do_chat_completion(self, chat_request: ChatRequest) -> Optional[ChatCompletion]:
         tools = [t.get_function_settings() for t in self.tools.values()]
