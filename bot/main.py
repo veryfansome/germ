@@ -18,6 +18,7 @@ import subprocess
 import traceback
 
 from bot.api.models import ChatMessage, ChatSessionSummary, SqlRequest
+from bot.chat.openai_beta import AssistantHelper
 from bot.chat.openai_handlers import ChatRoutingEventHandler, ResponseGraphingHandler, UserProfilingHandler
 from bot.db.models import DATABASE_URL, SessionLocal, engine
 from bot.db.neo4j import AsyncNeo4jDriver
@@ -49,16 +50,7 @@ tracer = trace.get_tracer(__name__)
 # App
 
 neo4j_driver = AsyncNeo4jDriver()
-
 control_plane = ControlPlane(neo4j_driver)
-
-english_controller = EnglishController(control_plane)
-control_plane.add_code_block_merge_event_handler(english_controller)
-control_plane.add_paragraph_merge_event_handler(english_controller)
-control_plane.add_sentence_merge_event_handler(english_controller)
-
-response_grapher = ResponseGraphingHandler(control_plane)
-
 websocket_manager = WebSocketConnectionManager(control_plane)
 
 
@@ -70,9 +62,23 @@ async def lifespan(app: FastAPI):
     :param app:
     :return:
     """
+
+    # Graph controllers
+    response_grapher = ResponseGraphingHandler(control_plane)
+
+    english_controller = EnglishController(control_plane)
+    control_plane.add_code_block_merge_event_handler(english_controller)
+    control_plane.add_paragraph_merge_event_handler(english_controller)
+    control_plane.add_sentence_merge_event_handler(english_controller)
+
     await control_plane.initialize()
 
-    router = ChatRoutingEventHandler()
+    assistant_helper = AssistantHelper()
+    await assistant_helper.refresh_assistants()
+    await assistant_helper.refresh_files()
+    scheduler.scheduled_job(assistant_helper.refresh_files, "interval", minutes=5)
+
+    router = ChatRoutingEventHandler(assistant_helper=assistant_helper)
     # TODO: maybe this shouldn't happen with every message.
     # user_fact_profiler = UserProfilingHandler({
     #    "user_fact": {
@@ -98,12 +104,18 @@ async def lifespan(app: FastAPI):
 
     # DB stats
     await db_stats_job()  # Warms up DB connections on startup
+
+    # Scheduler
+    scheduler.start()
+
     # Started
 
     yield
 
     # Stopping
     websocket_manager_disconnect_task = asyncio.create_task(websocket_manager.disconnect_all())
+    await assistant_helper.no_loose_files()
+    await assistant_helper.no_loose_threads()
     await neo4j_driver.shutdown()
     await websocket_manager_disconnect_task
     scheduler.shutdown()

@@ -1,9 +1,11 @@
 import os
 
+ASSISTANT_NAME = os.getenv("OPENAI_ASSISTANT_NAME", "_GERM_:Assistant")
 CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o")
 IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "dall-e-3")
 MINI_MODEL = os.getenv("OPENAI_MINI_MODEL", "gpt-4o-mini")
 REASONING_MODEL = os.getenv("OPENAI_REASONING_MODEL", None)
+SUMMARY_MODEL = os.getenv("OPENAI_SUMMARY_MODEL", "gpt-4o")
 ROUTING_MODEL = MINI_MODEL
 ENABLED_CHAT_MODELS = (
     *([] if not CHAT_MODEL else [CHAT_MODEL]),
