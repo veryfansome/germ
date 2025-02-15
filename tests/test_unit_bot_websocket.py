@@ -108,7 +108,6 @@ async def test_receive_and_event_handlers():
     """
     mock_ws = MagicMock()
     mock_ws.receive_json = AsyncMock(return_value={
-        "messages": [{"role": "user", "content": "Hello"}]
     })
     mock_control_plane = MagicMock()
 
@@ -333,7 +332,6 @@ async def test_new_chat_request_received():
         # We track how the ChatRequestReceived is constructed
         with patch("bot.websocket.ChatRequestReceived") as mock_model:
             mock_model.return_value = mock_record
-            chat_request = ChatRequest(messages=[{"role": "user", "content": "Hello test"}])
             out = await new_chat_request_received(123, chat_request)
             assert out == 999
 
