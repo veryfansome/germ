@@ -121,6 +121,9 @@
     };
     initPopup(refreshSettingsPopup, "settings");
 
+    const loadingIndicator = getLoadingIndicator();
+    chatbox.appendChild(loadingIndicator);
+
     // Text input area
     let submittedText = [];
     initTextArea(submittedText, sendMessage);
@@ -180,7 +183,6 @@
         chatbox.innerHTML = '';
 
         // Show loading indicator
-        const loadingIndicator = getLoadingIndicator();
         chatbox.appendChild(loadingIndicator);
         scrollChatBoxToBottom();
 
@@ -218,9 +220,15 @@
     }
 
     function handleMessageReceived(data) {
+        const responseComplete = data['complete'];
         const responseModel = data['model'];
         const responseRole = data['role'];
         const responseContent = data['content'];
+
+        if (responseComplete) {
+            loadingIndicator.remove(); // Stop showing loading indicator
+        }
+
         chatCompletionMessageList.push({ role: responseRole, content: responseContent });
 
         // Setup assistant message box
@@ -243,16 +251,16 @@
         ws.onopen = () => {
             wsConnectionAttemptInProgress = false
             console.log('WebSocket connected');
+            // Stop showing loading indicator
+            loadingIndicator.remove();
         };
         ws.onclose = (event) => {
             wsConnectionAttemptInProgress = false
-            const loadingIndicator = getLoadingIndicator();
             loadingIndicator.remove(); // Stop showing loading indicator if error
             console.log('WebSocket connection closed:', event);
         };
         ws.onerror = (event) => {
             wsConnectionAttemptInProgress = false
-            const loadingIndicator = getLoadingIndicator();
             loadingIndicator.remove(); // Stop showing loading indicator if error
             console.log('WebSocket connection errored:', event);
         };
@@ -264,9 +272,7 @@
             attachedFiles.forEach((f) => {
                 formData.append('files', f);
             });
-
             try {
-                // Adjust /upload to your actual endpoint
                 const uploadResponse = await fetch('/upload', {
                     method: 'POST',
                     body: formData
@@ -274,9 +280,6 @@
                 if (!uploadResponse.ok) {
                     console.error('File upload failed:', uploadResponse.statusText);
                 }
-                // On success, possibly clear the attachments
-                attachedFiles = [];
-                renderAttachedFiles();
             } catch (error) {
                 console.error('Error uploading files:', error);
             }
@@ -295,12 +298,10 @@
         chatCompletionMessageList.push({ role: "user", content: message });
 
         // Show loading indicator
-        const loadingIndicator = getLoadingIndicator();
         chatbox.appendChild(loadingIndicator);
         scrollChatBoxToBottom();
 
         ws.onmessage = function(event) {
-            loadingIndicator.remove(); // Stop showing loading indicator
             try {
                 handleMessageReceived(JSON.parse(event.data));
             } catch (error) {
@@ -312,7 +313,17 @@
         if (!isBlankOrEmptyStr(systemChatMessage)) {
             finalChatCompletionMessageList.push({ role: "system", content: systemChatMessage});
         }
-        ws.send(JSON.stringify({ messages: finalChatCompletionMessageList }));
+        while (ws.readyState !== WebSocket.OPEN) {
+            console.log("Waiting to send, connection not ready...");
+            await sleep(1000)  // ms
+        }
+        ws.send(JSON.stringify({
+            messages: finalChatCompletionMessageList,
+            uploaded_filenames: attachedFiles.map(file => file.name),
+        }));
+        // On success, possibly clear the attachments
+        attachedFiles = [];
+        renderAttachedFiles();
     }
     wsConnect();
     function reconnectIfDisconnected() {

@@ -174,6 +174,10 @@ const showErrorPopup = (message) => {
     }, 5000);
 };
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function throwOrJson(response) {
     if (!response.ok) {
         throw new Error(`HTTP error! Status: ${response.status}`);
