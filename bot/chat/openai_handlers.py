@@ -251,7 +251,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                     {"role": "system",
                      "content": "Answer in valid Markdown format only."},
                     {"role": "system",
-                     "content": "Don't generate code. Always use a tool if code is needed."},
+                     "content": "Don't generate backtick code blocks. Always use a tool if code is needed."},
                 ],
                 model=self.model,
                 n=1, tools=tools,

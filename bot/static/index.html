@@ -313,6 +313,10 @@
         if (!isBlankOrEmptyStr(systemChatMessage)) {
             finalChatCompletionMessageList.push({ role: "system", content: systemChatMessage});
         }
+        while (ws.readyState !== WebSocket.OPEN) {
+            console.log("Waiting to send, connection not ready...");
+            await sleep(1000)  // ms
+        }
         ws.send(JSON.stringify({
             messages: finalChatCompletionMessageList,
             uploaded_filenames: attachedFiles.map(file => file.name),
