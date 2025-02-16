@@ -8,7 +8,7 @@ on:
       - .github/workflows/tests.yml
       - '*/**.py'
       - docker-compose.yml
-      - app.Dockerfile
+      - ../../docker/app.Dockerfile
       - gunicorn_config.py
       - pytest.ini
   pull_request:
@@ -18,7 +18,7 @@ on:
       - .github/workflows/tests.yml
       - '*/**.py'
       - docker-compose.yml
-      - app.Dockerfile
+      - ../../docker/app.Dockerfile
       - gunicorn_config.py
       - pytest.ini
 

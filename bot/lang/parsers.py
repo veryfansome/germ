@@ -2,7 +2,6 @@ from bs4 import BeautifulSoup
 from typing import Any
 import dns.exception
 import dns.resolver
-import inflect
 import logging
 import mimetypes
 import mistune
@@ -14,7 +13,6 @@ from bot.data.iana import IanaTLDCacher
 logger = logging.getLogger(__name__)
 
 iana_data = IanaTLDCacher()
-inflect_engine = inflect.engine()
 
 ipv4_addr_pattern = re.compile(r"^(?P<ipv4_addr>(\d{1,3}\.){3}\d{1,3})")
 ipv6_addr_pattern = re.compile(r"^(?P<ipv6_addr>\[[0-9a-zA-Z:%]{3,39}])")
