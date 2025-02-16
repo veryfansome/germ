@@ -3,6 +3,8 @@ set -ex
 
 rm -rf /src/bot/static/tests
 if [ "$SKIP_TESTS" == 'false' ]; then
+    source germ_venv/bin/activate
+
     pytest -vvv \
         -n auto \
         --cov=bot \

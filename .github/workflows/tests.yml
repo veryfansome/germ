@@ -8,7 +8,7 @@ on:
       - .github/workflows/tests.yml
       - '*/**.py'
       - docker-compose.yml
-      - app.Dockerfile
+      - docker/*
       - gunicorn_config.py
       - pytest.ini
   pull_request:
@@ -18,7 +18,7 @@ on:
       - .github/workflows/tests.yml
       - '*/**.py'
       - docker-compose.yml
-      - app.Dockerfile
+      - docker/*
       - gunicorn_config.py
       - pytest.ini
 
@@ -33,8 +33,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Build latest image
-        run: docker build -t germ:latest -f app.Dockerfile .
+      - name: Build app image
+        run: docker build -t germ:latest -f docker/app.Dockerfile .
+
+      - name: Build db-migrate image
+        run: docker build -t germ-db-migrate:latest -f docker/db-migrate.Dockerfile .
 
       - name: Run tests
         env:

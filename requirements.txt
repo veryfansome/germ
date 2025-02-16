@@ -1,24 +1,17 @@
-accelerate>=0.26.0  # Required for using Trainer with PyTorch
 aiohttp
 aiofiles
 apscheduler
 asyncpg
 beautifulsoup4
-conllu
-dataset
-datasets
 dnspython
 fastapi
 google-cloud-storage
-googletrans
 gunicorn
 httpx
-inflect
 lxml
 mistune
 neo4j
 nltk
-numpy
 openai
 opentelemetry-api
 opentelemetry-exporter-otlp-proto-grpc
@@ -35,14 +28,8 @@ pytest-cov
 pytest-xdist
 python-dotenv
 python-multipart
-scikit-learn
 sentencepiece
-seqeval
 sqlalchemy[asyncio] == 2.0.37
 starlette
-tensorflow
-tf-keras  # Required until transformers supports Keras 3
-tiktoken
-torch
 transformers
 uvicorn[standard]

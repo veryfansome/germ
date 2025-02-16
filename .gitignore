@@ -6,7 +6,11 @@
 .env
 .idea/
 __pycache__/
+
 bot/static/tests/report.xml
 bot/static/tests/cov/
-google_application_credentials.json
+
 venv/
+germ_venv/
+
+google_application_credentials.json

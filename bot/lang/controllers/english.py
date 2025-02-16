@@ -1,11 +1,9 @@
 from starlette.concurrency import run_in_threadpool
-import inflect
 
 from bot.graph.control_plane import CodeBlockMergeEventHandler, ControlPlane, ParagraphMergeEventHandler, SentenceMergeEventHandler
 from bot.lang.parsers import get_html_soup, strip_html_elements
 from observability.logging import logging
 
-inflect_engine = inflect.engine()
 logger = logging.getLogger(__name__)
 
 

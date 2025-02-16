@@ -19,9 +19,6 @@ services:
         condition: service_completed_successfully
       test:
         condition: service_completed_successfully
-    build:
-      context: .
-      dockerfile: app.Dockerfile
     image: "germ:latest"
     volumes:
       - ./:/src:rw
@@ -40,13 +37,11 @@ services:
       POSTGRES_PASSWORD: &pg-password ${POSTGRES_PASSWORD:-bacteria4life}
       POSTGRES_USER: &pg-user ${POSTGRES_USER:-germ}
     working_dir: /src
-    command: [
-      "gunicorn", "-c", "gunicorn_config.py", "bot.main:bot", "--bind", "0.0.0.0:8000"
-    ]
+    command: [ "scripts/app-start.sh", "bot.main:bot", "8000" ]
     ports:
       - "8001:8000"
     healthcheck:
-      test: ["CMD", "curl", "-s", "localhost:8000/healthz"]
+      test: [ "CMD", "curl", "-s", "localhost:8000/healthz" ]
       interval: 10s
       timeout: 9s
       retries: 6
@@ -62,7 +57,7 @@ services:
     image: "germ-db-migrate:latest"
     build:
       context: .
-      dockerfile: db-migrate.Dockerfile
+      dockerfile: docker/db-migrate.Dockerfile
     volumes:
       - ./:/src
     environment:
@@ -121,9 +116,6 @@ services:
         condition: service_completed_successfully
       test:
         condition: service_completed_successfully
-    build:
-      context: .
-      dockerfile: app.Dockerfile
     image: "germ:latest"
     volumes:
       - ./:/src:rw
@@ -132,13 +124,11 @@ services:
     environment:
       HF_HOME: *hf-home
     working_dir: /src
-    command: [
-      "gunicorn", "-c", "gunicorn_config.py", "models.main:model_service", "--bind", "0.0.0.0:9000"
-    ]
+    command: [ "scripts/app-start.sh", "models.main:model_service", "9000" ]
     ports:
       - "9001:9000"
     healthcheck:
-      test: ["CMD", "curl", "-s", "localhost:9000/healthz"]
+      test: [ "CMD", "curl", "-s", "localhost:9000/healthz" ]
       interval: 10s
       timeout: 9s
       retries: 6
@@ -188,7 +178,6 @@ services:
       - ./:/src
     environment:
       <<: *local-dev
-      WAIT_FOR_AFTER_COMMAND: python -m bot.db.models
       WAIT_FOR_HOST: *pg-host
       WAIT_FOR_PORT: 5432
     working_dir: /src
@@ -223,9 +212,9 @@ services:
   test:
     networks: [bots]
     container_name: germ-test
-    build:
-      context: .
-      dockerfile: app.Dockerfile
+    depends_on:
+      venv:
+        condition: service_completed_successfully
     image: "germ:latest"
     volumes:
       - ./:/src
@@ -235,3 +224,15 @@ services:
       SKIP_TESTS: ${SKIP_TESTS:-true}
     working_dir: /src
     command: ["tests/run.sh"]
+
+  venv:
+    networks: [bots]
+    container_name: germ-venv
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+    image: "germ:latest"
+    volumes:
+      - ./:/src
+    working_dir: /src
+    command: [ "scripts/venv.sh" ]
