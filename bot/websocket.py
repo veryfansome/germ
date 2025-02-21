@@ -91,8 +91,8 @@ class WebSocketReceiveEventHandler(ABC):
 class WebSocketConnectionManager:
     def __init__(self, control_plane: ControlPlane):
         self.active_connections: dict[int, WebSocket] = {}
-        self.monitor_tasks: dict[int, tuple[asyncio.Task, asyncio.Event]] = {}
         self.control_plane = control_plane
+        self.monitor_tasks: dict[int, tuple[asyncio.Task, asyncio.Event]] = {}
         self.receive_event_handlers: list[WebSocketReceiveEventHandler] = []
         self.send_event_handlers: list[WebSocketSendEventHandler] = []
         self.session_monitors: list[SessionMonitor] = []

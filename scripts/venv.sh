@@ -5,5 +5,5 @@ if [ ! -e germ_venv ]; then
 fi
 source germ_venv/bin/activate
 
+pip install --upgrade pip
 pip install --no-cache-dir -r requirements.txt
-#opentelemetry-bootstrap -a install
