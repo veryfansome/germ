@@ -18,7 +18,7 @@ def get_torch_device():
         device = torch.device("mps")
     else:
         device = torch.device("cpu")
-    logger.info(f"using {device}")
+    logger.info(f"using torch in {device} mode")
     return device
 
 
