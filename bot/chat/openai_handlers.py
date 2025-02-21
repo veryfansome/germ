@@ -12,7 +12,7 @@ from bot.graph.control_plane import ControlPlane
 from bot.lang.parsers import extract_markdown_page_elements
 from bot.websocket import WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender
 from observability.annotations import measure_exec_seconds
-from settings.openai_settings import (CHAT_MODEL, MINI_MODEL, ROUTING_MODEL,
+from settings.openai_settings import (CHAT_MODEL, MINI_MODEL, REASONING_MODEL, ROUTING_MODEL,
                                       ENABLED_CHAT_MODELS, ENABLED_IMAGE_MODELS, HTTPX_TIMEOUT)
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ class RoutableChatEventHandler(WebSocketReceiveEventHandler, ABC):
 
 
 class ChatModelEventHandler(RoutableChatEventHandler):
-    def __init__(self, mode: str, model: str = CHAT_MODEL):
+    def __init__(self, model: str = CHAT_MODEL):
         self.function_name = f"use_{model}"
         self.function_settings = {
             "type": "function",
@@ -45,7 +45,6 @@ class ChatModelEventHandler(RoutableChatEventHandler):
                 "parameters": {},
             },
         }
-        self.mode = mode
         self.model = model
 
     async def do_chat_completion(self, chat_request: ChatRequest) -> ChatCompletion:
@@ -68,18 +67,16 @@ class ChatModelEventHandler(RoutableChatEventHandler):
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await self.do_chat_completion(chat_request)
-        response = ChatResponse(
-            complete=True,
-            content=completion.choices[0].message.content,
-            model=completion.model)
-        if self.mode == "direct":
-            _ = asyncio.create_task(ws_sender.return_chat_response(chat_request_received_id, response))
-        else:
-            return response
+        await ws_sender.return_chat_response(
+            chat_request_received_id,
+            ChatResponse(
+                complete=True,
+                content=completion.choices[0].message.content,
+                model=completion.model))
 
 
 class ImageModelEventHandler(RoutableChatEventHandler):
-    def __init__(self, mode: str, model: str, httpx_timeout: float = 90):
+    def __init__(self, model: str, httpx_timeout: float = 90):
         self.function_name = f"use_{model}"
         self.function_settings = {
             "type": "function",
@@ -92,7 +89,6 @@ class ImageModelEventHandler(RoutableChatEventHandler):
             },
         }
         self.httpx_timeout = httpx_timeout
-        self.mode = mode
         self.model = model
 
     async def generate_markdown_image(self, chat_request: ChatRequest):
@@ -118,16 +114,15 @@ class ImageModelEventHandler(RoutableChatEventHandler):
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         markdown_image = await self.generate_markdown_image(chat_request)
-        response = ChatResponse(complete=True, content=markdown_image, model=self.model)
-        if self.mode == "direct":
-            _ = asyncio.create_task(
-                ws_sender.return_chat_response(chat_request_received_id, response))
-        else:
-            return response
+        _ = asyncio.create_task(
+            ws_sender.return_chat_response(
+                chat_request_received_id, ChatResponse(complete=True, content=markdown_image, model=self.model)))
 
 
 class ReasoningChatModelEventHandler(RoutableChatEventHandler):
-    def __init__(self, mode: str, model: str = CHAT_MODEL, httpx_timeout: float = 120):
+    def __init__(self, assistant_helper: openai_beta.AssistantHelper = None,
+                 model: str = REASONING_MODEL, httpx_timeout: float = 120):
+        self.assistant_helper = assistant_helper
         self.function_name = f"use_{model}"
         self.function_settings = {
             "type": "function",
@@ -149,7 +144,6 @@ class ReasoningChatModelEventHandler(RoutableChatEventHandler):
             },
         }
         self.httpx_timeout = httpx_timeout
-        self.mode = mode
         self.model = model
 
     async def do_chat_completion(self, chat_request: ChatRequest) -> ChatCompletion:
@@ -174,15 +168,12 @@ class ReasoningChatModelEventHandler(RoutableChatEventHandler):
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await self.do_chat_completion(chat_request)
-        response = ChatResponse(
-            complete=True,
-            content=completion.choices[0].message.content,
-            model=f"{completion.model}[{'|'.join([f'{k}:{v}' for k, v in chat_request.parameters.items()])}]")
-        if self.mode == "direct":
-            _ = asyncio.create_task(ws_sender.return_chat_response(
-                chat_request_received_id, response))
-        else:
-            return response
+        await ws_sender.return_chat_response(
+            chat_request_received_id,
+            ChatResponse(
+                complete=True,
+                content=completion.choices[0].message.content,
+                model=f"{completion.model}[{'|'.join([f'{k}:{v}' for k, v in chat_request.parameters.items()])}]"))
 
 
 class ChatRoutingEventHandler(ChatModelEventHandler):
@@ -191,21 +182,20 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
     if the situation calls for other tools.
     """
 
-    def __init__(self, mode: str, model: str = ROUTING_MODEL, assistant_helper: openai_beta.AssistantHelper = None):
+    def __init__(self, model: str = ROUTING_MODEL, assistant_helper: openai_beta.AssistantHelper = None):
         super().__init__(model)
         self.assistant_helper = assistant_helper
-        self.mode = mode
         self.model: str = model
         self.tools: dict[str, RoutableChatEventHandler] = {}
 
         tools: dict[str, RoutableChatEventHandler] = {}
         for m in ENABLED_CHAT_MODELS:
             if m.startswith("gpt-"):
-                tools[m] = ChatModelEventHandler(self.mode, m)
+                tools[m] = ChatModelEventHandler(model=m)
             elif m.startswith("o1") or m.startswith("o3"):
-                tools[m] = ReasoningChatModelEventHandler(self.mode, m)
+                tools[m] = ReasoningChatModelEventHandler(assistant_helper=assistant_helper, model=m)
         for m in ENABLED_IMAGE_MODELS:
-            tools[m] = ImageModelEventHandler(self.mode, m)
+            tools[m] = ImageModelEventHandler(m)
         for tool in tools.values():
             self.tools[tool.get_function_name()] = tool
             logger.info(f"added {tool.get_function_name()} => {tool}")
@@ -216,15 +206,14 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         if chat_request.uploaded_filenames:
             logger.info(f"uploaded file: {chat_request.uploaded_filenames}")
-            _ = asyncio.create_task(self.assistant_helper.handle_in_a_thread(
-                chat_session_id, chat_request_received_id, chat_request, ws_sender))
+            await self.assistant_helper.handle_in_a_thread(
+                chat_session_id, chat_request_received_id, chat_request, ws_sender)
         else:
             completion = await self.do_chat_completion(chat_request)
             if completion is None:
-                _ = asyncio.create_task(ws_sender.return_chat_response(
+                await ws_sender.return_chat_response(
                     chat_request_received_id,
-                    ChatResponse(complete=True, content="Sorry, I'm unable to access my language model.")))
-                return False  # Signal to upstream, since mode is ignored
+                    ChatResponse(complete=True, content="Sorry, I'm unable to access my language model."))
             elif completion.choices[0].message.content is None:
                 if completion.choices[0].message.tool_calls is not None:
                     tool_response_tasks = []
@@ -238,28 +227,22 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                             )
                         )
                     # Let user know you're delegating
-                    if self.mode == "direct":
-                        await ws_sender.return_chat_response(
-                            chat_request_received_id,
-                            ChatResponse(
-                                complete=False,
-                                content="One moment.",
-                                model=completion.model))
-                        return
-                    else:
-                        return await asyncio.gather(*tool_response_tasks)
+                    tool_names = [f"`{t.function.name}`" for t in completion.choices[0].message.tool_calls]
+                    await ws_sender.return_chat_response(
+                        chat_request_received_id,
+                        ChatResponse(complete=False, content=f"One moment, using tools: {''.join(tool_names)}.",
+                                     model=completion.model))
+                    await asyncio.gather(*tool_response_tasks)
+                    return
                 else:
                     logger.error("completion content and tool_calls are both missing", completion)
                     completion.choices[0].message.content = "Strange... I don't have a response"
             # Return completed response
-            response = ChatResponse(
-                complete=True,
-                content=completion.choices[0].message.content,
-                model=completion.model)
-            if self.mode == "direct":
-                _ = asyncio.create_task(ws_sender.return_chat_response(chat_request_received_id, response))
-            else:
-                return [response]
+            await ws_sender.return_chat_response(
+                chat_request_received_id,
+                ChatResponse(complete=True,
+                             content=completion.choices[0].message.content,
+                             model=completion.model))
 
     async def do_chat_completion(self, chat_request: ChatRequest) -> Optional[ChatCompletion]:
         tools = [t.get_function_settings() for t in self.tools.values()]

@@ -1,4 +1,5 @@
 from openai.lib.streaming import AsyncAssistantEventHandler
+from pathlib import Path
 from traceback import format_exc
 from typing_extensions import override
 import asyncio
@@ -19,6 +20,21 @@ class AssistantHelper:
         self.stored_files = {}
         self.threads = {}
 
+    async def create_or_update_assistant(self, name: str, **kwargs):
+        if name not in self.assistants:
+            asst = await async_openai_client.beta.assistants.create(
+                name=name,
+                **kwargs,
+            )
+            self.assistants[asst.name] = asst
+        else:
+            asst = await async_openai_client.beta.assistants.update(
+                self.assistants[name].id,
+                **kwargs,
+            )
+            self.assistants[asst.name] = asst
+        logger.info(f"initialized {asst}")
+
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def handle_in_a_thread(self, chat_session_id: int, chat_request_received_id: int,
                                  chat_request: ChatRequest, ws_sender: WebSocketSender):
@@ -26,49 +42,54 @@ class AssistantHelper:
             for filename in chat_request.uploaded_filenames:
                 if filename not in self.stored_files:
                     new_stored_file = await async_openai_client.files.create(
-                        file=open(f"/tmp/{filename}", "rb"),
+                        file=Path(f"/tmp/{filename}"),
                         purpose='assistants',
                         timeout=openai_settings.HTTPX_TIMEOUT,
                     )
                     self.stored_files[filename] = new_stored_file
                     logger.info(f"uploaded: {new_stored_file}")
-            thread = await async_openai_client.beta.threads.create(
-                messages=[m.model_dump() for m in chat_request.messages] + [{
-                    "role": "user",
-                    "content": ", ".join(chat_request.uploaded_filenames),
-                    "attachments": [{
-                        "file_id": self.stored_files[filename].id,
-                        "tools": [{"type": "code_interpreter"}]
-                    } for filename in chat_request.uploaded_filenames]
-                }],
-            )
-            self.threads[thread.id] = thread
+        messages = [m.model_dump() for m in chat_request.messages]
+        if chat_request.uploaded_filenames:
+            messages += [{
+                "role": "user",
+                "content": ", ".join(chat_request.uploaded_filenames),
+                "attachments": [{
+                    "file_id": self.stored_files[filename].id,
+                    "tools": [{"type": "code_interpreter"}]
+                } for filename in chat_request.uploaded_filenames],
+            }]
+        thread = await async_openai_client.beta.threads.create(
+            messages=messages, timeout=120)
+        self.threads[thread.id] = thread
 
-            assistant = self.assistants[openai_settings.ASSISTANT_NAME]
-            async with async_openai_client.beta.threads.runs.stream(
-                assistant_id=assistant.id,
-                thread_id=thread.id,
-                event_handler=ThreadEventHandler(
-                    assistant, thread, chat_session_id, chat_request_received_id,
-                    chat_request, ws_sender),
-            ) as stream:
-                try:
-                    await stream.until_done()
-                    logger.info("stream.until_done() completed")
-                except Exception as e:
-                    logger.error(f"stream.until_done() failed: {format_exc()}")
+        assistant = self.assistants[
+            openai_settings.SUMMARIZER_NAME if chat_request.uploaded_filenames else openai_settings.ASSISTANT_NAME]
+        async with async_openai_client.beta.threads.runs.stream(
+            assistant_id=assistant.id,
+            thread_id=thread.id,
+            event_handler=ThreadEventHandler(
+                assistant, thread, chat_session_id, chat_request_received_id,
+                chat_request, ws_sender),
+        ) as stream:
+            try:
+                await stream.until_done()
+                logger.info("stream.until_done() completed")
+            except Exception as e:
+                logger.error(f"stream.until_done() failed: {format_exc()}")
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def no_loose_files(self):
         deletion_tasks = []
-        for stored_file in self.stored_files.values():
+        while self.stored_files:
+            _, stored_file = self.stored_files.popitem()
             deletion_tasks.append(asyncio.create_task(async_openai_client.files.delete(file_id=stored_file.id)))
         await asyncio.gather(*deletion_tasks)
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def no_loose_threads(self):
         deletion_tasks = []
-        for thread_id in self.threads:
+        while self.threads:
+            thread_id, _ = self.threads.popitem()
             deletion_tasks.append(asyncio.create_task(async_openai_client.beta.threads.delete(thread_id=thread_id)))
         await asyncio.gather(*deletion_tasks)
 
@@ -77,18 +98,29 @@ class AssistantHelper:
         assistant_list = await async_openai_client.beta.assistants.list(timeout=openai_settings.HTTPX_TIMEOUT)
         for asst in assistant_list.data:
             self.assistants[asst.name] = asst
-        if not assistant_list.data:
-            asst = await async_openai_client.beta.assistants.create(
-                name=openai_settings.ASSISTANT_NAME,
-                instructions="Be helpful. Always read attached files, using tools when appropriate.",
+        await asyncio.gather(
+            self.create_or_update_assistant(
+                openai_settings.ASSISTANT_NAME,
+                instructions=openai_settings.ASSISTANT_INSTRUCTION,
+                model=(
+                    openai_settings.REASONING_MODEL
+                    if openai_settings.REASONING_MODEL else openai_settings.CHAT_MODEL),
+                reasoning_effort=(
+                    "medium"
+                    if openai_settings.REASONING_MODEL else None),
+                timeout=openai_settings.HTTPX_TIMEOUT,
+                tools=[],
+            ),
+            self.create_or_update_assistant(
+                openai_settings.SUMMARIZER_NAME,
+                instructions=openai_settings.SUMMARIZER_INSTRUCTION,
                 model=openai_settings.SUMMARY_MODEL,
                 timeout=openai_settings.HTTPX_TIMEOUT,
                 tools=[
                     {"type": "code_interpreter"},
                 ],
-            )
-            self.assistants[asst.name] = asst
-        logger.info(f"initialized {self.assistants}")
+            ),
+        )
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def refresh_files(self):
@@ -112,22 +144,29 @@ class ThreadEventHandler(AsyncAssistantEventHandler):
         super().__init__()
 
     @override
-    async def on_tool_call_created(self, tool_call):
-        _ = asyncio.create_task(
-            self.ws_sender.return_chat_response(
-                self.chat_request_received_id,
-                ChatResponse(complete=False,
-                             content=f"One moment. I'm using my `{tool_call.type}` tool.",
-                             model=self.assistant.model)))
-        await super().on_tool_call_created(tool_call)
+    async def on_end(self) -> None:
+        logger.info(f"on_end called")
+        await self.ws_sender.return_chat_response(
+            self.chat_request_received_id,
+            ChatResponse(complete=True,
+                         content=f"Thread {self.thread.id} ended.",
+                         model=self.assistant.model))
+        await super().on_end()
 
     @override
     async def on_message_done(self, message) -> None:
-        logger.info(f"on_message_done: {message}")
-        _ = asyncio.create_task(
-            self.ws_sender.return_chat_response(
-                self.chat_request_received_id,
-                ChatResponse(complete=message.status == "completed",
-                             content=message.content[0].text.value,
-                             model=self.assistant.model)))
+        await self.ws_sender.return_chat_response(
+            self.chat_request_received_id,
+            ChatResponse(complete=False,
+                         content=message.content[0].text.value,
+                         model=self.assistant.model))
         await super().on_message_done(message)
+
+    @override
+    async def on_tool_call_created(self, tool_call):
+        await self.ws_sender.return_chat_response(
+            self.chat_request_received_id,
+            ChatResponse(complete=False,
+                         content=f"One moment, using tool: `{tool_call.type}`.",
+                         model=self.assistant.model))
+        await super().on_tool_call_created(tool_call)

@@ -78,9 +78,10 @@ async def lifespan(app: FastAPI):
     assistant_helper = AssistantHelper()
     await assistant_helper.refresh_assistants()
     await assistant_helper.refresh_files()
+    await assistant_helper.no_loose_files()
     scheduler.scheduled_job(assistant_helper.refresh_files, "interval", minutes=5)
 
-    router = ChatRoutingEventHandler("delegate", assistant_helper=assistant_helper)
+    router = ChatRoutingEventHandler(assistant_helper=assistant_helper)
     chat_controller = ChatController(router)
     websocket_manager.add_receive_event_handler(chat_controller)
 
