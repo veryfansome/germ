@@ -8,6 +8,7 @@ fastapi
 google-cloud-storage
 gunicorn
 httpx
+huggingface_hub
 lxml
 mistune
 neo4j
@@ -31,5 +32,6 @@ python-multipart
 sentencepiece
 sqlalchemy[asyncio] == 2.0.37
 starlette
+torch
 transformers
 uvicorn[standard]

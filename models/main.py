@@ -5,9 +5,10 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
-import asyncio
 import os
 
+from bot.api.models import TextPayload
+from models.predict.multi_predict import MultiHeadPredictor
 from observability.logging import logging, setup_logging
 from observability.tracing import setup_tracing
 
@@ -25,6 +26,8 @@ tracer = trace.get_tracer(__name__)
 
 ##
 # App
+
+text_token_classifier = MultiHeadPredictor("veryfansome/multi-classifier", subfolder="models/o3-mini_20250218")
 
 
 @asynccontextmanager
@@ -65,3 +68,8 @@ async def get_healthz():
 @model_service.get("/metrics")
 async def get_metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@model_service.post("/text/classification")
+async def post_text_classification(payload: TextPayload):
+    return await run_in_threadpool(text_token_classifier.predict, payload.text)
