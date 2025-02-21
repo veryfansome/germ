@@ -37,3 +37,7 @@ class ChatSessionSummary(BaseModel):
 
 class SqlRequest(BaseModel):
     sql: str
+
+
+class TextPayload(BaseModel):
+    text: str
