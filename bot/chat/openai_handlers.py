@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from openai.types.chat.chat_completion import ChatCompletion
-from starlette.concurrency import run_in_threadpool
 from typing import Callable, Optional
 import asyncio
 import json
@@ -9,8 +8,7 @@ import logging
 from bot.api.models import ChatRequest, ChatResponse
 from bot.chat import async_openai_client, openai_beta
 from bot.graph.control_plane import ControlPlane
-from bot.lang.parsers import extract_markdown_page_elements
-from bot.websocket import WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender
+from bot.websocket import WebSocketReceiveEventHandler, WebSocketSender
 from observability.annotations import measure_exec_seconds
 from settings.openai_settings import (CHAT_MODEL, MINI_MODEL, REASONING_MODEL, ROUTING_MODEL,
                                       ENABLED_CHAT_MODELS, ENABLED_IMAGE_MODELS, HTTPX_TIMEOUT)
@@ -266,78 +264,6 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
 
 ##
 # Internal chat handlers
-
-
-class ResponseGraphingHandler(WebSocketSendEventHandler):
-    def __init__(self, control_plane: ControlPlane):
-        self.control_plane = control_plane
-        self.node_types = {
-            "block_code": "CodeBlock",
-            "header": "Header",
-            "paragraph": "Paragraph",
-        }
-
-    async def on_send(self,
-                      chat_response_sent_id: int,
-                      chat_response: ChatResponse,
-                      chat_session_id: int,
-                      chat_request_received_id: int = None):
-        elements = await run_in_threadpool(extract_markdown_page_elements, chat_response.content)
-        """
-        ('header', 1, 'Heading 1')
-        ('paragraph', 'This is a paragraph with some text.')
-        ('header', 2, 'Heading 2')
-        ('list', 'unordered', '- Bullet point 1\n- Bullet point 2\n')
-        ('list_item', 'Bullet point 1')
-        ('list_item', 'Bullet point 2')
-        ('list', 'ordered', '1. Ordered item 1\n2. Ordered item 2\n')
-        ('list_item', 'Ordered item 1')
-        ('list_item', 'Ordered item 2')
-        ('code_block', None, 'def hello_world():\n    print("Hello, world!")\n')
-        """
-        last_element_type = None
-        last_element_attrs = None
-        link_attrs = {
-            "chat_request_received_id": chat_request_received_id,
-            "chat_response_sent_id": chat_response_sent_id,
-            "chat_session_id": chat_session_id,
-        }
-        for element in elements:
-            logger.debug(f"markdown element: {element}")
-            # `paragraph` and `code_block` are ordered at the top for frequency
-            if element[0] == "paragraph":
-                _, paragraph_id, _ = await self.control_plane.add_paragraph(element[1])
-                this_element_attrs = {"paragraph_id": paragraph_id}
-            elif element[0] == "block_code":
-                _, code_block_id, _ = await self.control_plane.add_code_block(
-                    element[2], language=str(element[1]))
-                this_element_attrs = {"code_block_id": code_block_id}
-            elif element[0] == "header":
-                await self.control_plane.add_header(element[1])
-                this_element_attrs = {"text": element[1]}
-            # TODO: List may need its own node type with vertexes to item sentences
-            #elif element[0] == "list":
-            #    pass
-            #elif element[0] == "list_item":
-            #    pass
-            # TODO: BlockQuote may need its own node type with vertexes to inner sentences
-            #elif element[0] == "block_quote":
-            #    pass
-            else:
-                logger.info(f"unsupported element type: {element[0]}")
-                continue
-
-            _ = asyncio.create_task(self.control_plane.link_page_element_to_chat_response(
-                self.node_types[element[0]], this_element_attrs, chat_response_sent_id))
-
-            if last_element_type is not None and last_element_attrs is not None:
-                _ = asyncio.create_task(self.control_plane.link_successive_page_elements(
-                    last_element_type, last_element_attrs,
-                    self.node_types[element[0]], this_element_attrs,
-                    link_attrs))
-
-            last_element_attrs = this_element_attrs
-            last_element_type = self.node_types[element[0]]
 
 
 class UserProfileConsumer(ABC):

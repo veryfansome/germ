@@ -20,7 +20,7 @@ import traceback
 from bot.api.models import ChatMessage, ChatSessionSummary, SqlRequest
 from bot.chat.controller import ChatController
 from bot.chat.openai_beta import AssistantHelper
-from bot.chat.openai_handlers import ChatRoutingEventHandler, ResponseGraphingHandler, UserProfilingHandler
+from bot.chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
 from bot.db.models import DATABASE_URL, SessionLocal, engine
 from bot.db.neo4j import AsyncNeo4jDriver
 from bot.db.utils import db_stats_job
@@ -65,14 +65,10 @@ async def lifespan(app: FastAPI):
     """
 
     # Graph controllers
-    response_grapher = ResponseGraphingHandler(control_plane)
-    websocket_manager.add_send_event_handler(response_grapher)
-
     english_controller = EnglishController(control_plane)
     control_plane.add_code_block_merge_event_handler(english_controller)
     control_plane.add_paragraph_merge_event_handler(english_controller)
     control_plane.add_sentence_merge_event_handler(english_controller)
-
     await control_plane.initialize()
 
     assistant_helper = AssistantHelper()
@@ -82,44 +78,46 @@ async def lifespan(app: FastAPI):
     scheduler.scheduled_job(assistant_helper.refresh_files, "interval", minutes=5)
 
     router = ChatRoutingEventHandler(assistant_helper=assistant_helper)
-    chat_controller = ChatController(router)
+    chat_controller = ChatController(control_plane, router)
+
     websocket_manager.add_receive_event_handler(chat_controller)
+    websocket_manager.add_send_event_handler(chat_controller)
 
-    if openai_settings.REASONING_MODEL:
-        # TODO:
-        #  - try using a basic sentiment classifier instead
-        #  - try using a simpler UI based approach
-        rejection_profiler = UserProfilingHandler(
-            control_plane,
-            {
-                "outcome": {
-                    "type": "string",
-                    "description": ("\"None\", if user's first message. "
-                                    "\"User accepted\", if the assistant replied and the user is not criticizing "
-                                    "or contesting the assistant's responses. "
-                                    "\"User rejected\", if the user is criticizing, contesting, or seems otherwise  "
-                                    "dissatisfied with the assistant's responses."),
-                    "enum": ["None", "User accepted", "User rejected"]
-                },
-            },
-            model="o1",
-            tool_func_name="outcome_handler",
-            tool_func_description="Handles outcomes of user interactions.",
-            tool_parameter_description="Object containing an interaction's outcome classification.",
-        )
-        websocket_manager.add_receive_event_handler(rejection_profiler)
+    #if openai_settings.REASONING_MODEL:
+    #    # TODO:
+    #    #  - try using a basic sentiment classifier instead
+    #    #  - try using a simpler UI based approach
+    #    rejection_profiler = UserProfilingHandler(
+    #        control_plane,
+    #        {
+    #            "outcome": {
+    #                "type": "string",
+    #                "description": ("\"None\", if user's first message. "
+    #                                "\"User accepted\", if the assistant replied and the user is not criticizing "
+    #                                "or contesting the assistant's responses. "
+    #                                "\"User rejected\", if the user is criticizing, contesting, or seems otherwise  "
+    #                                "dissatisfied with the assistant's responses."),
+    #                "enum": ["None", "User accepted", "User rejected"]
+    #            },
+    #        },
+    #        model="o1",
+    #        tool_func_name="outcome_handler",
+    #        tool_func_description="Handles outcomes of user interactions.",
+    #        tool_parameter_description="Object containing an interaction's outcome classification.",
+    #    )
+    #    websocket_manager.add_receive_event_handler(rejection_profiler)
 
-    user_intent_profiler = UserProfilingHandler(
-        control_plane,
-        {
-            "intent": {
-                "type": "string",
-                "description": "A statement beginning with \"The User \", describing what the User wants.",
-            },
-        },
-        post_func=lambda intent: intent if intent.startswith("The User") else f"The User {intent}"  # Needed sometimes
-    )
-    websocket_manager.add_receive_event_handler(user_intent_profiler)
+    #user_intent_profiler = UserProfilingHandler(
+    #    control_plane,
+    #    {
+    #        "intent": {
+    #            "type": "string",
+    #            "description": "A statement beginning with \"The User \", describing what the User wants.",
+    #        },
+    #    },
+    #    post_func=lambda intent: intent if intent.startswith("The User") else f"The User {intent}"  # Needed sometimes
+    #)
+    #websocket_manager.add_receive_event_handler(user_intent_profiler)
 
     # DB stats
     await db_stats_job()  # Warms up DB connections on startup

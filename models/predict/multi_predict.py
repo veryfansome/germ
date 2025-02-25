@@ -17,7 +17,6 @@ class MultiHeadPredictor:
         self.model.to(self.device)
         self.model.eval()
 
-
     def predict(self, text: str):
         """
         Perform multi-headed token classification on a single piece of text.
