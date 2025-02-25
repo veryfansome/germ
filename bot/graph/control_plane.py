@@ -98,7 +98,7 @@ class ControlPlane:
         logger.info(f"session: {results}")
         return results
 
-    async def add_code_block(self, code_block: str, language: str = None):
+    async def add_code_block(self, code_block: str, code_block_attrs):
         code_block = code_block.strip()
         # Generate signature for lookup in PostgreSQL
         code_block_signature = uuid.uuid5(UUID5_NS, code_block)
@@ -118,34 +118,26 @@ class ControlPlane:
                     # Execute the insert and fetch the returned values
                     rdb_record = (await rdb_session.execute(sql_insert_stmt)).first()
 
-        graph_results = await self.driver.query("""
-        MERGE (code_block:CodeBlock {text: $text, language: $language, code_block_id: $code_block_id})
-        RETURN code_block
+        code_block_attrs_expr = ", ".join([f"{k}: ${k}" for k in code_block_attrs.keys()])
+        graph_results = await self.driver.query(f"""
+        MERGE (block:CodeBlock {{text: $text, code_block_id: $code_block_id, {code_block_attrs_expr}}})
+        RETURN block
         """, {
             "text": code_block,
-            "language": language,
             "code_block_id": rdb_record.text_block_id,
+            **code_block_attrs
         })
-        logger.info(f"code block: {graph_results}")
         async_tasks = []
-        for handler in self.code_block_merge_event_handlers:
-            async_tasks.append(asyncio.create_task(
-                handler.on_code_block_merge(code_block, rdb_record.text_block_id)))
+        if graph_results:
+            result_sig = ", ".join([f"{k}: {v}" for k, v in graph_results[0]['block'].items() if k.endswith("_id")])
+            logger.info(f"MERGE (block:CodeBlock {{{result_sig}}}")
+            for handler in self.code_block_merge_event_handlers:
+                async_tasks.append(asyncio.create_task(
+                    handler.on_code_block_merge(code_block, rdb_record.text_block_id)))
         return graph_results, rdb_record.text_block_id, async_tasks
 
     def add_code_block_merge_event_handler(self, handler: CodeBlockMergeEventHandler):
         self.code_block_merge_event_handlers.append(handler)
-
-    async def add_header(self, header: str):
-        header = header.strip()
-        results = await self.driver.query("""
-        MERGE (header:Header {text: $text})
-        RETURN header
-        """, {
-            "text": header
-        })
-        logger.info(f"header: {results}")
-        return results
 
     async def add_hyperlink(self, html_tag: str, url: str):
         results = await self.driver.query("""
@@ -154,7 +146,7 @@ class ControlPlane:
         """, {
             "html_tag": html_tag, "url": url,
         })
-        logger.info(f"header: {results}")
+        logger.info(f"hyperlink: {results}")
         return results
 
     async def add_noun_form(self, noun: str, form: str):
@@ -180,7 +172,7 @@ class ControlPlane:
         logger.info(f"noun: {noun_record}")
         return noun_record
 
-    async def add_paragraph(self, paragraph: str):
+    async def add_paragraph(self, paragraph: str, paragraph_attrs):
         paragraph = paragraph.strip()
         # Generate signature for lookup in PostgreSQL
         paragraph_signature = uuid.uuid5(UUID5_NS, paragraph)
@@ -200,18 +192,22 @@ class ControlPlane:
                     # Execute the insert and fetch the returned values
                     rdb_record = (await rdb_session.execute(sql_insert_stmt)).first()
 
-        graph_results = await self.driver.query("""
-        MERGE (paragraph:Paragraph {text: $text, paragraph_id: $paragraph_id})
+        paragraph_attrs_expr = ", ".join([f"{k}: ${k}" for k in paragraph_attrs.keys()])
+        graph_results = await self.driver.query(f"""
+        MERGE (paragraph:Paragraph {{text: $text, paragraph_id: $paragraph_id, {paragraph_attrs_expr}}})
         RETURN paragraph
         """, {
             "text": paragraph,
             "paragraph_id": rdb_record.text_block_id,
+            **paragraph_attrs,
         })
-        logger.info(f"paragraph: {graph_results}")
         async_tasks = []
-        for handler in self.paragraph_merge_event_handlers:
-            async_tasks.append(asyncio.create_task(
-                handler.on_paragraph_merge(paragraph, rdb_record.text_block_id)))
+        if graph_results:
+            result_sig = ", ".join([f"{k}: {v}" for k, v in graph_results[0]['paragraph'].items() if k.endswith("_id")])
+            logger.info(f"MERGE (paragraph:Paragraph {{{result_sig}}}")
+            for handler in self.paragraph_merge_event_handlers:
+                async_tasks.append(asyncio.create_task(
+                    handler.on_paragraph_merge(paragraph, rdb_record.text_block_id)))
         return graph_results, rdb_record.text_block_id, async_tasks
 
     def add_paragraph_merge_event_handler(self, handler: ParagraphMergeEventHandler):
@@ -399,18 +395,40 @@ class ControlPlane:
         logger.info(f"noun type link: {semantic_category_link_record}")
         return semantic_category_link_record
 
+    async def link_page_element_to_chat_request(self, element_type: str, element_attrs,
+                                                chat_request_received_id: int):
+        element_attrs_expr = ", ".join([f"{k}: ${k}" for k in element_attrs.keys()])
+        results = await self.driver.query(f"""
+        MATCH (element:{element_type} {{{element_attrs_expr}}}), (req:ChatRequest {{chat_request_received_id: $chat_request_received_id}})
+        MERGE (req)-[r:CONTAINS]->(element)
+        RETURN element,r
+        """, {
+            "chat_request_received_id": chat_request_received_id,
+            **element_attrs,
+        })
+        if results:
+            result_sig = ", ".join([f"{k}: {v}" for k, v in results[0]['element'].items() if k.endswith("_id")])
+            logger.info("MERGE "
+                        f"(req:ChatRequest {{chat_request_received_id: {chat_request_received_id}}})-[r:CONTAINS]->"
+                        f"(element:{element_type} {{{result_sig}}})")
+        return results
+
     async def link_page_element_to_chat_response(self, element_type: str, element_attrs,
                                                  chat_response_sent_id: int):
         element_attrs_expr = ", ".join([f"{k}: ${k}" for k in element_attrs.keys()])
         results = await self.driver.query(f"""
         MATCH (element:{element_type} {{{element_attrs_expr}}}), (resp:ChatResponse {{chat_response_sent_id: $chat_response_sent_id}})
         MERGE (resp)-[r:CONTAINS]->(element)
-        RETURN r
+        RETURN element,r
         """, {
             "chat_response_sent_id": chat_response_sent_id,
             **element_attrs,
         })
-        logger.info(f"element/response link: {results}")
+        if results:
+            result_sig = ", ".join([f"{k}: {v}" for k, v in results[0]['element'].items() if k.endswith("_id")])
+            logger.info("MERGE "
+                        f"(req:ChatResponse {{chat_response_sent_id: {chat_response_sent_id}}})-[r:CONTAINS]->"
+                        f"(element:{element_type} {{{result_sig}}})")
         return results
 
     async def link_paragraph_to_sentence(self, paragraph_id: int, sentence_id: int):
@@ -478,13 +496,19 @@ class ControlPlane:
         results = await self.driver.query(f"""
         MATCH (predecessor:{predecessor_type} {{{predecessor_attrs_expr}}}), (successor:{successor_type} {{{successor_attrs_expr}}})
         MERGE (predecessor)-[r:PRECEDES {{{link_attrs_expr}}}]->(successor)
-        RETURN r
+        RETURN predecessor,r,successor
         """, {
             **link_attrs,
             **{f"predecessor_{k}": v for k, v in predecessor_attrs.items()},
             **{f"successor_{k}": v for k, v in successor_attrs.items()},
         })
-        logger.info(f"successive element link: {results}")
+        if results:
+            predecessor_sig = ", ".join([f"{k}: {v}" for k, v in results[0]['predecessor'].items() if k.endswith("_id")])
+            successor_sig = ", ".join([f"{k}: {v}" for k, v in results[0]['successor'].items() if k.endswith("_id")])
+            logger.info("MERGE "
+                        f"(predecessor:{predecessor_type} {{{predecessor_sig}}})"
+                        "-[r:PRECEDES]->"
+                        f"(successor:{successor_type} {{{successor_sig}}})")
         return results
 
     def signal_handler(self, sig, frame):

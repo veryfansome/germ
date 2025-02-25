@@ -1,19 +1,25 @@
 from starlette.concurrency import run_in_threadpool
-import aiohttp
 import asyncio
 import logging
 
-from bot.api.models import ChatRequest, TextPayload
+from bot.api.models import ChatRequest, ChatResponse
+from bot.graph.control_plane import ControlPlane
 from bot.lang.parsers import extract_markdown_page_elements
-from bot.websocket import WebSocketReceiveEventHandler, WebSocketSender
+from bot.websocket import WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender
 from observability.annotations import measure_exec_seconds
 
 logger = logging.getLogger(__name__)
 
 
-class ChatController(WebSocketReceiveEventHandler):
+class ChatController(WebSocketReceiveEventHandler, WebSocketSendEventHandler):
 
-    def __init__(self, remote: WebSocketReceiveEventHandler):
+    def __init__(self, control_plane: ControlPlane, remote: WebSocketReceiveEventHandler):
+        self.control_plane = control_plane
+        self.node_types = {
+            "block_code": "CodeBlock",
+            "list_item": "Sentence",
+            "paragraph": "Paragraph",
+        }
         self.remote = remote
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
@@ -26,16 +32,126 @@ class ChatController(WebSocketReceiveEventHandler):
         #  - implement local completions
         #  - maybe even user profiling should be moved here...
         elements = await run_in_threadpool(extract_markdown_page_elements, chat_request.messages[-1].content)
-        for element in elements:
-            if element[0] == "paragraph":
-                async with aiohttp.ClientSession() as session:
-                    async with session.post("http://germ-models:9000/text/classification",
-                                            json={"text": element[1]}) as response:
-                        data = await response.json()
-                        logger.info("token classifications:\n" + (
-                            "\n".join([f"{head}\t{labels}" for head, labels in data.items()])))
-            else:
-                logger.info(f"ignored element type: {element[0]}")
-                continue
-
+        await self.process_markdown_element(
+            elements,
+            self.control_plane.link_page_element_to_chat_request, [chat_request_received_id],
+            {
+                "chat_request_received_id": chat_request_received_id,
+                "chat_session_id": chat_session_id,
+            })
         await remote_response_task
+
+    async def on_send(self,
+                      chat_response_sent_id: int,
+                      chat_response: ChatResponse,
+                      chat_session_id: int,
+                      chat_request_received_id: int = None):
+        elements = await run_in_threadpool(extract_markdown_page_elements, chat_response.content)
+        await self.process_markdown_element(
+            elements,
+            self.control_plane.link_page_element_to_chat_response, [chat_response_sent_id],
+            {
+                "chat_request_received_id": chat_request_received_id,
+                "chat_response_sent_id": chat_response_sent_id,
+                "chat_session_id": chat_session_id,
+            })
+
+    async def process_markdown_element(self, markdown_elements,
+                                       element_link_func, element_link_func_args,
+                                       session_attrs):
+        async_tasks = []
+        h1 = None
+        h2 = None
+        h3 = None
+        h4 = None
+        h5 = None
+        h6 = None
+        last_element_type = None
+        last_element_attrs = None
+        list_num = 0
+        list_type = None
+        for element in markdown_elements:
+            logger.debug(f"markdown element: {element}")
+            merged_element_attrs = {
+                **session_attrs,
+                "h1": str(h1),
+                "h2": str(h2),
+                "h3": str(h3),
+                "h4": str(h4),
+                "h5": str(h5),
+                "h6": str(h6),
+            }
+
+            if element[0] == "list":
+                list_type = "ol" if element[1] is True else "ul"
+                continue
+            elif element[0] == "list_item":
+                list_num += 1
+                list_marker = f"{list_num}." if list_type == "ol" else "•"
+                _, sentence_id, sentence_tasks = await self.control_plane.add_sentence(f"{list_marker} {element[1]}")
+                this_element_attrs = {"sentence_id": sentence_id}
+            else:
+                list_num = 0
+                list_type = None
+
+                # `paragraph` and `code_block` are ordered at the top for frequency
+                if element[0] == "paragraph":
+                    _, paragraph_id, paragraph_tasks = await self.control_plane.add_paragraph(
+                        element[1], merged_element_attrs)
+                    async_tasks.extend(paragraph_tasks)
+                    this_element_attrs = {"paragraph_id": paragraph_id}
+                elif element[0] == "block_code":
+                    _, code_block_id, code_block_tasks = await self.control_plane.add_code_block(
+                        element[2], {"language": str(element[1]), **merged_element_attrs})
+                    async_tasks.extend(code_block_tasks)
+                    this_element_attrs = {"code_block_id": code_block_id}
+                elif element[0] == "heading":
+                    if element[1] == 1:
+                        h1 = element[2]
+                        h2 = None
+                        h3 = None
+                        h4 = None
+                        h5 = None
+                        h6 = None
+                    elif element[1] == 2:
+                        h2 = element[2]
+                        h3 = None
+                        h4 = None
+                        h5 = None
+                        h6 = None
+                    elif element[1] == 3:
+                        h3 = element[2]
+                        h4 = None
+                        h5 = None
+                        h6 = None
+                    elif element[1] == 4:
+                        h4 = element[2]
+                        h5 = None
+                        h6 = None
+                    elif element[1] == 5:
+                        h5 = element[2]
+                        h6 = None
+                    elif element[1] == 6:
+                        h6 = element[2]
+                    this_element_attrs = None
+                else:
+                    # NOTE: text_block duplicates list_item
+                    logger.info(f"unsupported element type: {element}")
+                    continue
+
+            if this_element_attrs:
+                async_tasks.append(
+                    asyncio.create_task(element_link_func(
+                        self.node_types[element[0]], this_element_attrs, *element_link_func_args))
+                )
+                if last_element_type is not None and last_element_attrs is not None:
+                    async_tasks.append(
+                        asyncio.create_task(self.control_plane.link_successive_page_elements(
+                            last_element_type, last_element_attrs,
+                            self.node_types[element[0]], this_element_attrs,
+                            session_attrs))
+                    )
+
+                last_element_attrs = this_element_attrs
+                last_element_type = self.node_types[element[0]]
+        await asyncio.gather(*async_tasks)

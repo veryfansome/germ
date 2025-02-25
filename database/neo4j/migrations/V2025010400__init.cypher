@@ -19,8 +19,6 @@ CREATE CONSTRAINT     FOR (document:Document)                  REQUIRE document.
 CREATE CONSTRAINT     FOR (domainName:DomainName)              REQUIRE domainName.name                       IS UNIQUE;
 //
 CREATE CONSTRAINT     FOR (domainName:DomainName)              REQUIRE domainName.proper_noun                IS UNIQUE;
-//
-CREATE CONSTRAINT     FOR (header:Header)                      REQUIRE header.text                           IS UNIQUE;
 // Corresponds with NN, singular noun
 CREATE CONSTRAINT     FOR (noun:Noun)                          REQUIRE noun.text                             IS UNIQUE;
 //

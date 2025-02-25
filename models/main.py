@@ -9,6 +9,7 @@ import os
 
 from bot.api.models import TextPayload
 from models.predict.multi_predict import MultiHeadPredictor
+from models.utils import sp_tokenize
 from observability.logging import logging, setup_logging
 from observability.tracing import setup_tracing
 
@@ -73,3 +74,8 @@ async def get_metrics():
 @model_service.post("/text/classification")
 async def post_text_classification(payload: TextPayload):
     return await run_in_threadpool(text_token_classifier.predict, payload.text)
+
+
+@model_service.post("/text/tokenize/sp")
+async def post_text_classification(payload: TextPayload):
+    return await run_in_threadpool(sp_tokenize, payload.text)
