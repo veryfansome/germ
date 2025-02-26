@@ -212,6 +212,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                 await ws_sender.return_chat_response(
                     chat_request_received_id,
                     ChatResponse(complete=True, content="Sorry, I'm unable to access my language model."))
+                return
             elif completion.choices[0].message.content is None:
                 if completion.choices[0].message.tool_calls is not None:
                     tool_response_tasks = []

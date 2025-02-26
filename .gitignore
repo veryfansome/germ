@@ -5,11 +5,12 @@
 .coverage
 .env
 .idea/
+.venv/
 __pycache__/
 
 bot/static/tests/report.xml
 bot/static/tests/cov/
-
+data/germ/multi_head_examples/
 venv/
 germ_venv/
 

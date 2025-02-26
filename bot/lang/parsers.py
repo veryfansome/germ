@@ -248,6 +248,8 @@ async def strip_html_elements(soup: BeautifulSoup, tag: str = None):
                 element_artifacts += inner_artifacts
         else:  # Doesn't have inner elements
             logger.info(f"stripped <{element.name}>, kept inner string: {element.string}")
+            #if element.name == "code":  # Translate back to backticks, which the token classifier knows
+            #    element.string = f"`{element.string}`"
         text_elements[idx] = element.string if element.string else ""
     return ''.join(text_elements), element_artifacts
 
