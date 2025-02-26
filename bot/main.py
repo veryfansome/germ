@@ -8,6 +8,7 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 from typing import List
 import aiofiles
@@ -70,6 +71,10 @@ async def lifespan(app: FastAPI):
     control_plane.add_paragraph_merge_event_handler(english_controller)
     control_plane.add_sentence_merge_event_handler(english_controller)
     await control_plane.initialize()
+    scheduler.add_job(english_controller.label_sentences_periodically, "interval",
+                      seconds=english_controller.interval_seconds)
+    scheduler.add_job(english_controller.dump_multi_head_exps, "interval",
+                      minutes=10)
 
     assistant_helper = AssistantHelper()
     await assistant_helper.refresh_assistants()
@@ -121,6 +126,7 @@ async def lifespan(app: FastAPI):
 
     # DB stats
     await db_stats_job()  # Warms up DB connections on startup
+    scheduler.add_job(db_stats_job, "interval", minutes=5)
 
     # Scheduler
     scheduler.start()
@@ -130,6 +136,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Stopping
+    await run_in_threadpool(english_controller.dump_multi_head_exps)
+
     websocket_manager_disconnect_task = asyncio.create_task(websocket_manager.disconnect_all())
     await assistant_helper.no_loose_files()
     await assistant_helper.no_loose_threads()

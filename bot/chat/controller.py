@@ -17,7 +17,7 @@ class ChatController(WebSocketReceiveEventHandler, WebSocketSendEventHandler):
         self.control_plane = control_plane
         self.node_types = {
             "block_code": "CodeBlock",
-            "list_item": "Sentence",
+            "list": "Paragraph",
             "paragraph": "Paragraph",
         }
         self.remote = remote
@@ -68,7 +68,7 @@ class ChatController(WebSocketReceiveEventHandler, WebSocketSendEventHandler):
         h6 = None
         last_element_type = None
         last_element_attrs = None
-        list_num = 0
+        list_elements = []
         list_type = None
         for element in markdown_elements:
             logger.debug(f"markdown element: {element}")
@@ -80,18 +80,28 @@ class ChatController(WebSocketReceiveEventHandler, WebSocketSendEventHandler):
                 "h4": str(h4),
                 "h5": str(h5),
                 "h6": str(h6),
+                "list_size": 0,
+                "list_type": str(list_type),
             }
 
-            if element[0] == "list":
-                list_type = "ol" if element[1] is True else "ul"
+            if element[0] == "block_text":
+                # NOTE: block_text duplicates list_item
                 continue
             elif element[0] == "list_item":
-                list_num += 1
-                list_marker = f"{list_num}." if list_type == "ol" else "•"
-                _, sentence_id, sentence_tasks = await self.control_plane.add_sentence(f"{list_marker} {element[1]}")
-                this_element_attrs = {"sentence_id": sentence_id}
+                list_elements.append(element[1])
+                continue
+            elif element[0] == "list":
+                list_type = "ul" if element[1] is False else "ol"
+                # Store as paragraph
+                _, paragraph_id, paragraph_tasks = await self.control_plane.add_paragraph(
+                    "\n".join([(f"• {e}" if list_type == 'ul' else f"{i+1}. {e}") for i, e in enumerate(list_elements)]),
+                    {**merged_element_attrs, "list_size": len(list_elements), "list_type": list_type})
+                async_tasks.extend(paragraph_tasks)
+                this_element_attrs = {"paragraph_id": paragraph_id}
+                list_elements = []
+                list_type = None
             else:
-                list_num = 0
+                list_elements = []
                 list_type = None
 
                 # `paragraph` and `code_block` are ordered at the top for frequency
@@ -135,7 +145,6 @@ class ChatController(WebSocketReceiveEventHandler, WebSocketSendEventHandler):
                         h6 = element[2]
                     this_element_attrs = None
                 else:
-                    # NOTE: text_block duplicates list_item
                     logger.info(f"unsupported element type: {element}")
                     continue
 

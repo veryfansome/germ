@@ -2,7 +2,7 @@ from transformers import DebertaV2TokenizerFast
 import torch
 
 from models.predict.multi_head_model import MultiHeadModel
-from models.utils import get_torch_device, sp_tokenize
+from models.utils import get_torch_device
 
 
 class MultiHeadPredictor:
@@ -25,7 +25,7 @@ class MultiHeadPredictor:
 
         :return: A dict with {head_name: [predicted_label_for_each_token]} for the tokens in `text`.
         """
-        raw_tokens = sp_tokenize(text)
+        raw_tokens = text.split()
 
         # We'll do a single-example batch to replicate training chunk logic.
         # is_split_into_words=True => we pass a list of tokens, not a single string.
