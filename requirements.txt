@@ -10,6 +10,7 @@ google-cloud-storage
 gunicorn
 httpx
 huggingface_hub
+inflect
 lxml
 mistune
 neo4j

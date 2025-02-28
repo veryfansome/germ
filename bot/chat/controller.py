@@ -73,14 +73,13 @@ class ChatController(WebSocketReceiveEventHandler, WebSocketSendEventHandler):
         for element in markdown_elements:
             logger.debug(f"markdown element: {element}")
             merged_element_attrs = {
-                **session_attrs,
+                #**session_attrs,
                 "h1": str(h1),
                 "h2": str(h2),
                 "h3": str(h3),
                 "h4": str(h4),
                 "h5": str(h5),
                 "h6": str(h6),
-                "list_size": 0,
                 "list_type": str(list_type),
             }
 
