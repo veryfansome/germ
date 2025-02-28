@@ -3,6 +3,7 @@ from datetime import datetime
 from starlette.concurrency import run_in_threadpool
 import aiohttp
 import asyncio
+import inflect
 import os
 import re
 
@@ -13,13 +14,36 @@ from settings import germ_settings
 
 logger = logging.getLogger(__name__)
 
-naive_sentence_end_pattern = re.compile(r'\S+\s+\S+([\n\r]+|[.!?]+(?=\s|$))')
+infect_eng = inflect.engine()
+
+naive_sentence_end_pattern = re.compile(r"\S+\s+\S+([\n\r]+"
+                                        r"|[!?]+(?=\s|$)"
+                                        r"|(?<!Apt)"
+                                        r"(?<!Blvd)"
+                                        r"(?<!Dr)"
+                                        r"(?<!Jr)"
+                                        r"(?<!Mr)"
+                                        r"(?<!Mrs)"
+                                        r"(?<!Ms)"
+                                        r"(?<!Ph\.D)"
+                                        r"(?<!Rd)"
+                                        r"(?<!Sr)"
+                                        r"(?<!e\.g)"
+                                        r"(?<!etc)"
+                                        r"(?<!i\.e)"
+                                        r"(?<![A-Z])"
+                                        r"\.+(?=\s|$))")
+#   \S+\s+\S+  - Very tolerant matching for word-space-word, which avoids matching list items like 1. or a.
 # Option 1:
 #   [\n\r]+    - Match consecutive newline and carriage returns
 # Option 2:
-#   \S+\s+\S+  - Very tolerant matching for word-space-word, which avoids matching list items like 1. or a.
-#   [.!?]+     - Match . or ! or ?
+#   [!?]+      - Match ! or ?
 #   (?=\s|$)   - Must be followed by \s or end-of-string, to avoid things like decimals and IP addresses
+# Option 3:
+#   \.+        - Match .
+#   (?=\s|$)   - Must be followed by \s or end-of-string, to avoid things like decimals and IP addresses
+
+non_word_beginning_and_end_pattern = re.compile(r"(^\W+|\W+$)")  # TODO: currently too aggressive
 
 
 class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler):
@@ -58,71 +82,51 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
             sentence, sentence_id, sentence_parameters = sentence_args
             multi_head_labels = await get_token_classifications(sentence)
             self.labeled_multi_head_exps.append(multi_head_labels)
-            logger.info(f"on_periodic_run: sentence_id={sentence_id}\nopenai={sentence_parameters}\n" + (
+            logger.info(f"on_periodic_run: sentence_id={sentence_id}\nattrs\t{sentence_parameters}\n" + (
                 "\n".join([f"{head}\t{labels}" for head, labels in multi_head_labels.items()])))
 
-            add_positions = extract_label_idx_groups(
-                multi_head_labels["misc"], {"ADD"})
-            logger.info(f"add positions: {idx_group_to_labels(add_positions, multi_head_labels)}")
+            last_comma_idx = None
+            last_noun = None
+            last_noun_idx = None
+            last_period_idx = None
+            last_verb = None
+            last_verb_idx = None
+            for idx in range(len(multi_head_labels["tokens"])):
+                token = multi_head_labels["tokens"][idx]
+                adj_label = multi_head_labels["adj"][idx]
+                adv_label = multi_head_labels["adv"][idx]
+                det_label = multi_head_labels["det"][idx]
+                enc_label = multi_head_labels["enc"][idx]
+                func_label = multi_head_labels["func"][idx]
+                misc_label = multi_head_labels["misc"][idx]
+                ner1_label = multi_head_labels["ner1"][idx]
+                ner2_label = multi_head_labels["ner2"][idx]
+                noun_label = multi_head_labels["noun"][idx]
+                pronoun_label = multi_head_labels["pronoun"][idx]
+                punct_label = multi_head_labels["punct"][idx]
+                verb_label = multi_head_labels["verb"][idx]
+                wh_label = multi_head_labels["wh"][idx]
 
-            cd_positions = extract_label_idx_groups(
-                multi_head_labels["misc"], {"CD"})
-            logger.info(f"cd positions: {idx_group_to_labels(cd_positions, multi_head_labels)}")
+                last_idx = idx - 1
 
-            det_positions = extract_label_idx_groups(
-                multi_head_labels["det"], {"DT", "PDT"})
-            logger.info(f"determiner positions: {idx_group_to_labels(det_positions, multi_head_labels)}")
-            # DT NN .. determiner right before noun
-
-            event_positions = extract_label_idx_groups(
-                multi_head_labels["ner2"], {"B-EVENT", "I-EVENT"})
-            logger.info(f"event positions: {idx_group_to_labels(event_positions, multi_head_labels)}")
-
-            func_positions = extract_label_idx_groups(
-                multi_head_labels["func"], {"CC", "IN", "RP", "TO"})
-            logger.info(f"func positions: {idx_group_to_labels(func_positions, multi_head_labels)}")
-
-            loc_positions = extract_label_idx_groups(
-                multi_head_labels["ner2"], {"B-LOC", "I-LOC"})
-            logger.info(f"loc positions: {idx_group_to_labels(loc_positions, multi_head_labels)}")
-
-            noun_positions = extract_label_idx_groups(
-                multi_head_labels["noun"], {"NN", "NNS", "NNP", "NNPS"})
-            logger.info(f"noun positions: {idx_group_to_labels(noun_positions, multi_head_labels)}")
-
-            org_positions = extract_label_idx_groups(
-                multi_head_labels["ner1"], {"B-ORG", "I-ORG"})
-            logger.info(f"org positions: {idx_group_to_labels(org_positions, multi_head_labels)}")
-
-            person_positions = extract_label_idx_groups(
-                multi_head_labels["ner1"], {"B-PER", "I-PER"})
-            logger.info(f"person positions: {idx_group_to_labels(person_positions, multi_head_labels)}")
-
-            pronoun_positions = extract_label_idx_groups(
-                multi_head_labels["pronoun"], {"POS", "PRP$", "PRP"})
-            logger.info(f"pronoun positions: {idx_group_to_labels(pronoun_positions, multi_head_labels)}")
-
-            quest_positions = extract_label_idx_groups(
-                multi_head_labels["punct"], {"QUESTION"})
-            logger.info(f"question mark positions: {idx_group_to_labels(quest_positions, multi_head_labels)}")
-
-            modal_positions = extract_label_idx_groups(
-                multi_head_labels["verb"], {"MD"})
-            logger.info(f"modal positions: {idx_group_to_labels(modal_positions, multi_head_labels)}")
-
-            time_positions = extract_label_idx_groups(
-                multi_head_labels["misc"], {"TIME"})
-            logger.info(f"time positions: {idx_group_to_labels(time_positions, multi_head_labels)}")
-
-            verb_positions = extract_label_idx_groups(
-                multi_head_labels["verb"], {"VB", "VBD", "VBG", "VBN", "VBP", "VBZ"})
-            logger.info(f"verb positions: {idx_group_to_labels(verb_positions, multi_head_labels)}")
-            # ^VB PRP ... might be an imperative if PRP is me?
-
-            wh_positions = extract_label_idx_groups(
-                multi_head_labels["wh"], {"WDT", "WP$", "WP", "WRB"})
-            logger.info(f"wh positions: {idx_group_to_labels(wh_positions, multi_head_labels)}")
-            # might be interrogative
+                if noun_label in {"NN", "NNS", "NNP", "NNPS"}:
+                    token = non_word_beginning_and_end_pattern.sub("", token)
+                    if noun_label == "NN":
+                        noun_base_form = token
+                    elif noun_label == "NNS":
+                        noun_base_form = infect_eng.singular_noun(token)
+                    elif noun_label == "NNP":
+                        noun_base_form = token.capitalize()
+                    elif noun_label == "NNPS":
+                        noun_base_form = infect_eng.singular_noun(token.capitalize())
+                    if noun_base_form:
+                        await self.control_plane.add_noun_form(noun_base_form, token)
+                        await self.control_plane.link_noun_form_to_sentence(
+                            noun_base_form, token, noun_label, sentence_id)
+                        if last_noun_idx == last_idx and not last_noun.endswith(","):
+                            await self.control_plane.link_successive_nouns(last_noun, noun_base_form)
+                        last_noun = noun_base_form
+                        last_noun_idx = idx
 
     async def on_code_block_merge(self, code_block: str, code_block_id: int):
         logger.info(f"on_code_block_merge: code_block_id={code_block_id}, {code_block}")
@@ -162,7 +166,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
             if previous_sentence_id is not None:
                 async_tasks.append(
                     asyncio.create_task(
-                        self.control_plane.link_sentence_to_previous_sentence(previous_sentence_id, sentence_id)))
+                        self.control_plane.link_successive_sentence(previous_sentence_id, sentence_id)))
             previous_sentence_id = sentence_id
 
             if sentence_end_match:

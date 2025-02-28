@@ -317,20 +317,25 @@ class UserProfilingHandler(WebSocketReceiveEventHandler):
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         user_profile = await self.process_chat_request(chat_session_id, chat_request)
         processed_profile = {}
+        async_tasks = []
         for profile_name, profile_text in user_profile["profile"].items():
             if self.post_func:
                 profile_text = self.post_func(profile_text)
             processed_profile[profile_name] = profile_text
-            _, sentence_id, _ = await self.control_plane.add_sentence(profile_text)
-            _ = asyncio.create_task(
-                self.control_plane.link_reactive_sentence_to_chat_request(chat_request_received_id, sentence_id))
+            _, sentence_id, sentence_tasks = await self.control_plane.add_paragraph(profile_text, {})
+            async_tasks.extend(sentence_tasks)
+            async_tasks.append(asyncio.create_task(
+                self.control_plane.link_reactive_sentence_to_chat_request(chat_request_received_id, sentence_id)
+            ))
             # Get how many nodes are linked to session
             # If first node, create starts link
         user_profile["profile"] = processed_profile
         for consumer in self.consumers:
-            _ = asyncio.create_task(
+            async_tasks.append(asyncio.create_task(
                 consumer.on_new_user_profile(
-                    user_profile, chat_session_id, chat_request_received_id, chat_request, ws_sender))
+                    user_profile, chat_session_id, chat_request_received_id, chat_request, ws_sender)
+            ))
+        await asyncio.gather(*async_tasks)
 
     async def process_chat_request(self, chat_session_id: int, chat_request: ChatRequest):
         completion = await async_openai_client.chat.completions.create(

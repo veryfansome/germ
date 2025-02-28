@@ -3,12 +3,10 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import MetaData, Table, and_
 from sqlalchemy import insert as sql_insert
 from sqlalchemy.future import select as sql_select
-from starlette.concurrency import run_in_threadpool
 from typing import Optional
 import asyncio
 import uuid
 
-from bot.lang.classifiers import get_sentence_classifier
 from bot.db.models import AsyncSessionLocal, Sentence, engine
 from bot.db.neo4j import AsyncNeo4jDriver
 from observability.logging import logging
@@ -31,7 +29,7 @@ class ParagraphMergeEventHandler(ABC):
 
 class SentenceMergeEventHandler(ABC):
     @abstractmethod
-    async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_parameters):
+    async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_attrs):
         pass
 
 
@@ -118,6 +116,7 @@ class ControlPlane:
                     # Execute the insert and fetch the returned values
                     rdb_record = (await rdb_session.execute(sql_insert_stmt)).first()
 
+        code_block_attrs["time_occurred"] = round_time_now_down_to_nearst_interval()
         code_block_attrs_expr = ", ".join([f"{k}: ${k}" for k in code_block_attrs.keys()])
         graph_results = await self.driver.query(f"""
         MERGE (block:CodeBlock {{text: $text, code_block_id: $code_block_id, {code_block_attrs_expr}}})
@@ -163,15 +162,6 @@ class ControlPlane:
         logger.info(f"noun: {results}")
         return results
 
-    async def add_noun_plural_form(self, noun: str, plural: str):
-        noun_record = await self.driver.query("""
-        MATCH (noun:Noun {text: $noun})
-        SET noun.plural_forms = coalesce(noun.plural_forms, []) + [$plural]
-        RETURN noun
-        """, {"noun": noun, "plural": plural})
-        logger.info(f"noun: {noun_record}")
-        return noun_record
-
     async def add_paragraph(self, paragraph: str, paragraph_attrs):
         paragraph = paragraph.strip()
         # Generate signature for lookup in PostgreSQL
@@ -192,6 +182,7 @@ class ControlPlane:
                     # Execute the insert and fetch the returned values
                     rdb_record = (await rdb_session.execute(sql_insert_stmt)).first()
 
+        paragraph_attrs["time_occurred"] = round_time_now_down_to_nearst_interval()
         paragraph_attrs_expr = ", ".join([f"{k}: ${k}" for k in paragraph_attrs.keys()])
         graph_results = await self.driver.query(f"""
         MERGE (paragraph:Paragraph {{text: $text, paragraph_id: $paragraph_id, {paragraph_attrs_expr}}})
@@ -213,44 +204,12 @@ class ControlPlane:
     def add_paragraph_merge_event_handler(self, handler: ParagraphMergeEventHandler):
         self.paragraph_merge_event_handlers.append(handler)
 
-    async def add_part_of_speech(self, tag: str):
-        results = await self.driver.query("""
-        MERGE (pos:PartOfSpeech {tag: $tag})
-        RETURN pos
-        """, {
-            "tag": tag
-        })
-        logger.info(f"pos tag: {results}")
-        return results
-
-    async def add_proper_noun_form(self, proper_noun: str, form: str):
-        results = await self.driver.query("""
-        MERGE (properNoun:ProperNoun {text: $properNoun})
-        WITH properNoun
-        UNWIND (COALESCE(properNoun.forms, []) + [$form]) AS form
-        WITH properNoun, COLLECT(DISTINCT form) AS uniqueForms
-        SET properNoun.forms = uniqueForms
-        RETURN properNoun
-        """, {
-            "properNoun": proper_noun, "form": form
-        })
-        logger.info(f"proper noun: {results}")
-        return results
-
-    async def add_semantic_category(self, semantic_category: str):
-        semantic_category_record = await self.driver.query(
-            "MERGE (semanticCategory:SemanticCategory {text: $semanticCategory}) RETURN semanticCategory",
-            {"semanticCategory": semantic_category})
-        logger.info(f"semantic_category: {semantic_category_record}")
-        return semantic_category_record
-
     async def add_sentence(self, sentence: str):
         sentence = sentence.strip()
         # Generate signature for lookup in PostgreSQL
         sentence_signature = uuid.uuid5(UUID5_NS, sentence)
         async with (AsyncSessionLocal() as rdb_session):
             async with rdb_session.begin():
-
                 sentence_select_stmt = sql_select(Sentence).where(Sentence.sentence_signature == sentence_signature)
                 sentence_select_result = await rdb_session.execute(sentence_select_stmt)
                 rdb_record = sentence_select_result.scalars().first()
@@ -261,79 +220,26 @@ class ControlPlane:
                     rdb_session.add(rdb_record)
                     await rdb_session.commit()
 
-            # Get sentence type if not set
-            sentence_classifier = get_sentence_classifier()
-            if (rdb_record.sentence_openai_parameters is None
-                    or is_stale_or_over_fetch_count_threshold(
-                        rdb_record.sentence_openai_parameters_time_changed,
-                        rdb_record.sentence_openai_parameters_fetch_count,
-                        hours=24
-                    )):
-                openai_parameters = await run_in_threadpool(sentence_classifier.classify, sentence)
-                async with rdb_session.begin():
-                    await rdb_session.refresh(rdb_record)
-                    rdb_record.sentence_openai_parameters = openai_parameters
-                    rdb_record.sentence_openai_parameters_time_changed = utc_now()
-                    rdb_record.sentence_openai_parameters_fetch_count += 1
-                    await rdb_session.commit()
-            logger.debug(f"sentence openai_parameters: {rdb_record.sentence_openai_parameters}")
-
             # Merge sentence node
-            parameter_spec = sentence_classifier.tool_properties_spec
             graph_results = await self.driver.query(
-                ("MERGE (sentence:Sentence "
-                 + "{text: $text, sentence_id: $sentence_id, "
-                 + ", ".join([f"{k}: ${k}" for k in parameter_spec.keys()])
-                 + "}) RETURN sentence"),
+                "MERGE (sentence:Sentence {text: $text, sentence_id: $sentence_id}) RETURN sentence",
                 {
                     "text": sentence,
                     "sentence_id": rdb_record.sentence_id,
-                    **{k: rdb_record.sentence_openai_parameters[k] for k in parameter_spec.keys()},
                 })
             logger.info(f"sentence node: {graph_results}")
         async_tasks = []
         for handler in self.sentence_merge_event_handlers:
             async_tasks.append(asyncio.create_task(
                 handler.on_sentence_merge(
-                    sentence, rdb_record.sentence_id, rdb_record.sentence_openai_parameters)))
+                    sentence, rdb_record.sentence_id, {})))
         return graph_results, rdb_record.sentence_id, async_tasks
 
     def add_sentence_merge_event_handler(self, handler: SentenceMergeEventHandler):
         self.sentence_merge_event_handlers.append(handler)
 
-    async def add_time(self):
-        """
-        Time nodes are created in set intervals and changed together to match the directionality of real time.
-        The idea, here, is that every node created should be linked to its proper chunk of time. This provides a sense
-        of temporality.
-
-        :return:
-        """
-        current_rounded_time = round_time_now_down_to_nearst_interval()
-        current_time_record = await self.driver.query(
-            "MERGE (t:Time {text: $time}) RETURN t", {"time": str(current_rounded_time)})
-        logger.info(f"time: {current_time_record}")
-        last_rounded_time = current_rounded_time - timedelta(minutes=15)
-        time_record_links = await self.driver.query(
-            "MATCH (n:Time {text: $now}), (l:Time {text: $last}) "
-            "MERGE (n)-[rp:FOLLOWS]->(l) "
-            "MERGE (l)-[rf:PRECEDES]->(n) "
-            "RETURN rp, rf", {"now": str(current_rounded_time), "last": str(last_rounded_time)})
-        logger.debug(f"time links: {time_record_links}")
-        return current_rounded_time, current_time_record, time_record_links
-
     async def close(self):
-        await self.driver.close()
-
-    async def get_semantic_category_desc_by_connections(self):
-        # Get a random topic that is linked to two ideas that are not the same and not connected
-        semantic_category_results = await self.driver.query("""
-            MATCH (semanticCategory:SemanticCategory)
-            OPTIONAL MATCH ()-[r]->(semanticCategory)
-            RETURN semanticCategory, count(r) AS connections
-            ORDER by connections DESC
-            """)
-        return semantic_category_results
+        await self.driver.shutdown()
 
     async def link_chat_request_to_chat_session(self, chat_request_received_id: int, chat_session_id: int, time_occurred):
         results = await self.driver.query("""
@@ -385,16 +291,6 @@ class ControlPlane:
         logger.info(f"noun link: {results}")
         return results
 
-    async def link_noun_to_semantic_category(self, noun: str, semantic_category: str, sentence_id: int):
-        semantic_category_link_record = await self.driver.query(
-            "MATCH (noun:Noun {text: $noun}), (semanticCategory:SemanticCategory {text: $semanticCategory}) "
-            "MERGE (noun)-[r:TYPE_OF {sentence_id: $sentence_id}]->(semanticCategory) "
-            "RETURN r", {
-                "noun": noun, "semanticCategory": semantic_category, "sentence_id": sentence_id,
-            })
-        logger.info(f"noun type link: {semantic_category_link_record}")
-        return semantic_category_link_record
-
     async def link_page_element_to_chat_request(self, element_type: str, element_attrs,
                                                 chat_request_received_id: int):
         element_attrs_expr = ", ".join([f"{k}: ${k}" for k in element_attrs.keys()])
@@ -442,29 +338,6 @@ class ControlPlane:
         logger.info(f"sentence/paragraph link: {results}")
         return results
 
-    async def link_pos_tag_to_last_pos_tag(self, tag: str, tag_idx: int, last_tag: str, last_tag_idx: int, sentence_id: int):
-        results = await self.driver.query("""
-        MATCH (pos:PartOfSpeech {tag: $tag}), (lastPos:PartOfSpeech {tag: $last_tag})
-        MERGE (lastPos)-[r:PRECEDES {sentence_id: $sentence_id, predecessor_idx: $last_tag_idx, successor_idx: $tag_idx}]->(pos)
-        RETURN r
-        """, {
-            "tag": tag, "tag_idx": tag_idx, "last_tag": last_tag, "last_tag_idx": last_tag_idx,
-            "sentence_id": sentence_id,
-        })
-        logger.info(f"pos link: {results}")
-        return results
-
-    async def link_proper_noun_form_to_sentence(self, proper_noun: str, form: str, tag: str, sentence_id: int):
-        results = await self.driver.query(f"""
-        MATCH (properNoun:ProperNoun {{text: $properNoun}}), (sentence:Sentence {{sentence_id: $sentence_id}})
-        MERGE (sentence)-[r:{tag} {{form: $form, sentence_id: $sentence_id}}]->(properNoun)
-        RETURN r
-        """, {
-            "properNoun": proper_noun, "form": form, "sentence_id": sentence_id
-        })
-        logger.info(f"proper_noun link: {results}")
-        return results
-
     async def link_reactive_sentence_to_chat_request(self, chat_request_received_id: int, sentence_id: int):
         results = await self.driver.query("""
         MATCH (req:ChatRequest {chat_request_received_id: $chat_request_received_id}), (sentence:Sentence {sentence_id: $sentence_id})
@@ -476,16 +349,17 @@ class ControlPlane:
         logger.info(f"sentence/request link: {results}")
         return results
 
-    async def link_sentence_to_previous_sentence(self, previous_sentence_id: int, sentence_id: int):
+    async def link_successive_nouns(self, previous_noun: str, noun: str):
         results = await self.driver.query("""
-        MATCH (prev:Sentence {sentence_id: $previous_sentence_id}), (this:Sentence {sentence_id: $sentence_id})
+        MATCH (prev:Noun {text: $previous_noun}), (this:Noun {text: $noun})
         MERGE (prev)-[r:PRECEDES]->(this)
         RETURN r
         """, {
-            "previous_sentence_id": previous_sentence_id, "sentence_id": sentence_id,
+            "previous_noun": previous_noun, "noun": noun,
 
         })
-        logger.info(f"sentence/previous link: {results}")
+        if results:
+            logger.info(f"MERGE (prev:Noun {{text: {previous_noun}}})-[r:PRECEDES]->(this:Noun {{text: {noun}}})")
         return results
 
     async def link_successive_page_elements(self, predecessor_type: str, predecessor_attrs,
@@ -511,23 +385,20 @@ class ControlPlane:
                         f"(successor:{successor_type} {{{successor_sig}}})")
         return results
 
+    async def link_successive_sentence(self, previous_sentence_id: int, sentence_id: int):
+        results = await self.driver.query("""
+        MATCH (prev:Sentence {sentence_id: $previous_sentence_id}), (this:Sentence {sentence_id: $sentence_id})
+        MERGE (prev)-[r:PRECEDES]->(this)
+        RETURN r
+        """, {
+            "previous_sentence_id": previous_sentence_id, "sentence_id": sentence_id,
+
+        })
+        logger.info(f"sentence/previous link: {results}")
+        return results
+
     def signal_handler(self, sig, frame):
         asyncio.run(self.close())
-
-
-def is_stale_or_over_fetch_count_threshold(dt, fetch_count: int, hours: int, max_fetch_count: int = 25):
-    """
-
-    :param dt:  Time changed Datetime object
-    :param fetch_count: Number of times fetched from OpenAI
-    :param hours: Number of hours to wait before fetching again
-    :param max_fetch_count: Maximum number of times fetched from OpenAI since the value diminishes.
-    :return:
-    """
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return (fetch_count >= max_fetch_count  # Value of fetching diminishes
-            or (utc_now() - dt) > timedelta(hours=hours))
 
 
 def round_time_now_down_to_nearst_interval(interval_minutes: int = 5):
