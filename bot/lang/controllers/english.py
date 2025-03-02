@@ -7,7 +7,8 @@ import inflect
 import os
 import re
 
-from bot.graph.control_plane import CodeBlockMergeEventHandler, ControlPlane, ParagraphMergeEventHandler, SentenceMergeEventHandler
+from bot.graph.control_plane import CodeBlockMergeEventHandler, ControlPlane, ParagraphMergeEventHandler, \
+    SentenceMergeEventHandler
 from bot.lang.parsers import get_html_soup, strip_html_elements
 from observability.logging import logging
 from settings import germ_settings
@@ -16,34 +17,39 @@ logger = logging.getLogger(__name__)
 
 infect_eng = inflect.engine()
 
-naive_sentence_end_pattern = re.compile(r"\S+\s+\S+([\n\r]+"
+
+apostrophe_alpha_pattern = re.compile(r"'[a-z]+$")
+non_word_start_or_end_pattern = re.compile(r"(^\W+|\W+$)")
+
+non_terminal_periods = (
+    r"(?<!Apt)"
+    r"(?<!Blvd)"
+    r"(?<!Dr)"
+    r"(?<!Jr)"
+    r"(?<!Mr)"
+    r"(?<!Mrs)"
+    r"(?<!Ms)"
+    r"(?<!Ph\.D)"
+    r"(?<!Rd)"
+    r"(?<!Sr)"
+    r"(?<!e\.g)"
+    r"(?<!etc)"
+    r"(?<!i\.e)"
+    r"(?<![A-Z])"
+)
+naive_punctuation_end_pattern = re.compile(r"([,!?]$|" + non_terminal_periods + r"\.$)")
+naive_sentence_end_pattern = re.compile(r"([\n\r]+"
                                         r"|[!?]+(?=\s|$)"
-                                        r"|(?<!Apt)"
-                                        r"(?<!Blvd)"
-                                        r"(?<!Dr)"
-                                        r"(?<!Jr)"
-                                        r"(?<!Mr)"
-                                        r"(?<!Mrs)"
-                                        r"(?<!Ms)"
-                                        r"(?<!Ph\.D)"
-                                        r"(?<!Rd)"
-                                        r"(?<!Sr)"
-                                        r"(?<!e\.g)"
-                                        r"(?<!etc)"
-                                        r"(?<!i\.e)"
-                                        r"(?<![A-Z])"
-                                        r"\.+(?=\s|$))")
-#   \S+\s+\S+  - Very tolerant matching for word-space-word, which avoids matching list items like 1. or a.
+                                        r"|" + non_terminal_periods + r"\.+(?=\s|$))")
 # Option 1:
 #   [\n\r]+    - Match consecutive newline and carriage returns
 # Option 2:
 #   [!?]+      - Match ! or ?
-#   (?=\s|$)   - Must be followed by \s or end-of-string, to avoid things like decimals and IP addresses
+#   (?=\s|$)   - Must be followed by \s or end-of-string
 # Option 3:
-#   \.+        - Match .
-#   (?=\s|$)   - Must be followed by \s or end-of-string, to avoid things like decimals and IP addresses
-
-non_word_beginning_and_end_pattern = re.compile(r"(^\W+|\W+$)")  # TODO: currently too aggressive
+#   non_terminal_periods  - Must not be preceded by non-terminal characters
+#   \.+                   - Match .
+#   (?=\s|$)              - Must be followed by \s or end-of-string
 
 
 class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler):
@@ -74,6 +80,9 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
 
     async def label_sentences_periodically(self):
         logger.info(f"on_periodic_run: {len(self.unlabeled_sentences)} sentences to be labeled")
+        adjectives_added = set()  # Helps with dupes
+        nouns_added = set()  # Helps with dupes
+
         todo = []
         if self.unlabeled_sentences:
             while self.unlabeled_sentences:
@@ -85,14 +94,90 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
             logger.info(f"on_periodic_run: sentence_id={sentence_id}\nattrs\t{sentence_parameters}\n" + (
                 "\n".join([f"{head}\t{labels}" for head, labels in multi_head_labels.items()])))
 
-            last_comma_idx = None
-            last_noun = None
+            # Noun groups
+
+            idx_to_noun_group = {}
+            idx_to_noun_joined_base_form = {}
+            for noun_group in extract_label_idx_groups(multi_head_labels, "noun"):
+                noun_group_len = len(noun_group)
+
+                noun_labels = []
+                base_form_tokens = []
+                stripped_form_tokens = []
+                for idx in noun_group:
+                    noun_label = multi_head_labels["noun"][idx]
+                    noun_labels.append(noun_label)
+
+                    token = multi_head_labels["tokens"][idx]
+                    stripped_token = non_word_start_or_end_pattern.sub("", token)
+                    stripped_form_tokens.append(stripped_token)
+
+                    if noun_label.endswith("S"):
+                        noun_base_form = infect_eng.singular_noun(stripped_token)
+                        if noun_base_form is False:
+                            noun_base_form = stripped_token
+                    else:
+                        noun_base_form = stripped_token
+                    base_form_tokens.append(noun_base_form.lower())
+
+                # Strip any 'd, 'll, 'm, 's, etc.
+                base_form_tokens[-1] = apostrophe_alpha_pattern.sub("", base_form_tokens[-1])
+                stripped_form_tokens[-1] = apostrophe_alpha_pattern.sub("", stripped_form_tokens[-1])
+
+                joined_base_form = " ".join(base_form_tokens)
+                joined_stripped_form = " ".join(stripped_form_tokens)
+                if joined_base_form not in nouns_added:
+                    await self.control_plane.add_noun(joined_base_form)
+                    await self.control_plane.add_noun_form(joined_base_form, joined_stripped_form)
+                    nouns_added.add(joined_base_form)
+
+                # If there's a proper noun, everything becomes proper
+                noun_label = "NNP" if "NNP" in noun_labels else "NN"
+                # If the last noun is plural, everything becomes plural
+                if noun_labels[-1].endswith("S"):
+                    noun_label += "S"
+
+                await self.control_plane.link_noun_form_to_sentence(
+                    joined_base_form, joined_stripped_form,
+                    noun_label,  # Implicitly last noun_label in group
+                    sentence_id)
+
+                if noun_group_len > 1:
+                    for idx in range(len(base_form_tokens)):
+                        noun_base_form = apostrophe_alpha_pattern.sub("", base_form_tokens[idx])
+                        stripped_token = apostrophe_alpha_pattern.sub("", stripped_form_tokens[idx])
+                        if noun_base_form not in nouns_added:
+                            await self.control_plane.add_noun(noun_base_form)
+                            await self.control_plane.add_noun_form(noun_base_form, stripped_token)
+                            nouns_added.add(noun_base_form)
+                        await self.control_plane.link_noun_to_phrase(noun_base_form, joined_base_form)
+
+                for idx in noun_group:
+                    idx_to_noun_group[idx] = noun_group
+                    idx_to_noun_joined_base_form[idx] = joined_base_form
+
+            # Verb groups
+
+            idx_to_verb_group = {}
+            for verb_group in extract_label_idx_groups(multi_head_labels, "verb"):
+                for idx in verb_group:
+                    idx_to_verb_group[idx] = verb_group
+
+            last_adj_idx = None
+            last_adj_base = None
+            last_adj_stripped = None
+            last_adj_token = None
+
             last_noun_idx = None
-            last_period_idx = None
+
             last_verb = None
             last_verb_idx = None
+
+            last_walked_idx = None
             for idx in range(len(multi_head_labels["tokens"])):
                 token = multi_head_labels["tokens"][idx]
+                stripped_token = non_word_start_or_end_pattern.sub("", token)
+
                 adj_label = multi_head_labels["adj"][idx]
                 adv_label = multi_head_labels["adv"][idx]
                 det_label = multi_head_labels["det"][idx]
@@ -107,26 +192,44 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                 verb_label = multi_head_labels["verb"][idx]
                 wh_label = multi_head_labels["wh"][idx]
 
-                last_idx = idx - 1
+                if verb_label == "VB" and idx == 0:
+                    # - Present tense base verb at the beginning is likely imperative sentence signal
+                    # - ^ is not always the case because some constructions can start with base verbs without being
+                    #   imperative in nature.
+                    #   - Think what you will, our conclusions remain unchanged.
+                    #   - Be it known that innovation drives progress.
+                    #   - Come what may, the journey continues.
+                    # - This is difficult to solve with rules because context matters. But maybe these kinds of idioms
+                    #   and expressions can be learned and recalled using the graph.
+                    pass
+                elif verb_label == "VBZ" and idx > 0 and last_noun_idx == last_walked_idx:
+                    if stripped_token == "is":
+                        next_adj_label = multi_head_labels["adv"][idx + 1]
+                        next_det_label = multi_head_labels["det"][idx + 1]
+                        next_verb_label = multi_head_labels["verb"][idx + 1]
+
+                # Filter for adjectives that are not also part of a noun phrase.
+                if adj_label == "JJ" and noun_label == "O":
+                    last_adj_idx = idx
+                    last_adj_base = stripped_token.lower()
+                    last_adj_stripped = stripped_token
+                    last_adj_token = token
 
                 if noun_label in {"NN", "NNS", "NNP", "NNPS"}:
-                    token = non_word_beginning_and_end_pattern.sub("", token)
-                    if noun_label == "NN":
-                        noun_base_form = token
-                    elif noun_label == "NNS":
-                        noun_base_form = infect_eng.singular_noun(token)
-                    elif noun_label == "NNP":
-                        noun_base_form = token.capitalize()
-                    elif noun_label == "NNPS":
-                        noun_base_form = infect_eng.singular_noun(token.capitalize())
-                    if noun_base_form:
-                        await self.control_plane.add_noun_form(noun_base_form, token)
-                        await self.control_plane.link_noun_form_to_sentence(
-                            noun_base_form, token, noun_label, sentence_id)
-                        if last_noun_idx == last_idx and not last_noun.endswith(","):
-                            await self.control_plane.link_successive_nouns(last_noun, noun_base_form)
-                        last_noun = noun_base_form
-                        last_noun_idx = idx
+                    if (last_walked_idx is not None
+                            and last_adj_base is not None
+                            and last_adj_idx == last_walked_idx
+                            and naive_punctuation_end_pattern.search(last_adj_token) is None):
+                        # Link attributed adjectives that come immediately before nouns.
+                        if last_adj_base not in adjectives_added:
+                            await self.control_plane.add_adjective(last_adj_base)
+                            await self.control_plane.add_adjective_form(last_adj_base, last_adj_stripped)
+                            adjectives_added.add(last_adj_base)
+                        await self.control_plane.link_noun_to_preceding_adjective(
+                            last_adj_base, idx_to_noun_joined_base_form[idx])
+                    last_noun_idx = idx
+
+                last_walked_idx = idx
 
     async def on_code_block_merge(self, code_block: str, code_block_id: int):
         logger.info(f"on_code_block_merge: code_block_id={code_block_id}, {code_block}")
@@ -181,7 +284,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         self.unlabeled_sentences.append((sentence, sentence_id, sentence_parameters))
 
 
-def extract_label_idx_groups(labels, target_labels):
+def extract_label_idx_groups(exp, feat, target_labels=None):
     """
     For example, given a list of labels (e.g. ["O", "O", "NN", "NN", "O", "O", "NNS", "O"]),
     this function will extract the index positions of the labels: NN, NNS, NNP, NNPS.
@@ -193,7 +296,8 @@ def extract_label_idx_groups(labels, target_labels):
         [[2, 3], [6]]
 
     Args:
-        labels (list of str): The list of labels.
+        exp: Example
+        feat: feature
         target_labels (set of str): The set of tags to target.
 
     Returns:
@@ -203,8 +307,11 @@ def extract_label_idx_groups(labels, target_labels):
     groups = []
     current_group = []
 
-    for idx, label in enumerate(labels):
-        if label in target_labels:
+    for idx, label in enumerate(exp[feat]):
+        if (((label in target_labels) if target_labels is not None else label != "O")
+                and (idx != 0
+                     and naive_punctuation_end_pattern.search(exp["tokens"][idx-1]) is None
+                     and exp["enc"][idx] == exp["enc"][idx-1])):  # Same enclosure chunk
             # If current_group is empty or the current idx is consecutive (i.e., previous index + 1),
             # append to current_group. Otherwise, start a new group.
             if current_group and idx == current_group[-1] + 1:

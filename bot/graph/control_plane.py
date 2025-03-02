@@ -64,6 +64,32 @@ class ControlPlane:
                 paragraph_text_block_type_record = (await rdb_session.execute(paragraph_text_block_type_stmt)).first()
                 self.paragraph_text_block_type_id = paragraph_text_block_type_record.struct_type_id
 
+    async def add_adjective(self, adj: str):
+        results = await self.driver.query("""
+        MERGE (adj:Adjective {text: $adj})
+        RETURN adj
+        """, {
+            "adj": adj,
+        })
+        if results:
+            logger.info(f"MERGE (adj:Adjective {{text: {adj}}})")
+        return results
+
+    async def add_adjective_form(self, adj: str, form: str):
+        results = await self.driver.query("""
+        MATCH (adj:Adjective {text: $adj})
+        WITH adj
+        UNWIND (COALESCE(adj.forms, []) + [$form]) AS form
+        WITH adj, COLLECT(DISTINCT form) AS uniqueForms
+        SET adj.forms = uniqueForms
+        RETURN adj
+        """, {
+            "adj": adj, "form": form
+        })
+        if results:
+            logger.info(f"SET (adj:Adjective {{{adj}}}).forms = {results[0]['adj']['forms']}}} << {form}")
+        return results
+
     async def add_chat_request(self, chat_request_received_id: int):
         time_occurred = round_time_now_down_to_nearst_interval()
         results = await self.driver.query("""
@@ -148,9 +174,20 @@ class ControlPlane:
         logger.info(f"hyperlink: {results}")
         return results
 
-    async def add_noun_form(self, noun: str, form: str):
+    async def add_noun(self, noun: str):
         results = await self.driver.query("""
         MERGE (noun:Noun {text: $noun})
+        RETURN noun
+        """, {
+            "noun": noun,
+        })
+        if results:
+            logger.info(f"MERGE (noun:Noun {{text: {noun}}})")
+        return results
+
+    async def add_noun_form(self, noun: str, form: str):
+        results = await self.driver.query("""
+        MATCH (noun:Noun {text: $noun})
         WITH noun
         UNWIND (COALESCE(noun.forms, []) + [$form]) AS form
         WITH noun, COLLECT(DISTINCT form) AS uniqueForms
@@ -159,7 +196,8 @@ class ControlPlane:
         """, {
             "noun": noun, "form": form
         })
-        logger.info(f"noun: {results}")
+        if results:
+            logger.info(f"SET (noun:Noun {{{noun}}}).forms = {results[0]['noun']['forms']}}} << {form}")
         return results
 
     async def add_paragraph(self, paragraph: str, paragraph_attrs):
@@ -289,6 +327,30 @@ class ControlPlane:
             "noun": noun, "form": form, "sentence_id": sentence_id
         })
         logger.info(f"noun link: {results}")
+        return results
+
+    async def link_noun_to_phrase(self, noun: str, phrase: str):
+        results = await self.driver.query("""
+        MATCH (noun:Noun {text: $noun}), (phrase:Noun {text: $phrase})
+        MERGE (phrase)-[r:CONTAINS]->(noun)
+        RETURN r
+        """, {
+            "noun": noun, "phrase": phrase,
+        })
+        if results:
+            logger.info(f"MERGE (phrase:Noun {{text: {phrase}}})-[r:CONTAINS]->(noun:Noun {{text: {noun}}})")
+        return results
+
+    async def link_noun_to_preceding_adjective(self, adj: str, noun: str):
+        results = await self.driver.query("""
+        MATCH (adj:Adjective {text: $adj}), (noun:Noun {text: $noun})
+        MERGE (adj)-[r:DESCRIBES]->(noun)
+        RETURN r
+        """, {
+            "adj": adj, "noun": noun,
+        })
+        if results:
+            logger.info(f"MERGE (adj:Adjective {{text: {adj}}})-[r:PRECEDES]->(noun:Noun {{text: {noun}}})")
         return results
 
     async def link_page_element_to_chat_request(self, element_type: str, element_attrs,
