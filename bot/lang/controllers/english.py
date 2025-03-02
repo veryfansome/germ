@@ -94,6 +94,8 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
             logger.info(f"on_periodic_run: sentence_id={sentence_id}\nattrs\t{sentence_parameters}\n" + (
                 "\n".join([f"{head}\t{labels}" for head, labels in multi_head_labels.items()])))
 
+            # Noun groups
+
             idx_to_noun_group = {}
             idx_to_noun_joined_base_form = {}
             for noun_group in extract_label_idx_groups(multi_head_labels, "noun"):
@@ -153,6 +155,8 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                 for idx in noun_group:
                     idx_to_noun_group[idx] = noun_group
                     idx_to_noun_joined_base_form[idx] = joined_base_form
+
+            # Verb groups
 
             idx_to_verb_group = {}
             for verb_group in extract_label_idx_groups(multi_head_labels, "verb"):
