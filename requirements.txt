@@ -15,6 +15,7 @@ lxml
 mistune
 neo4j
 nltk
+numpy
 openai
 opentelemetry-api
 opentelemetry-exporter-otlp-proto-grpc
