@@ -89,6 +89,9 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                 todo.append(self.unlabeled_sentences.pop(0))
         for sentence_args in todo:
             sentence, sentence_id, sentence_context = sentence_args
+
+            emotion_labels_task = asyncio.create_task(get_emotions_classifications(sentence))
+
             multi_head_labels = await get_token_classifications(sentence)
             self.labeled_multi_head_exps.append(multi_head_labels)
             logger.info(f"on_periodic_run: sentence_id={sentence_id}\nattrs\t{sentence_context}\n" + (
@@ -181,7 +184,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
             for verb_group in extract_label_idx_groups(multi_head_labels, "verb"):
                 for idx in verb_group:
                     idx_to_verb_group[idx] = verb_group
-            logger.info("verb groups: %s", [f'{k}: {[multi_head_labels['tokens'][i] for i in v]}' for k, v in idx_to_verb_group.items()])
+            logger.info("verb groups: %s", [f"{k}: {[multi_head_labels['tokens'][i] for i in v]}" for k, v in idx_to_verb_group.items()])
 
             last_adj_idx = None
             last_adj_base = None
@@ -314,6 +317,9 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
 
                 last_walked_idx = idx
 
+            emotion_labels = await emotion_labels_task
+            logger.info(f"emotion_labels: {emotion_labels}")
+
     async def on_code_block_merge(self, code_block: str, code_block_id: int):
         logger.info(f"on_code_block_merge: code_block_id={code_block_id}, {code_block}")
 
@@ -415,9 +421,16 @@ def extract_label_idx_groups(exp, feat, target_labels=None):
     return groups
 
 
+async def get_emotions_classifications(text: str):
+    async with aiohttp.ClientSession() as session:
+        async with session.post("http://germ-models:9000/text/classification/emotions",
+                                json={"text": text}) as response:
+            return await response.json()
+
+
 async def get_token_classifications(text: str):
     async with aiohttp.ClientSession() as session:
-        async with session.post("http://germ-models:9000/text/classification",
+        async with session.post("http://germ-models:9000/text/classification/multi",
                                 json={"text": text}) as response:
             return await response.json()
 

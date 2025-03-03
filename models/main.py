@@ -8,6 +8,7 @@ from starlette.responses import Response
 import os
 
 from bot.api.models import TextPayload
+from models.predict.goemotions_predict import GoEmotionsPredictor
 from models.predict.multi_predict import MultiHeadPredictor
 from observability.logging import logging, setup_logging
 from observability.tracing import setup_tracing
@@ -27,7 +28,8 @@ tracer = trace.get_tracer(__name__)
 ##
 # App
 
-text_token_classifier = MultiHeadPredictor("veryfansome/multi-classifier", subfolder="models/o3-mini_20250218")
+text_emotions_classifier = GoEmotionsPredictor("veryfansome/deberta-goemotions", subfolder="pos_weight_best")
+text_token_multi_classifier = MultiHeadPredictor("veryfansome/multi-classifier", subfolder="models/o3-mini_20250218")
 
 
 @asynccontextmanager
@@ -70,6 +72,11 @@ async def get_metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-@model_service.post("/text/classification")
+@model_service.post("/text/classification/emotions")
+async def post_text_classification_emotions(payload: TextPayload):
+    return await run_in_threadpool(text_emotions_classifier.predict, [payload.text], use_per_label=True)
+
+
+@model_service.post("/text/classification/multi")
 async def post_text_classification(payload: TextPayload):
-    return await run_in_threadpool(text_token_classifier.predict, payload.text)
+    return await run_in_threadpool(text_token_multi_classifier.predict, payload.text)
