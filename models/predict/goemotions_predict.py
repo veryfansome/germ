@@ -4,6 +4,7 @@ import torch
 
 from models.utils import get_torch_device
 
+
 class GoEmotionsPredictor:
     def __init__(self, model_name_or_path: str, subfolder=None):
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -58,19 +59,3 @@ class GoEmotionsPredictor:
             results.append({"text": text, "emotions": predicted_labels})
 
         return results
-
-if __name__ == "__main__":
-    predictor = GoEmotionsPredictor("veryfansome/deberta-goemotions", subfolder="pos_weight_best")
-
-    texts_to_classify = [
-        "I'm so happy today!",
-        "Everything is awful.",
-        "I can't believe how excited I am for the future!",
-        "I lost my job and I'm devastated."
-    ]
-
-    pred_results = predictor.predict(texts_to_classify, use_per_label=True)
-    for item in pred_results:
-        print("Text:", item["text"])
-        print("Predicted labels:", item["emotions"])
-        print("-----------")
