@@ -23,13 +23,13 @@ class CodeBlockMergeEventHandler(ABC):
 
 class ParagraphMergeEventHandler(ABC):
     @abstractmethod
-    async def on_paragraph_merge(self, paragraph: str, paragraph_id: int):
+    async def on_paragraph_merge(self, paragraph: str, paragraph_id: int, paragraph_context):
         pass
 
 
 class SentenceMergeEventHandler(ABC):
     @abstractmethod
-    async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_attrs):
+    async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_context):
         pass
 
 
@@ -122,7 +122,7 @@ class ControlPlane:
         logger.info(f"session: {results}")
         return results
 
-    async def add_code_block(self, code_block: str, code_block_attrs):
+    async def add_code_block(self, code_block: str, code_block_context):
         code_block = code_block.strip()
         # Generate signature for lookup in PostgreSQL
         code_block_signature = uuid.uuid5(UUID5_NS, code_block)
@@ -142,15 +142,15 @@ class ControlPlane:
                     # Execute the insert and fetch the returned values
                     rdb_record = (await rdb_session.execute(sql_insert_stmt)).first()
 
-        code_block_attrs["time_occurred"] = round_time_now_down_to_nearst_interval()
-        code_block_attrs_expr = ", ".join([f"{k}: ${k}" for k in code_block_attrs.keys()])
+        code_block_context["time_occurred"] = round_time_now_down_to_nearst_interval()
+        code_block_context_expr = ", ".join([f"{k}: ${k}" for k in code_block_context.keys()])
         graph_results = await self.driver.query(f"""
-        MERGE (block:CodeBlock {{text: $text, code_block_id: $code_block_id, {code_block_attrs_expr}}})
+        MERGE (block:CodeBlock {{text: $text, code_block_id: $code_block_id, {code_block_context_expr}}})
         RETURN block
         """, {
             "text": code_block,
             "code_block_id": rdb_record.text_block_id,
-            **code_block_attrs
+            **code_block_context
         })
         async_tasks = []
         if graph_results:
@@ -185,12 +185,28 @@ class ControlPlane:
             logger.info(f"MERGE (noun:Noun {{text: {noun}}})")
         return results
 
+    async def add_noun_entity_class(self, noun: str, entity_class: str):
+        results = await self.driver.query("""
+        MATCH (noun:Noun {text: $noun})
+        WITH noun
+        UNWIND (COALESCE(noun.entity_classes, []) + [$entity_class]) AS entity_classes
+        WITH noun, COLLECT(DISTINCT entity_classes) AS uniqueEntityClasses
+        SET noun.entity_classes = uniqueEntityClasses
+        RETURN noun
+        """, {
+            "noun": noun, "entity_class": entity_class
+        })
+        if results:
+            logger.info(f"SET (noun:Noun {{{noun}}}).entity_classes = {results[0]['noun']['entity_classes']}}} "
+                        f"<< {entity_class}")
+        return results
+
     async def add_noun_form(self, noun: str, form: str):
         results = await self.driver.query("""
         MATCH (noun:Noun {text: $noun})
         WITH noun
-        UNWIND (COALESCE(noun.forms, []) + [$form]) AS form
-        WITH noun, COLLECT(DISTINCT form) AS uniqueForms
+        UNWIND (COALESCE(noun.forms, []) + [$form]) AS forms
+        WITH noun, COLLECT(DISTINCT forms) AS uniqueForms
         SET noun.forms = uniqueForms
         RETURN noun
         """, {
@@ -200,7 +216,7 @@ class ControlPlane:
             logger.info(f"SET (noun:Noun {{{noun}}}).forms = {results[0]['noun']['forms']}}} << {form}")
         return results
 
-    async def add_paragraph(self, paragraph: str, paragraph_attrs):
+    async def add_paragraph(self, paragraph: str, paragraph_context):
         paragraph = paragraph.strip()
         # Generate signature for lookup in PostgreSQL
         paragraph_signature = uuid.uuid5(UUID5_NS, paragraph)
@@ -220,15 +236,15 @@ class ControlPlane:
                     # Execute the insert and fetch the returned values
                     rdb_record = (await rdb_session.execute(sql_insert_stmt)).first()
 
-        paragraph_attrs["time_occurred"] = round_time_now_down_to_nearst_interval()
-        paragraph_attrs_expr = ", ".join([f"{k}: ${k}" for k in paragraph_attrs.keys()])
+        paragraph_context["time_occurred"] = round_time_now_down_to_nearst_interval()
+        paragraph_context_expr = ", ".join([f"{k}: ${k}" for k in paragraph_context.keys()])
         graph_results = await self.driver.query(f"""
-        MERGE (paragraph:Paragraph {{text: $text, paragraph_id: $paragraph_id, {paragraph_attrs_expr}}})
+        MERGE (paragraph:Paragraph {{text: $text, paragraph_id: $paragraph_id, {paragraph_context_expr}}})
         RETURN paragraph
         """, {
             "text": paragraph,
             "paragraph_id": rdb_record.text_block_id,
-            **paragraph_attrs,
+            **paragraph_context,
         })
         async_tasks = []
         if graph_results:
@@ -236,13 +252,13 @@ class ControlPlane:
             logger.info(f"MERGE (paragraph:Paragraph {{{result_sig}}}")
             for handler in self.paragraph_merge_event_handlers:
                 async_tasks.append(asyncio.create_task(
-                    handler.on_paragraph_merge(paragraph, rdb_record.text_block_id)))
+                    handler.on_paragraph_merge(paragraph, rdb_record.text_block_id, paragraph_context)))
         return graph_results, rdb_record.text_block_id, async_tasks
 
     def add_paragraph_merge_event_handler(self, handler: ParagraphMergeEventHandler):
         self.paragraph_merge_event_handlers.append(handler)
 
-    async def add_sentence(self, sentence: str):
+    async def add_sentence(self, sentence: str, sentence_context):
         sentence = sentence.strip()
         # Generate signature for lookup in PostgreSQL
         sentence_signature = uuid.uuid5(UUID5_NS, sentence)
@@ -270,7 +286,7 @@ class ControlPlane:
         for handler in self.sentence_merge_event_handlers:
             async_tasks.append(asyncio.create_task(
                 handler.on_sentence_merge(
-                    sentence, rdb_record.sentence_id, {})))
+                    sentence, rdb_record.sentence_id, sentence_context)))
         return graph_results, rdb_record.sentence_id, async_tasks
 
     def add_sentence_merge_event_handler(self, handler: SentenceMergeEventHandler):
@@ -351,6 +367,19 @@ class ControlPlane:
         })
         if results:
             logger.info(f"MERGE (adj:Adjective {{text: {adj}}})-[r:PRECEDES]->(noun:Noun {{text: {noun}}})")
+        return results
+
+    async def link_nouns_via_preposition(self, noun1: str, preposition: str, noun2: str):
+        link_name = preposition.upper()
+        results = await self.driver.query(f"""
+        MATCH (noun1:Noun {{text: $noun1}}), (noun2:Noun {{text: $noun2}})
+        MERGE (noun1)-[r:{link_name}]->(noun2)
+        RETURN r
+        """, {
+            "noun1": noun1, "noun2": noun2,
+        })
+        if results:
+            logger.info(f"MERGE (noun1:Noun {{text: {noun1}}})-[r:{link_name}]->(noun2:Noun {{text: {noun2}}})")
         return results
 
     async def link_page_element_to_chat_request(self, element_type: str, element_attrs,
