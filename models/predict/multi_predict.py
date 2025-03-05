@@ -3,6 +3,7 @@ import torch
 
 from models.predict.multi_head_model import MultiHeadModel
 from models.utils import get_torch_device
+from models.utils.tokenize import naive_tokenize
 
 
 class MultiHeadPredictor:
@@ -25,7 +26,7 @@ class MultiHeadPredictor:
 
         :return: A dict with {head_name: [predicted_label_for_each_token]} for the tokens in `text`.
         """
-        raw_tokens = text.split()
+        raw_tokens = naive_tokenize(text)
 
         # We'll do a single-example batch to replicate training chunk logic.
         # is_split_into_words=True => we pass a list of tokens, not a single string.

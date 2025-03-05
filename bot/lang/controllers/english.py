@@ -1,15 +1,16 @@
 from datasets import Dataset
 from datetime import datetime
 from starlette.concurrency import run_in_threadpool
+from traceback import format_exc
 import aiohttp
 import asyncio
 import inflect
 import os
-import re
 
 from bot.graph.control_plane import CodeBlockMergeEventHandler, ControlPlane, ParagraphMergeEventHandler, \
     SentenceMergeEventHandler
 from bot.lang.parsers import get_html_soup, strip_html_elements
+from bot.lang.patterns import naive_sentence_end_pattern
 from observability.logging import logging
 from settings import germ_settings
 
@@ -18,257 +19,152 @@ logger = logging.getLogger(__name__)
 infect_eng = inflect.engine()
 
 
-apostrophe_alpha_pattern = re.compile(r"'[a-z]+$")
-non_word_start_or_end_pattern = re.compile(r"(^\W+|\W+$)")
-
-non_terminal_periods = (
-    r"(?<!Apt)"
-    r"(?<!Blvd)"
-    r"(?<!Dr)"
-    r"(?<!Jr)"
-    r"(?<!Mr)"
-    r"(?<!Mrs)"
-    r"(?<!Ms)"
-    r"(?<!Ph\.D)"
-    r"(?<!Rd)"
-    r"(?<!Sr)"
-    r"(?<!e\.g)"
-    r"(?<!etc)"
-    r"(?<!i\.e)"
-    r"(?<![A-Z])"
-)
-naive_punctuation_end_pattern = re.compile(r"([,!?]\"?$|" + non_terminal_periods + r"\.\"?$)")
-naive_sentence_end_pattern = re.compile(r"([\n\r]+"
-                                        r"|[!?]+\"?(?=\s|$)"
-                                        r"|" + non_terminal_periods + r"\.+\"?(?=\s|$))")
-# Option 1:
-#   [\n\r]+    - Match consecutive newline and carriage returns
-# Option 2:
-#   [!?]+      - Match ! or ?
-#   (?=\s|$)   - Must be followed by \s or end-of-string
-# Option 3:
-#   non_terminal_periods  - Must not be preceded by non-terminal characters
-#   \.+                   - Match .
-#   (?=\s|$)              - Must be followed by \s or end-of-string
-
-
 class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler):
     def __init__(self, control_plane: ControlPlane, interval_seconds: int = 10):
         self.control_plane = control_plane
-        self.dump_dir = os.path.join(germ_settings.DATA_DIR, "multi_head_exps")
         self.interval_seconds = interval_seconds
-        self.labeled_multi_head_exps = []
+        self.ud_labeled_exps = []
         self.unlabeled_sentences = []
 
-    def dump_multi_head_exps(self):
-        os.makedirs(self.dump_dir, exist_ok=True)
-        copied_exps = []
-        if self.labeled_multi_head_exps:
-            while self.labeled_multi_head_exps:
-                copied_exps.append(self.labeled_multi_head_exps.pop(0))
+    def dump_labeled_exps(self):
+        ud_exps = []
+        if self.ud_labeled_exps:
+            while self.ud_labeled_exps:
+                ud_exps.append(self.ud_labeled_exps.pop(0))
+            dump_labeled_exps(ud_exps, "ud")
 
-            first_exp = copied_exps[0]
-            ds_dict = {k: [] for k in first_exp.keys()}
-            for exp in copied_exps:
-                for col, labels in exp.items():
-                    ds_dict[col].append(exp[col])
-            ds = Dataset.from_dict(ds_dict)
-            ts_dump = datetime.now().strftime("%Y%m%d%H%M%S")
-            dump_path = f"{self.dump_dir}/{ts_dump}"
-            logger.info(f"writing {dump_path}\n{ds}")
-            ds.save_to_disk(dump_path)
+    async def graph_sentences_using_ud_model(self, sentence: str, sentence_id: int, sentence_context):
+        ud_token_labels = await get_ud_token_classifications(sentence)
+        self.ud_labeled_exps.append(ud_token_labels)
+        logger.info(f"ud labels: sentence_id={sentence_id}\nattrs\t{sentence_context}\n" + (
+            "\n".join([f"{head}\t{labels}" for head, labels in ud_token_labels.items()])))
 
-    async def label_sentences_periodically(self):
-        logger.info(f"on_periodic_run: {len(self.unlabeled_sentences)} sentences to be labeled")
         adjectives_added = set()
+        noun_labels = {"NN", "NNS", "NNP", "NNPS"}
         nouns_added = set()
-
-        todo = []
-        if self.unlabeled_sentences:
-            while self.unlabeled_sentences:
-                todo.append(self.unlabeled_sentences.pop(0))
-        for sentence_args in todo:
-            sentence, sentence_id, sentence_context = sentence_args
-
-            emotion_labels_task = asyncio.create_task(get_emotions_classifications(sentence))
-
-            multi_head_labels = await get_token_classifications(sentence)
-            self.labeled_multi_head_exps.append(multi_head_labels)
-            logger.info(f"on_periodic_run: sentence_id={sentence_id}\nattrs\t{sentence_context}\n" + (
-                "\n".join([f"{head}\t{labels}" for head, labels in multi_head_labels.items()])))
-
-            # Noun groups
+        token_cnt = len(ud_token_labels["tokens"])
+        try:
+            # Noun groups / noun phrases
             idx_to_noun_group = {}
             idx_to_noun_joined_base_form = {}
-            for noun_group in extract_label_idx_groups(multi_head_labels, "noun"):
+            for noun_group in extract_label_idx_groups(ud_token_labels, "xpos", target_labels=noun_labels):
                 noun_group_len = len(noun_group)
 
-                ner1_labels = []
-                ner2_labels = []
-                noun_labels = []
                 base_form_tokens = []
-                stripped_form_tokens = []
+                group_labels = []
+                raw_tokens = []
                 for idx in noun_group:
-                    ner1_label = multi_head_labels["ner1"][idx]
-                    ner1_labels.append(ner1_label)
-                    ner2_label = multi_head_labels["ner2"][idx]
-                    ner2_labels.append(ner2_label)
+                    token = ud_token_labels["tokens"][idx]
+                    raw_tokens.append(token)
 
-                    noun_label = multi_head_labels["noun"][idx]
-                    noun_labels.append(noun_label)
-
-                    token = multi_head_labels["tokens"][idx]
-                    stripped_token = non_word_start_or_end_pattern.sub("", token)
-                    stripped_form_tokens.append(stripped_token)
+                    noun_label = ud_token_labels["xpos"][idx]
+                    group_labels.append(noun_label)
 
                     if noun_label.endswith("S"):
-                        noun_base_form = infect_eng.singular_noun(stripped_token)
+                        noun_base_form = infect_eng.singular_noun(token)
                         if noun_base_form is False:
-                            noun_base_form = stripped_token
+                            noun_base_form = token
                     else:
-                        noun_base_form = stripped_token
+                        noun_base_form = token
                     base_form_tokens.append(noun_base_form.lower())
 
-                # Strip any 'd, 'll, 'm, 's, etc.
-                base_form_tokens[-1] = apostrophe_alpha_pattern.sub("", base_form_tokens[-1])
-                stripped_form_tokens[-1] = apostrophe_alpha_pattern.sub("", stripped_form_tokens[-1])
-
                 joined_base_form = " ".join(base_form_tokens)
-                joined_stripped_form = " ".join(stripped_form_tokens)
+                joined_raw_form = " ".join(raw_tokens)
                 if joined_base_form not in nouns_added:
                     await self.control_plane.add_noun(joined_base_form)
-                    await self.control_plane.add_noun_form(joined_base_form, joined_stripped_form)
+                    await self.control_plane.add_noun_form(joined_base_form, joined_raw_form)
                     nouns_added.add(joined_base_form)
-                if ner1_labels[-1] != "O":
-                    await self.control_plane.add_noun_entity_class(
-                        joined_base_form, ner1_labels[-1].split("-")[-1])
-                if ner2_labels[-1].endswith("LOC"):
-                    await self.control_plane.add_noun_entity_class(
-                        joined_base_form, ner2_labels[-1].split("-")[-1])
 
                 # If there's a proper noun, everything becomes proper
-                noun_label = "NNP" if "NNP" in noun_labels else "NN"
+                noun_label = "NNP" if "NNP" in group_labels else "NN"
                 # If the last noun is plural, everything becomes plural
-                if noun_labels[-1].endswith("S"):
+                if group_labels[-1].endswith("S"):
                     noun_label += "S"
 
                 await self.control_plane.link_noun_form_to_sentence(
-                    joined_base_form, joined_stripped_form,
+                    joined_base_form, joined_raw_form,
                     noun_label,  # Implicitly last noun_label in group
                     sentence_id)
 
                 if noun_group_len > 1:
                     for idx in range(len(base_form_tokens)):
-                        ner1_label = ner1_labels[idx]
-                        ner2_label = ner2_labels[idx]
-                        noun_base_form = apostrophe_alpha_pattern.sub("", base_form_tokens[idx])
-                        stripped_token = apostrophe_alpha_pattern.sub("", stripped_form_tokens[idx])
+                        noun_base_form = base_form_tokens[idx]
+                        raw_token = raw_tokens[idx]
                         if noun_base_form not in nouns_added:
                             await self.control_plane.add_noun(noun_base_form)
-                            await self.control_plane.add_noun_form(noun_base_form, stripped_token)
+                            await self.control_plane.add_noun_form(noun_base_form, raw_token)
                             nouns_added.add(noun_base_form)
-                        if ner1_label != "O":
-                            await self.control_plane.add_noun_entity_class(
-                                noun_base_form, ner1_label.split("-")[-1])
-                        if ner2_label.endswith("LOC"):
-                            await self.control_plane.add_noun_entity_class(
-                                noun_base_form, ner2_label.split("-")[-1])
                         await self.control_plane.link_noun_to_phrase(noun_base_form, joined_base_form)
 
                 for idx in noun_group:
                     idx_to_noun_group[idx] = noun_group
                     idx_to_noun_joined_base_form[idx] = joined_base_form
 
-            # Verb groups
-            idx_to_verb_group = {}
-            for verb_group in extract_label_idx_groups(multi_head_labels, "verb"):
-                for idx in verb_group:
-                    idx_to_verb_group[idx] = verb_group
-            logger.info("verb groups: %s", [f"{k}: {[multi_head_labels['tokens'][i] for i in v]}" for k, v in idx_to_verb_group.items()])
-
             last_adj_idx = None
             last_adj_base = None
-            last_adj_stripped = None
             last_adj_token = None
             last_noun_idx = None
-            last_verb = None
-            last_verb_idx = None
+            #last_verb = None
+            #last_verb_idx = None
             last_walked_idx = None
-            for idx in range(len(multi_head_labels["tokens"])):
-                token = multi_head_labels["tokens"][idx]
-                stripped_token = non_word_start_or_end_pattern.sub("", token)
-                lowered_token = stripped_token.lower()
+            for idx in range(token_cnt):
+                token = ud_token_labels["tokens"][idx]
+                lowered_token = token.lower()
+                xpos_label = ud_token_labels["xpos"][idx]
 
-                adj_label = multi_head_labels["adj"][idx]
-                adv_label = multi_head_labels["adv"][idx]
-                det_label = multi_head_labels["det"][idx]
-                enc_label = multi_head_labels["enc"][idx]
-                func_label = multi_head_labels["func"][idx]
-                misc_label = multi_head_labels["misc"][idx]
-                ner1_label = multi_head_labels["ner1"][idx]
-                ner2_label = multi_head_labels["ner2"][idx]
-                noun_label = multi_head_labels["noun"][idx]
-                pronoun_label = multi_head_labels["pronoun"][idx]
-                punct_label = multi_head_labels["punct"][idx]
-                verb_label = multi_head_labels["verb"][idx]
-                wh_label = multi_head_labels["wh"][idx]
+            #    if pronoun_label == "PRP":
+            #        logger.info(f"{lowered_token} context: {sentence_context}")
+            #        # - Pronouns typically refer to the nearest preceding noun that matches the pronoun in number
+            #        #   and gender.
+            #        # - When a pronoun is used within a passage, it often retains the same referent throughout unless
+            #        #   otherwise specified.
+            #        if lowered_token == "i":
+            #            pass
+            #        elif lowered_token == "me":
+            #            pass
+            #        elif lowered_token == "it":
+            #            pass
+            #        elif lowered_token == "he":
+            #            pass
+            #        elif lowered_token == "she":
+            #            pass
+            #        elif lowered_token == "they":
+            #            pass
+            #        elif lowered_token == "us":
+            #            pass
+            #        elif lowered_token == "we":
+            #            pass
+            #        elif lowered_token == "you":
+            #            pass
+            #        else:  # Other personal pronouns
+            #            pass
 
-                if pronoun_label == "PRP":
-                    logger.info(f"{lowered_token} context: {sentence_context}")
-                    # - Pronouns typically refer to the nearest preceding noun that matches the pronoun in number
-                    #   and gender.
-                    # - When a pronoun is used within a passage, it often retains the same referent throughout unless
-                    #   otherwise specified.
-                    if lowered_token == "i":
-                        pass
-                    elif lowered_token == "me":
-                        pass
-                    elif lowered_token == "you":
-                        pass
-                    elif lowered_token == "it":
-                        pass
-                    elif lowered_token == "he":
-                        pass
-                    elif lowered_token == "she":
-                        pass
-                    elif lowered_token == "they":
-                        pass
-                    elif lowered_token == "us":
-                        pass
-                    elif lowered_token == "we":
-                        pass
-                    elif lowered_token == "you":
-                        pass
-                    else:  # Other personal pronouns
-                        pass
-
-                if noun_label in {"NN", "NNS", "NNP", "NNPS"}:
+                if xpos_label in noun_labels:
                     # TODO:
                     # - Proper nouns should link to common nouns with INSTANCE_OF links
                     if (last_walked_idx is not None
                             and last_adj_base is not None
-                            and last_adj_idx == last_walked_idx
-                            and naive_punctuation_end_pattern.search(last_adj_token) is None):
+                            and last_adj_idx == last_walked_idx):
                         # Link attributed adjectives that come immediately before nouns.
                         if last_adj_base not in adjectives_added:
                             await self.control_plane.add_adjective(last_adj_base)
-                            await self.control_plane.add_adjective_form(last_adj_base, last_adj_stripped)
+                            await self.control_plane.add_adjective_form(last_adj_base, last_adj_token)
                             adjectives_added.add(last_adj_base)
                         await self.control_plane.link_noun_to_preceding_adjective(
                             last_adj_base, idx_to_noun_joined_base_form[idx])
                     last_noun_idx = idx
 
                 # Filter for adjectives that are not also part of a noun phrase.
-                if adj_label == "JJ" and noun_label == "O":
+                if xpos_label == "JJ":
                     last_adj_idx = idx
                     last_adj_base = lowered_token
-                    last_adj_stripped = stripped_token
                     last_adj_token = token
 
-                if func_label == "IN":
+                if xpos_label == "IN":
                     # Prepositions linking nouns
                     if (last_walked_idx is not None
-                            and stripped_token not in {  # Subordinating conjunctions
+                            and idx < token_cnt - 1
+                            and token not in {  # Subordinating conjunctions
                                 "after",
                                 "although",
                                 "because",
@@ -283,42 +179,54 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                                 "when",
                                 "while",
                             }
-                            and multi_head_labels["noun"][idx-1] != "O"
-                            and multi_head_labels["noun"][idx+1] != "O"
-                            and naive_punctuation_end_pattern.search(multi_head_labels["tokens"][idx-1]) is None):
+                            and ud_token_labels["xpos"][idx-1] in noun_labels
+                            and ud_token_labels["xpos"][idx+1] in noun_labels):
                         await self.control_plane.link_nouns_via_preposition(
-                            idx_to_noun_joined_base_form[last_walked_idx],
-                            stripped_token,
+                            idx_to_noun_joined_base_form[idx-1],
+                            token,
                             idx_to_noun_joined_base_form[idx+1])
 
-                if verb_label == "VB" and idx == 0:
-                    # - Present tense base verb at the beginning is likely imperative sentence signal
-                    # - ^ is not always the case because some constructions can start with base verbs without being
-                    #   imperative in nature.
-                    #   - Think what you will, our conclusions remain unchanged.
-                    #   - Be it known that innovation drives progress.
-                    #   - Come what may, the journey continues.
-                    # - This is difficult to solve with rules because context matters. But maybe these kinds of idioms
-                    #   and expressions can be learned and recalled using the graph.
-                    pass
-                elif verb_label == "VBZ" and idx > 0 and last_noun_idx == last_walked_idx:
-                    if stripped_token == "is":
-                        next_adj_label = multi_head_labels["adj"][idx + 1]
-                        next_adv_label = multi_head_labels["adv"][idx + 1]
-                        next_det_label = multi_head_labels["det"][idx + 1]
-                        next_verb_label = multi_head_labels["verb"][idx + 1]
+            #    if verb_label == "VB" and idx == 0:
+            #        # - Present tense base verb at the beginning is likely imperative sentence signal
+            #        # - ^ is not always the case because some constructions can start with base verbs without being
+            #        #   imperative in nature.
+            #        #   - Think what you will, our conclusions remain unchanged.
+            #        #   - Be it known that innovation drives progress.
+            #        #   - Come what may, the journey continues.
+            #        # - This is difficult to solve with rules because context matters. But maybe these kinds of idioms
+            #        #   and expressions can be learned and recalled using the graph.
+            #        pass
+            #    elif verb_label == "VBZ" and idx > 0 and last_noun_idx == last_walked_idx:
+            #        if stripped_token == "is":
+            #            pass
 
-                # TODO:
-                # - When nouns are common, verbs often describe a capability of that kind of noun
-                #   - Verb nodes connect to nouns as COULD/_NOT and CAN/_NOT to indicate capability
-                #   - Verb nodes should store information about associated verb links
-                # - When nouns are proper, Verbs often describe actions individual do to each other
-                #   - Verb links connect individual nodes
+            #    # TODO:
+            #    # - When nouns are common, verbs often describe a capability of that kind of noun
+            #    #   - Verb nodes connect to nouns as COULD/_NOT and CAN/_NOT to indicate capability
+            #    #   - Verb nodes should store information about associated verb links
+            #    # - When nouns are proper, Verbs often describe actions individual do to each other
+            #    #   - Verb links connect individual nodes
 
                 last_walked_idx = idx
+            pass
+        except Exception as e:
+            logger.error(f"failed to process sentence periodically\n{format_exc()}")
 
-            emotion_labels = await emotion_labels_task
-            logger.info(f"emotion_labels: {emotion_labels}")
+    async def label_sentences_periodically(self):
+        logger.info(f"on_periodic_run: {len(self.unlabeled_sentences)} sentences to be labeled")
+        todo = []
+        if self.unlabeled_sentences:
+            while self.unlabeled_sentences:
+                todo.append(self.unlabeled_sentences.pop(0))
+        for sentence_args in todo:
+            sentence, sentence_id, sentence_context = sentence_args
+
+            emotion_labels = await get_emotions_classifications(sentence)
+            ud_labels_task = asyncio.create_task(self.graph_sentences_using_ud_model(
+                sentence, sentence_id, {**sentence_context, "emotions": emotion_labels["emotions"]}))
+            await asyncio.gather(*[
+                ud_labels_task,
+            ])
 
     async def on_code_block_merge(self, code_block: str, code_block_id: int):
         logger.info(f"on_code_block_merge: code_block_id={code_block_id}, {code_block}")
@@ -373,6 +281,22 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         self.unlabeled_sentences.append((sentence, sentence_id, sentence_context))
 
 
+def dump_labeled_exps(exps, dir_name):
+    first_exp = exps[0]
+    ds_dict = {k: [] for k in first_exp.keys()}
+    for exp in exps:
+        for col, labels in exp.items():
+            ds_dict[col].append(exp[col])
+    ds = Dataset.from_dict(ds_dict)
+    ts_dump = datetime.now().strftime("%Y%m%d%H%M%S")
+
+    dump_dir = os.path.join(germ_settings.DATA_DIR, dir_name)
+    os.makedirs(dump_dir, exist_ok=True)
+    dump_path = f"{dump_dir}/{ts_dump}"
+    logger.info(f"writing {dump_path}\n{ds}")
+    ds.save_to_disk(dump_path)
+
+
 def extract_label_idx_groups(exp, feat, target_labels=None):
     """
     For example, given a list of labels (e.g. ["O", "O", "NN", "NN", "O", "O", "NNS", "O"]),
@@ -397,10 +321,7 @@ def extract_label_idx_groups(exp, feat, target_labels=None):
     current_group = []
 
     for idx, label in enumerate(exp[feat]):
-        if (((label in target_labels) if target_labels is not None else label != "O")
-                and (idx != 0
-                     and naive_punctuation_end_pattern.search(exp["tokens"][idx-1]) is None
-                     and exp["enc"][idx] == exp["enc"][idx-1])):  # Same enclosure chunk
+        if (label in target_labels) if target_labels is not None else label != "O":
             # If current_group is empty or the current idx is consecutive (i.e., previous index + 1),
             # append to current_group. Otherwise, start a new group.
             if current_group and idx == current_group[-1] + 1:
@@ -425,10 +346,10 @@ async def get_emotions_classifications(text: str):
     async with aiohttp.ClientSession() as session:
         async with session.post("http://germ-models:9000/text/classification/emotions",
                                 json={"text": text}) as response:
-            return await response.json()
+            return (await response.json())[0]
 
 
-async def get_token_classifications(text: str):
+async def get_ud_token_classifications(text: str):
     async with aiohttp.ClientSession() as session:
         async with session.post("http://germ-models:9000/text/classification/multi",
                                 json={"text": text}) as response:
