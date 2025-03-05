@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
     await control_plane.initialize()
     scheduler.add_job(english_controller.label_sentences_periodically, "interval",
                       seconds=english_controller.interval_seconds)
-    scheduler.add_job(english_controller.dump_multi_head_exps, "interval",
+    scheduler.add_job(english_controller.dump_labeled_exps, "interval",
                       minutes=10)
 
     assistant_helper = AssistantHelper()
@@ -136,7 +136,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Stopping
-    await run_in_threadpool(english_controller.dump_multi_head_exps)
+    await run_in_threadpool(english_controller.dump_labeled_exps)
 
     websocket_manager_disconnect_task = asyncio.create_task(websocket_manager.disconnect_all())
     await assistant_helper.no_loose_files()

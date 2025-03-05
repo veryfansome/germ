@@ -28,8 +28,10 @@ tracer = trace.get_tracer(__name__)
 ##
 # App
 
-text_emotions_classifier = GoEmotionsPredictor("veryfansome/deberta-goemotions", subfolder="pos_weight_best")
-text_token_multi_classifier = MultiHeadPredictor("veryfansome/multi-classifier", subfolder="models/o3-mini_20250218")
+text_emotions_classifier = GoEmotionsPredictor(
+    "veryfansome/deberta-goemotions", subfolder="pos_weight_best")
+text_token_multi_classifier = MultiHeadPredictor(
+    "veryfansome/multi-classifier", subfolder="models/ud_ewt_gum_20250304")
 
 
 @asynccontextmanager
