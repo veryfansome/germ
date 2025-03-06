@@ -185,22 +185,6 @@ class ControlPlane:
             logger.info(f"MERGE (noun:Noun {{text: {noun}}})")
         return results
 
-    async def add_noun_entity_class(self, noun: str, entity_class: str):
-        results = await self.driver.query("""
-        MATCH (noun:Noun {text: $noun})
-        WITH noun
-        UNWIND (COALESCE(noun.entity_classes, []) + [$entity_class]) AS entity_classes
-        WITH noun, COLLECT(DISTINCT entity_classes) AS uniqueEntityClasses
-        SET noun.entity_classes = uniqueEntityClasses
-        RETURN noun
-        """, {
-            "noun": noun, "entity_class": entity_class
-        })
-        if results:
-            logger.info(f"SET (noun:Noun {{{noun}}}).entity_classes = {results[0]['noun']['entity_classes']}}} "
-                        f"<< {entity_class}")
-        return results
-
     async def add_noun_form(self, noun: str, form: str):
         results = await self.driver.query("""
         MATCH (noun:Noun {text: $noun})
