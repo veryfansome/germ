@@ -23,19 +23,33 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
     def __init__(self, control_plane: ControlPlane, interval_seconds: int = 10):
         self.control_plane = control_plane
         self.interval_seconds = interval_seconds
-        self.ud_labeled_exps = []
+        self.labeled_exps_conll = []
+        self.labeled_exps_ud = []
         self.unlabeled_sentences = []
 
-    def dump_labeled_exps(self):
+    async def dump_labeled_exps(self):
+        async_tasks = []
+        conll_exps = []
         ud_exps = []
-        if self.ud_labeled_exps:
-            while self.ud_labeled_exps:
-                ud_exps.append(self.ud_labeled_exps.pop(0))
-            dump_labeled_exps(ud_exps, "ud")
+        if self.labeled_exps_conll:
+            while self.labeled_exps_conll:
+                conll_exps.append(self.labeled_exps_conll.pop(0))
+            async_tasks.append(asyncio.create_task(run_in_threadpool(dump_labeled_exps, conll_exps, "conll")))
+        if self.labeled_exps_ud:
+            while self.labeled_exps_ud:
+                ud_exps.append(self.labeled_exps_ud.pop(0))
+            async_tasks.append(asyncio.create_task(run_in_threadpool(dump_labeled_exps, ud_exps, "ud")))
+        await asyncio.gather(*async_tasks)
 
     async def graph_sentences_using_ud_model(self, sentence: str, sentence_id: int, sentence_context):
-        ud_token_labels = await get_ud_token_classifications(sentence)
-        self.ud_labeled_exps.append(ud_token_labels)
+        conll_token_labels, ud_token_labels = await asyncio.gather(
+            get_conll_token_classifications(sentence),
+            get_ud_token_classifications(sentence),
+        )
+        self.labeled_exps_conll.append(conll_token_labels)
+        self.labeled_exps_ud.append(ud_token_labels)
+        logger.info(f"conll labels: sentence_id={sentence_id}\nattrs\t{sentence_context}\n" + (
+            "\n".join([f"{head}\t{labels}" for head, labels in conll_token_labels.items()])))
         logger.info(f"ud labels: sentence_id={sentence_id}\nattrs\t{sentence_context}\n" + (
             "\n".join([f"{head}\t{labels}" for head, labels in ud_token_labels.items()])))
 
@@ -342,6 +356,13 @@ def extract_label_idx_groups(exp, feat, target_labels=None):
     return groups
 
 
+async def get_conll_token_classifications(text: str):
+    async with aiohttp.ClientSession() as session:
+        async with session.post("http://germ-models:9000/text/classification/conll",
+                                json={"text": text}) as response:
+            return await response.json()
+
+
 async def get_emotions_classifications(text: str):
     async with aiohttp.ClientSession() as session:
         async with session.post("http://germ-models:9000/text/classification/emotions",
@@ -351,7 +372,7 @@ async def get_emotions_classifications(text: str):
 
 async def get_ud_token_classifications(text: str):
     async with aiohttp.ClientSession() as session:
-        async with session.post("http://germ-models:9000/text/classification/multi",
+        async with session.post("http://germ-models:9000/text/classification/ud",
                                 json={"text": text}) as response:
             return await response.json()
 
