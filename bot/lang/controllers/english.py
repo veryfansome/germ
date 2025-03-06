@@ -46,12 +46,30 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
             get_conll_token_classifications(sentence),
             get_ud_token_classifications(sentence),
         )
-        self.labeled_exps_conll.append(conll_token_labels)
-        self.labeled_exps_ud.append(ud_token_labels)
         logger.info(f"conll labels: sentence_id={sentence_id}\nattrs\t{sentence_context}\n" + (
             "\n".join([f"{head}\t{labels}" for head, labels in conll_token_labels.items()])))
         logger.info(f"ud labels: sentence_id={sentence_id}\nattrs\t{sentence_context}\n" + (
             "\n".join([f"{head}\t{labels}" for head, labels in ud_token_labels.items()])))
+
+        is_conll_ud_aligned = True
+        conll_token_len = len(conll_token_labels["tokens"])
+        ud_token_len = len(ud_token_labels["tokens"])
+        if conll_token_len != ud_token_len:
+            logger.warning(f"classifier token length mismatch: conll={conll_token_len} ud={ud_token_len}")
+        else:
+            for idx, conll_token in enumerate(conll_token_labels["tokens"]):
+                if conll_token != ud_token_labels['tokens'][idx]:
+                    logger.warning(f"CoNLL/UD token mismatch: idx={idx} "
+                                   f"conll={conll_token} "
+                                   f"ud={ud_token_labels['tokens'][idx]}")
+                    is_conll_ud_aligned = False
+                elif conll_token_labels["pos_tags"][idx] != ud_token_labels['xpos'][idx]:
+                    logger.warning(f"CoNLL/UD part-of-speech label mismatch: token={conll_token} "
+                                   f"conll={conll_token_labels['pos_tags'][idx]} "
+                                   f"ud={ud_token_labels['xpos'][idx]}")
+
+        self.labeled_exps_conll.append(conll_token_labels)
+        self.labeled_exps_ud.append(ud_token_labels)
 
         adjectives_added = set()
         noun_labels = {"NN", "NNS", "NNP", "NNPS"}
@@ -66,6 +84,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
 
                 base_form_tokens = []
                 group_labels = []
+                ner_labels = []
                 raw_tokens = []
                 for idx in noun_group:
                     token = ud_token_labels["tokens"][idx]
@@ -82,12 +101,17 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                         noun_base_form = token
                     base_form_tokens.append(noun_base_form.lower())
 
+                    if is_conll_ud_aligned:
+                        ner_labels.append(conll_token_labels["ner_tags"][idx])
+
                 joined_base_form = " ".join(base_form_tokens)
                 joined_raw_form = " ".join(raw_tokens)
                 if joined_base_form not in nouns_added:
                     await self.control_plane.add_noun(joined_base_form)
                     await self.control_plane.add_noun_form(joined_base_form, joined_raw_form)
                     nouns_added.add(joined_base_form)
+                if is_conll_ud_aligned:
+                    logger.info(f"ner: {ner_labels}")
 
                 # If there's a proper noun, everything becomes proper
                 noun_label = "NNP" if "NNP" in group_labels else "NN"
@@ -124,7 +148,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
             for idx in range(token_cnt):
                 token = ud_token_labels["tokens"][idx]
                 lowered_token = token.lower()
-                xpos_label = ud_token_labels["xpos"][idx]
+                ud_xpos_label = ud_token_labels["xpos"][idx]
 
             #    if pronoun_label == "PRP":
             #        logger.info(f"{lowered_token} context: {sentence_context}")
@@ -153,7 +177,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
             #        else:  # Other personal pronouns
             #            pass
 
-                if xpos_label in noun_labels:
+                if ud_xpos_label in noun_labels:
                     # TODO:
                     # - Proper nouns should link to common nouns with INSTANCE_OF links
                     if (last_walked_idx is not None
@@ -169,12 +193,12 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                     last_noun_idx = idx
 
                 # Filter for adjectives that are not also part of a noun phrase.
-                if xpos_label == "JJ":
+                if ud_xpos_label == "JJ":
                     last_adj_idx = idx
                     last_adj_base = lowered_token
                     last_adj_token = token
 
-                if xpos_label == "IN":
+                if ud_xpos_label == "IN":
                     # Prepositions linking nouns
                     if (last_walked_idx is not None
                             and idx < token_cnt - 1
@@ -200,26 +224,46 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                             token,
                             idx_to_noun_joined_base_form[idx+1])
 
-            #    if verb_label == "VB" and idx == 0:
-            #        # - Present tense base verb at the beginning is likely imperative sentence signal
-            #        # - ^ is not always the case because some constructions can start with base verbs without being
-            #        #   imperative in nature.
-            #        #   - Think what you will, our conclusions remain unchanged.
-            #        #   - Be it known that innovation drives progress.
-            #        #   - Come what may, the journey continues.
-            #        # - This is difficult to solve with rules because context matters. But maybe these kinds of idioms
-            #        #   and expressions can be learned and recalled using the graph.
-            #        pass
-            #    elif verb_label == "VBZ" and idx > 0 and last_noun_idx == last_walked_idx:
-            #        if stripped_token == "is":
-            #            pass
+                # Verbs
+                if ud_xpos_label in {"VB", "VBD", "VBG", "VBP", "VBN", "VBZ"}:
+                    if ud_xpos_label == "VB":  # base
+                        if lowered_token in {"be"}:
+                            if 0 < idx < token_cnt - 1:
+                                logger.info(
+                                    f"state-of-being verb: {ud_token_labels['tokens'][idx - 1]} {token} {ud_token_labels['tokens'][idx + 1]}")
+                    elif ud_xpos_label == "VBD":  # past tense
+                        if lowered_token in {"was", "were"}:
+                            if 0 < idx < token_cnt - 1:
+                                logger.info(
+                                    f"state-of-being verb: {ud_token_labels['tokens'][idx - 1]} {token} {ud_token_labels['tokens'][idx + 1]}")
+                    elif ud_xpos_label == "VBG":  # present participle / gerund
+                        if lowered_token in {"being"}:
+                            if 0 < idx < token_cnt - 1:
+                                logger.info(
+                                    f"state-of-being verb: {ud_token_labels['tokens'][idx - 1]} {token} {ud_token_labels['tokens'][idx + 1]}")
+                    elif ud_xpos_label == "VBN":  # past participle
+                        if lowered_token in {"been"}:
+                            if 0 < idx < token_cnt - 1:
+                                logger.info(
+                                    f"state-of-being verb: {ud_token_labels['tokens'][idx - 1]} {token} {ud_token_labels['tokens'][idx + 1]}")
+                    elif ud_xpos_label == "VBP":  # 1st person singular present and non-3rd person singular present
+                        if lowered_token in {"am", "are"}:
+                            if 0 < idx < token_cnt - 1:
+                                logger.info(
+                                    f"state-of-being verb: {ud_token_labels['tokens'][idx - 1]} {token} {ud_token_labels['tokens'][idx + 1]}")
+                    elif ud_xpos_label == "VBZ":  # 3rd person singular present
+                        if lowered_token in {"is"}:
+                            if idx == 0 and idx < token_cnt - 1:
+                                logger.info(f"{token} {ud_token_labels['tokens'][idx+1]}")
+                            elif idx < token_cnt - 1:
+                                logger.info(f"{ud_token_labels['tokens'][idx-1]} {token} {ud_token_labels['tokens'][idx+1]}")
 
-            #    # TODO:
-            #    # - When nouns are common, verbs often describe a capability of that kind of noun
-            #    #   - Verb nodes connect to nouns as COULD/_NOT and CAN/_NOT to indicate capability
-            #    #   - Verb nodes should store information about associated verb links
-            #    # - When nouns are proper, Verbs often describe actions individual do to each other
-            #    #   - Verb links connect individual nodes
+                #    # TODO:
+                #    # - When nouns are common, verbs often describe a capability of that kind of noun
+                #    #   - Verb nodes connect to nouns as COULD/_NOT and CAN/_NOT to indicate capability
+                #    #   - Verb nodes should store information about associated verb links
+                #    # - When nouns are proper, Verbs often describe actions individual do to each other
+                #    #   - Verb links connect individual nodes
 
                 last_walked_idx = idx
             pass

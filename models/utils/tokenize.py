@@ -18,6 +18,8 @@ naive_tokenize_pattern = re.compile(
     r"|`+"
     r"|,+(?=\"|\s|$)"
     r"|" + non_terminal_periods + r"\.+(?=\"|\s|$)"
+    r"|:+"
+    r"|;+"
     r"|[?!]+(?=\"|\s|$)"
     r")"
 )
