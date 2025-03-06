@@ -136,7 +136,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Stopping
-    await run_in_threadpool(english_controller.dump_labeled_exps)
+    await english_controller.dump_labeled_exps()
 
     websocket_manager_disconnect_task = asyncio.create_task(websocket_manager.disconnect_all())
     await assistant_helper.no_loose_files()
