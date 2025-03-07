@@ -7,6 +7,8 @@ import asyncio
 import inflect
 import os
 
+from transformers.models.udop.modeling_udop import get_relative_position_bucket
+
 from bot.graph.control_plane import CodeBlockMergeEventHandler, ControlPlane, ParagraphMergeEventHandler, \
     SentenceMergeEventHandler
 from bot.lang.parsers import get_html_soup, strip_html_elements
@@ -17,6 +19,12 @@ from settings import germ_settings
 logger = logging.getLogger(__name__)
 
 infect_eng = inflect.engine()
+
+NOUN_LABELS = {"NN", "NNS", "NNP", "NNPS"}
+VERB_LABELS = {"VB", "VBD", "VBG", "VBP", "VBN", "VBZ"}
+STATE_OF_BEING_VERBS = {"am", "are", "be", "been", "being", "is", "was", "were"}
+SUBORDINATING_CONJUNCTIONS = {"after", "although", "because", "before", "if", "once", "since", "that", "though",
+                             "unless", "until", "when", "while"}
 
 
 class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler):
@@ -73,26 +81,29 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
 
         adjectives_added = set()
         named_entity_classes_added = set()
-        noun_labels = {"NN", "NNS", "NNP", "NNPS"}
         nouns_added = set()
         token_cnt = len(ud_token_labels["tokens"])
         try:
             # Noun groups / noun phrases
             idx_to_noun_group = {}
             idx_to_noun_joined_base_form = {}
-            for noun_group in extract_label_idx_groups(ud_token_labels, "xpos", target_labels=noun_labels):
+            for noun_group in extract_label_idx_groups(ud_token_labels, "xpos", target_labels=NOUN_LABELS):
                 noun_group_len = len(noun_group)
 
-                base_form_tokens = []
-                group_labels = []
-                ner_labels = []
-                raw_tokens = []
+                grp_base_form_tokens = []
+                grp_deprel_labels = []
+                grp_noun_labels = []
+                grp_ner_labels = []
+                grp_raw_tokens = []
                 for idx in noun_group:
                     token = ud_token_labels["tokens"][idx]
-                    raw_tokens.append(token)
+                    grp_raw_tokens.append(token)
+
+                    deprel_label = ud_token_labels["deprel"][idx]
+                    grp_deprel_labels.append(deprel_label)
 
                     noun_label = ud_token_labels["xpos"][idx]
-                    group_labels.append(noun_label)
+                    grp_noun_labels.append(noun_label)
 
                     if noun_label.endswith("S"):
                         noun_base_form = infect_eng.singular_noun(token)
@@ -100,37 +111,38 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                             noun_base_form = token
                     else:
                         noun_base_form = token
-                    base_form_tokens.append(noun_base_form.lower())
+                    grp_base_form_tokens.append(noun_base_form.lower())
 
                     if is_conll_ud_aligned:
-                        ner_labels.append(conll_token_labels["ner_tags"][idx])
+                        grp_ner_labels.append(conll_token_labels["ner_tags"][idx])
 
-                joined_base_form = " ".join(base_form_tokens)
-                joined_raw_form = " ".join(raw_tokens)
+                joined_base_form = " ".join(grp_base_form_tokens)
+                joined_raw_form = " ".join(grp_raw_tokens)
                 if joined_base_form not in nouns_added:
                     await self.control_plane.add_noun(joined_base_form)
                     await self.control_plane.add_noun_form(joined_base_form, joined_raw_form)
                     nouns_added.add(joined_base_form)
 
                 # If there's a proper noun, everything becomes proper
-                noun_label = "NNP" if "NNP" in group_labels else "NN"
+                noun_label = "NNP" if "NNP" in grp_noun_labels else "NN"
                 # If the last noun is plural, everything becomes plural
-                if group_labels[-1].endswith("S"):
+                if grp_noun_labels[-1].endswith("S"):
                     noun_label += "S"
 
-                await self.control_plane.link_noun_form_to_sentence(
-                    joined_base_form, joined_raw_form,
-                    noun_label,  # Implicitly last noun_label in group
-                    sentence_id)
+                if "nsubj" in grp_deprel_labels:
+                    await self.control_plane.link_noun_form_to_sentence(
+                        joined_base_form, joined_raw_form,
+                        "nsubj",
+                        sentence_id)
 
                 # If CoNLL and UD tokens are aligned, graph NER entities and phrase components, else just graph
                 # phrase components.
                 if is_conll_ud_aligned:
-                    for entity_group in extract_entity_idx_groups(ner_labels):
+                    for entity_group in extract_entity_idx_groups(grp_ner_labels):
                         entity_label, member_idx_list = entity_group
 
-                        member_base_form_tokens = [base_form_tokens[i] for i in member_idx_list]
-                        member_raw_form_tokens = [raw_tokens[i] for i in member_idx_list]
+                        member_base_form_tokens = [grp_base_form_tokens[i] for i in member_idx_list]
+                        member_raw_form_tokens = [grp_raw_tokens[i] for i in member_idx_list]
                         joined_member_base_form = " ".join(member_base_form_tokens)
                         joined_member_raw_form = " ".join(member_raw_form_tokens)
 
@@ -147,9 +159,9 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                             await self.control_plane.link_noun_to_named_entity_class(
                                 joined_member_base_form, entity_label)
                 else:
-                    for idx in range(len(base_form_tokens)):
-                        noun_base_form = base_form_tokens[idx]
-                        raw_token = raw_tokens[idx]
+                    for idx in range(len(grp_base_form_tokens)):
+                        noun_base_form = grp_base_form_tokens[idx]
+                        raw_token = grp_raw_tokens[idx]
                         if noun_base_form not in nouns_added:
                             await self.control_plane.add_noun(noun_base_form)
                             await self.control_plane.add_noun_form(noun_base_form, raw_token)
@@ -199,7 +211,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
             #        else:  # Other personal pronouns
             #            pass
 
-                if ud_xpos_label in noun_labels:
+                if ud_xpos_label in NOUN_LABELS:
                     # TODO:
                     # - Proper nouns should link to common nouns with INSTANCE_OF links
                     if (last_walked_idx is not None
@@ -214,71 +226,60 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                             last_adj_base, idx_to_noun_joined_base_form[idx])
                     last_noun_idx = idx
 
-                # Filter for adjectives that are not also part of a noun phrase.
                 if ud_xpos_label == "JJ":
                     last_adj_idx = idx
                     last_adj_base = lowered_token
                     last_adj_token = token
 
-                if ud_xpos_label == "IN":
+                if ud_xpos_label == "IN" and token not in SUBORDINATING_CONJUNCTIONS:
                     # Prepositions linking nouns
-                    if (last_walked_idx is not None
-                            and idx < token_cnt - 1
-                            and token not in {  # Subordinating conjunctions
-                                "after",
-                                "although",
-                                "because",
-                                "before",
-                                "if",
-                                "once",
-                                "since",
-                                "that",
-                                "though",
-                                "unless",
-                                "until",
-                                "when",
-                                "while",
-                            }
-                            and ud_token_labels["xpos"][idx-1] in noun_labels
-                            and ud_token_labels["xpos"][idx+1] in noun_labels):
-                        await self.control_plane.link_nouns_via_preposition(
-                            idx_to_noun_joined_base_form[idx-1],
-                            token,
-                            idx_to_noun_joined_base_form[idx+1])
+                    if 0 < idx:
+                        if idx < token_cnt-1:
+                            if (ud_token_labels["xpos"][idx-1] in NOUN_LABELS
+                                    and ud_token_labels["xpos"][idx+1] in NOUN_LABELS):
+                                # NN of NN
+                                await self.control_plane.link_nouns_via_preposition(
+                                    idx_to_noun_joined_base_form[idx-1],
+                                    token,
+                                    idx_to_noun_joined_base_form[idx+1])
+                        elif idx < token_cnt-2:
+                            if (ud_token_labels["xpos"][idx-1] in NOUN_LABELS
+                                    and ud_token_labels["xpos"][idx+1] in {"DT", "JJ"}
+                                    and ud_token_labels["xpos"][idx+2] in NOUN_LABELS):
+                                # NN of DT/JJ NN
+                                await self.control_plane.link_nouns_via_preposition(
+                                    idx_to_noun_joined_base_form[idx-1],
+                                    token,
+                                    idx_to_noun_joined_base_form[idx+2])
+                        elif idx < token_cnt-3:
+                            if (ud_token_labels["xpos"][idx-1] in NOUN_LABELS
+                                    and ud_token_labels["xpos"][idx+1] == "DT"
+                                    and ud_token_labels["xpos"][idx+2] == "JJ"
+                                    and ud_token_labels["xpos"][idx+3] in NOUN_LABELS):
+                                # NN of DT JJ NN
+                                await self.control_plane.link_nouns_via_preposition(
+                                    idx_to_noun_joined_base_form[idx-1],
+                                    token,
+                                    idx_to_noun_joined_base_form[idx+3])
+                    elif 1 < idx:
+                        if idx < token_cnt-1:
+                            if (ud_token_labels["xpos"][idx-2] in NOUN_LABELS
+                                    and ud_token_labels["xpos"][idx-1] in STATE_OF_BEING_VERBS
+                                    and ud_token_labels["xpos"][idx+1] in NOUN_LABELS):
+                                # NN is in NN
+                                await self.control_plane.link_nouns_via_preposition(
+                                    idx_to_noun_joined_base_form[idx-2],
+                                    token,
+                                    idx_to_noun_joined_base_form[idx+1])
 
                 # Verbs
-                if ud_xpos_label in {"VB", "VBD", "VBG", "VBP", "VBN", "VBZ"}:
-                    if ud_xpos_label == "VB":  # base
-                        if lowered_token in {"be"}:
-                            if 0 < idx < token_cnt - 1:
-                                logger.info(
-                                    f"state-of-being verb: {ud_token_labels['tokens'][idx - 1]} {token} {ud_token_labels['tokens'][idx + 1]}")
-                    elif ud_xpos_label == "VBD":  # past tense
-                        if lowered_token in {"was", "were"}:
-                            if 0 < idx < token_cnt - 1:
-                                logger.info(
-                                    f"state-of-being verb: {ud_token_labels['tokens'][idx - 1]} {token} {ud_token_labels['tokens'][idx + 1]}")
-                    elif ud_xpos_label == "VBG":  # present participle / gerund
-                        if lowered_token in {"being"}:
-                            if 0 < idx < token_cnt - 1:
-                                logger.info(
-                                    f"state-of-being verb: {ud_token_labels['tokens'][idx - 1]} {token} {ud_token_labels['tokens'][idx + 1]}")
-                    elif ud_xpos_label == "VBN":  # past participle
-                        if lowered_token in {"been"}:
-                            if 0 < idx < token_cnt - 1:
-                                logger.info(
-                                    f"state-of-being verb: {ud_token_labels['tokens'][idx - 1]} {token} {ud_token_labels['tokens'][idx + 1]}")
-                    elif ud_xpos_label == "VBP":  # 1st person singular present and non-3rd person singular present
-                        if lowered_token in {"am", "are"}:
-                            if 0 < idx < token_cnt - 1:
-                                logger.info(
-                                    f"state-of-being verb: {ud_token_labels['tokens'][idx - 1]} {token} {ud_token_labels['tokens'][idx + 1]}")
-                    elif ud_xpos_label == "VBZ":  # 3rd person singular present
-                        if lowered_token in {"is"}:
-                            if idx == 0 and idx < token_cnt - 1:
-                                logger.info(f"{token} {ud_token_labels['tokens'][idx+1]}")
-                            elif idx < token_cnt - 1:
-                                logger.info(f"{ud_token_labels['tokens'][idx-1]} {token} {ud_token_labels['tokens'][idx+1]}")
+                if ud_xpos_label in VERB_LABELS:
+                    if lowered_token in STATE_OF_BEING_VERBS:
+                        if idx == 0 and idx < token_cnt - 1:
+                            logger.info(f"state-of-being verb: {token} {ud_token_labels['tokens'][idx + 1]}")
+                        elif idx < token_cnt - 1:
+                            logger.info(
+                                f"state-of-being verb: {ud_token_labels['tokens'][idx - 1]} {token} {ud_token_labels['tokens'][idx + 1]}")
 
                 #    # TODO:
                 #    # - When nouns are common, verbs often describe a capability of that kind of noun

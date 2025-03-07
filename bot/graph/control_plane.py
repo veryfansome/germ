@@ -329,15 +329,17 @@ class ControlPlane:
         logger.info(f"response/session link: {results}")
         return results
 
-    async def link_noun_form_to_sentence(self, noun: str, form: str, tag: str, sentence_id: int):
+    async def link_noun_form_to_sentence(self, noun: str, form: str, deprel: str, sentence_id: int):
+        link_name = deprel.upper()
         results = await self.driver.query(f"""
         MATCH (noun:Noun {{text: $noun}}), (sentence:Sentence {{sentence_id: $sentence_id}})
-        MERGE (sentence)-[r:{tag} {{form: $form, sentence_id: $sentence_id}}]->(noun)
+        MERGE (noun)-[r:{link_name} {{form: $form, sentence_id: $sentence_id}}]->(sentence)
         RETURN r
         """, {
             "noun": noun, "form": form, "sentence_id": sentence_id
         })
-        logger.info(f"noun link: {results}")
+        if results:
+            logger.info(f"MERGE (noun:Noun {{text: {noun}}})-[r:{link_name} {{form: {form}}}]->(sentence:Sentence {{sentence_id: {sentence_id}}})")
         return results
 
     async def link_noun_to_named_entity_class(self, noun: str, named_entity_class: str):
