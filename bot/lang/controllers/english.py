@@ -72,6 +72,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         self.labeled_exps_ud.append(ud_token_labels)
 
         adjectives_added = set()
+        named_entity_classes_added = set()
         noun_labels = {"NN", "NNS", "NNP", "NNPS"}
         nouns_added = set()
         token_cnt = len(ud_token_labels["tokens"])
@@ -110,8 +111,6 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                     await self.control_plane.add_noun(joined_base_form)
                     await self.control_plane.add_noun_form(joined_base_form, joined_raw_form)
                     nouns_added.add(joined_base_form)
-                if is_conll_ud_aligned:
-                    logger.info(f"ner: {ner_labels}")
 
                 # If there's a proper noun, everything becomes proper
                 noun_label = "NNP" if "NNP" in group_labels else "NN"
@@ -124,7 +123,30 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                     noun_label,  # Implicitly last noun_label in group
                     sentence_id)
 
-                if noun_group_len > 1:
+                # If CoNLL and UD tokens are aligned, graph NER entities and phrase components, else just graph
+                # phrase components.
+                if is_conll_ud_aligned:
+                    for entity_group in extract_entity_idx_groups(ner_labels):
+                        entity_label, member_idx_list = entity_group
+
+                        member_base_form_tokens = [base_form_tokens[i] for i in member_idx_list]
+                        member_raw_form_tokens = [raw_tokens[i] for i in member_idx_list]
+                        joined_member_base_form = " ".join(member_base_form_tokens)
+                        joined_member_raw_form = " ".join(member_raw_form_tokens)
+
+                        # Add if phrase component is new
+                        if joined_member_base_form not in nouns_added:
+                            await self.control_plane.add_noun(joined_member_base_form)
+                            await self.control_plane.add_noun_form(joined_member_base_form, joined_member_raw_form)
+                            nouns_added.add(joined_member_base_form)
+                        if entity_label != "O":
+                            logger.info(f"ner entity group: {entity_group}: {joined_member_base_form}")
+                            if entity_label not in named_entity_classes_added:
+                                await self.control_plane.add_named_entity_class(entity_label)
+                                named_entity_classes_added.add(entity_label)
+                            await self.control_plane.link_noun_to_named_entity_class(
+                                joined_member_base_form, entity_label)
+                else:
                     for idx in range(len(base_form_tokens)):
                         noun_base_form = base_form_tokens[idx]
                         raw_token = raw_tokens[idx]
@@ -353,6 +375,40 @@ def dump_labeled_exps(exps, dir_name):
     dump_path = f"{dump_dir}/{ts_dump}"
     logger.info(f"writing {dump_path}\n{ds}")
     ds.save_to_disk(dump_path)
+
+
+def extract_entity_idx_groups(labels):
+    entities = []
+    current_entity = None
+    current_indices = []
+
+    for index, label in enumerate(labels):
+        if label.startswith('B-'):  # Beginning of an entity
+            # If we're in the middle of collecting an entity, store it
+            if current_entity is not None:
+                entities.append((current_entity, list(current_indices)))
+                current_indices = []
+            # Start a new entity
+            current_entity = label[2:]
+            current_indices.append(index)
+        elif label.startswith('I-') and current_entity:  # Inside an entity
+            if label[2:] == current_entity:
+                current_indices.append(index)
+            else:
+                # If it's a continuation of a different entity, store current and reset
+                entities.append((current_entity, list(current_indices)))
+                current_entity = None
+                current_indices = []
+        else:
+            # If this is an "O" or unexpected format, store current entity
+            if current_entity is not None:
+                entities.append((current_entity, list(current_indices)))
+                current_entity = None
+                current_indices = []
+    # To store any entity that could end at the last element
+    if current_entity is not None:
+        entities.append((current_entity, current_indices))
+    return entities
 
 
 def extract_label_idx_groups(exp, feat, target_labels=None):

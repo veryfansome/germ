@@ -174,6 +174,17 @@ class ControlPlane:
         logger.info(f"hyperlink: {results}")
         return results
 
+    async def add_named_entity_class(self, named_entity_class: str):
+        results = await self.driver.query("""
+        MERGE (ner:NamedEntityClass {text: $ner})
+        RETURN ner
+        """, {
+            "ner": named_entity_class,
+        })
+        if results:
+            logger.info(f"MERGE (ner:NamedEntityClass {{text: {named_entity_class}}})")
+        return results
+
     async def add_noun(self, noun: str):
         results = await self.driver.query("""
         MERGE (noun:Noun {text: $noun})
@@ -327,6 +338,18 @@ class ControlPlane:
             "noun": noun, "form": form, "sentence_id": sentence_id
         })
         logger.info(f"noun link: {results}")
+        return results
+
+    async def link_noun_to_named_entity_class(self, noun: str, named_entity_class: str):
+        results = await self.driver.query("""
+        MATCH (noun:Noun {text: $noun}), (ner:NamedEntityClass {text: $ner})
+        MERGE (noun)-[r:IS_A]->(ner)
+        RETURN r
+        """, {
+            "noun": noun, "ner": named_entity_class,
+        })
+        if results:
+            logger.info(f"MERGE (noun:Noun {{text: {noun}}})-[r:IS_A]->(ner:NamedEntityClass {{text: {named_entity_class}}})")
         return results
 
     async def link_noun_to_phrase(self, noun: str, phrase: str):

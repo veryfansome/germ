@@ -12,6 +12,8 @@ CREATE CONSTRAINT     FOR (codeBlock:CodeBlock)                REQUIRE codeBlock
 //
 CREATE CONSTRAINT     FOR (domainName:DomainName)              REQUIRE domainName.name                       IS UNIQUE;
 //
+CREATE CONSTRAINT     FOR (ner:NamedEntityClass)               REQUIRE ner.text                              IS UNIQUE;
+//
 CREATE CONSTRAINT     FOR (noun:Noun)                          REQUIRE noun.text                             IS UNIQUE;
 //
 CREATE CONSTRAINT     FOR (paragraph:Paragraph)                REQUIRE paragraph.paragraph_id                IS UNIQUE;
