@@ -14,12 +14,12 @@ CREATE CONSTRAINT     FOR (domainName:DomainName)              REQUIRE domainNam
 //
 CREATE CONSTRAINT     FOR (ner:NamedEntityClass)               REQUIRE ner.text                              IS UNIQUE;
 //
-CREATE CONSTRAINT     FOR (noun:Noun)                          REQUIRE noun.text                             IS UNIQUE;
+CREATE CONSTRAINT     FOR (noun:Noun)                          REQUIRE (noun.text, noun.sentence_id)         IS UNIQUE;
 //
 CREATE CONSTRAINT     FOR (paragraph:Paragraph)                REQUIRE paragraph.paragraph_id                IS UNIQUE;
 //
 CREATE CONSTRAINT     FOR (sentence:Sentence)                  REQUIRE sentence.text                         IS UNIQUE;
 
 //
-CREATE INDEX          FOR (noun:Noun)                          ON noun.forms;
+CREATE INDEX          FOR (noun:Noun)                          ON (noun.forms, noun.sentence_id);
 

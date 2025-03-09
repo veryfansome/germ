@@ -36,6 +36,7 @@ class ChatController(WebSocketReceiveEventHandler, WebSocketSendEventHandler):
             elements,
             self.control_plane.link_page_element_to_chat_request, [chat_request_received_id],
             {
+                "_": {"deferred_labeling": False},
                 "chat_request_received_id": chat_request_received_id,
                 "chat_session_id": chat_session_id,
             })
