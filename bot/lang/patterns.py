@@ -18,6 +18,7 @@ non_terminal_periods = (
     r"(?<!\setc)"
     r"(?<!\si\.e)"
     r"(?<!\s[A-Z])"
+    r"(?<!^[a-zA-Z0-9])"
 )
 naive_sentence_end_pattern = re.compile(r"([\n\r]+"
                                         r"|[!?]+\"?(?=\s|$)"

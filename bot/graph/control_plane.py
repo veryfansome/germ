@@ -142,6 +142,7 @@ class ControlPlane:
                     # Execute the insert and fetch the returned values
                     rdb_record = (await rdb_session.execute(sql_insert_stmt)).first()
 
+        controller_context = code_block_context.pop("_", {})  # Exclude controller contexts
         code_block_context["time_occurred"] = round_time_now_down_to_nearst_interval()
         code_block_context_expr = ", ".join([f"{k}: ${k}" for k in code_block_context.keys()])
         graph_results = await self.driver.query(f"""
@@ -152,6 +153,8 @@ class ControlPlane:
             "code_block_id": rdb_record.text_block_id,
             **code_block_context
         })
+        code_block_context["_"] = controller_context
+
         async_tasks = []
         if graph_results:
             result_sig = ", ".join([f"{k}: {v}" for k, v in graph_results[0]['block'].items() if k.endswith("_id")])
@@ -174,41 +177,56 @@ class ControlPlane:
         logger.info(f"hyperlink: {results}")
         return results
 
-    async def add_named_entity_class(self, named_entity_class: str):
+    async def add_noun(self, noun: str, sentence_id: int):
         results = await self.driver.query("""
-        MERGE (ner:NamedEntityClass {text: $ner})
-        RETURN ner
-        """, {
-            "ner": named_entity_class,
-        })
-        if results:
-            logger.info(f"MERGE (ner:NamedEntityClass {{text: {named_entity_class}}})")
-        return results
-
-    async def add_noun(self, noun: str):
-        results = await self.driver.query("""
-        MERGE (noun:Noun {text: $noun})
+        MATCH (noun:Noun {text: $noun, sentence_id: $sentence_id})
         RETURN noun
         """, {
-            "noun": noun,
+            "noun": noun, "sentence_id": sentence_id,
         })
-        if results:
-            logger.info(f"MERGE (noun:Noun {{text: {noun}}})")
+        if not results:
+            results = await self.driver.query("""
+            MERGE (noun:Noun {text: $noun, sentence_id: $sentence_id})
+            WITH noun
+            UNWIND (COALESCE(noun.forms, []) + [$noun]) AS forms
+            WITH noun, COLLECT(DISTINCT forms) AS uniqueForms
+            SET noun.forms = uniqueForms
+            RETURN noun
+            """, {
+                "noun": noun, "sentence_id": sentence_id,
+            })
+            if results:
+                logger.info(f"MERGE (noun:Noun {{text: {noun}}})")
+            else:
+                logger.error(f"failed to add noun: '{noun}' sentence_id={sentence_id}")
         return results
 
-    async def add_noun_form(self, noun: str, form: str):
+    async def add_noun_class(self, noun_class: str):
         results = await self.driver.query("""
-        MATCH (noun:Noun {text: $noun})
+        MERGE (cls:Noun {text: $cls, sentence_id: 0})
+        RETURN cls
+        """, {
+            "cls": noun_class,
+        })
+        if results:
+            logger.info(f"MERGE (cls:Noun {{text: {noun_class}, sentence_id: 0}})")
+        return results
+
+    async def add_noun_form(self, noun: str, form: str, sentence_id: int):
+        results = await self.driver.query("""
+        MATCH (noun:Noun {text: $noun, sentence_id: $sentence_id})
         WITH noun
         UNWIND (COALESCE(noun.forms, []) + [$form]) AS forms
         WITH noun, COLLECT(DISTINCT forms) AS uniqueForms
         SET noun.forms = uniqueForms
         RETURN noun
         """, {
-            "noun": noun, "form": form
+            "noun": noun, "form": form, "sentence_id": sentence_id,
         })
         if results:
             logger.info(f"SET (noun:Noun {{{noun}}}).forms = {results[0]['noun']['forms']}}} << {form}")
+        else:
+            logger.error(f"failed to add noun form: '{noun}' form='{form}' sentence_id={sentence_id}")
         return results
 
     async def add_paragraph(self, paragraph: str, paragraph_context):
@@ -231,6 +249,8 @@ class ControlPlane:
                     # Execute the insert and fetch the returned values
                     rdb_record = (await rdb_session.execute(sql_insert_stmt)).first()
 
+        controller_context = paragraph_context.pop("_", {})  # Exclude controller contexts
+        paragraph_context["paragraph_id"] = rdb_record.text_block_id
         paragraph_context["time_occurred"] = round_time_now_down_to_nearst_interval()
         paragraph_context_expr = ", ".join([f"{k}: ${k}" for k in paragraph_context.keys()])
         graph_results = await self.driver.query(f"""
@@ -238,9 +258,10 @@ class ControlPlane:
         RETURN paragraph
         """, {
             "text": paragraph,
-            "paragraph_id": rdb_record.text_block_id,
             **paragraph_context,
         })
+        paragraph_context["_"] = controller_context
+
         async_tasks = []
         if graph_results:
             result_sig = ", ".join([f"{k}: {v}" for k, v in graph_results[0]['paragraph'].items() if k.endswith("_id")])
@@ -290,6 +311,14 @@ class ControlPlane:
     async def close(self):
         await self.driver.shutdown()
 
+    async def get_paragraph(self, paragraph_id: int):
+        return await self.driver.query("""
+        MATCH (paragraph:Paragraph {paragraph_id: $paragraph_id})
+        RETURN paragraph
+        """, {
+            "paragraph_id": paragraph_id,
+        })
+
     async def link_chat_request_to_chat_session(self, chat_request_received_id: int, chat_session_id: int, time_occurred):
         results = await self.driver.query("""
         MATCH (req:ChatRequest {chat_request_received_id: $chat_request_received_id}), (session:ChatSession {chat_session_id: $chat_session_id})
@@ -329,10 +358,10 @@ class ControlPlane:
         logger.info(f"response/session link: {results}")
         return results
 
-    async def link_noun_form_to_sentence(self, noun: str, form: str, deprel: str, sentence_id: int):
-        link_name = deprel.upper()
+    async def link_noun_form_to_sentence(self, noun: str, form: str, link_name: str, sentence_id: int):
+        link_name = link_name.upper()
         results = await self.driver.query(f"""
-        MATCH (noun:Noun {{text: $noun}}), (sentence:Sentence {{sentence_id: $sentence_id}})
+        MATCH (noun:Noun {{text: $noun, sentence_id: $sentence_id}}), (sentence:Sentence {{sentence_id: $sentence_id}})
         MERGE (noun)-[r:{link_name} {{form: $form, sentence_id: $sentence_id}}]->(sentence)
         RETURN r
         """, {
@@ -342,53 +371,103 @@ class ControlPlane:
             logger.info(f"MERGE (noun:Noun {{text: {noun}}})-[r:{link_name} {{form: {form}}}]->(sentence:Sentence {{sentence_id: {sentence_id}}})")
         return results
 
-    async def link_noun_to_named_entity_class(self, noun: str, named_entity_class: str):
+    async def link_noun_to_adjective(self, adj: str, noun: str, sentence_id: int):
         results = await self.driver.query("""
-        MATCH (noun:Noun {text: $noun}), (ner:NamedEntityClass {text: $ner})
-        MERGE (noun)-[r:IS_A]->(ner)
-        RETURN r
-        """, {
-            "noun": noun, "ner": named_entity_class,
-        })
-        if results:
-            logger.info(f"MERGE (noun:Noun {{text: {noun}}})-[r:IS_A]->(ner:NamedEntityClass {{text: {named_entity_class}}})")
-        return results
-
-    async def link_noun_to_phrase(self, noun: str, phrase: str):
-        results = await self.driver.query("""
-        MATCH (noun:Noun {text: $noun}), (phrase:Noun {text: $phrase})
-        MERGE (phrase)-[r:CONTAINS]->(noun)
-        RETURN r
-        """, {
-            "noun": noun, "phrase": phrase,
-        })
-        if results:
-            logger.info(f"MERGE (phrase:Noun {{text: {phrase}}})-[r:CONTAINS]->(noun:Noun {{text: {noun}}})")
-        return results
-
-    async def link_noun_to_preceding_adjective(self, adj: str, noun: str):
-        results = await self.driver.query("""
-        MATCH (adj:Adjective {text: $adj}), (noun:Noun {text: $noun})
+        MATCH (adj:Adjective {text: $adj}), (noun:Noun {text: $noun, sentence_id: $sentence_id})
         MERGE (adj)-[r:DESCRIBES]->(noun)
         RETURN r
         """, {
-            "adj": adj, "noun": noun,
+            "adj": adj, "noun": noun, "sentence_id": sentence_id,
         })
         if results:
             logger.info(f"MERGE (adj:Adjective {{text: {adj}}})-[r:PRECEDES]->(noun:Noun {{text: {noun}}})")
         return results
 
-    async def link_nouns_via_preposition(self, noun1: str, preposition: str, noun2: str):
+    async def equate_noun_to_noun(self, noun1: str, noun2: str, sentence_id: int):
+        results = await self.driver.query("""
+        MATCH (noun1:Noun {text: $noun1, sentence_id: $sentence_id}), (noun2:Noun {text: $noun2, sentence_id: $sentence_id})
+        MERGE (noun1)-[r:IS]->(noun2)
+        RETURN r
+        """, {
+            "noun1": noun1, "noun2": noun2, "sentence_id": sentence_id,
+        })
+        if results:
+            logger.info(f"MERGE (noun1:Noun {{text: {noun1}}})-[r:IS]->(noun:Noun {{text: {noun2}}})")
+        return results
+
+    async def link_noun_cls1_is_cls2(self, cls1: str, cls2: str):
+        results = await self.driver.query("""
+        MATCH (cls1:Noun {text: $cls1, sentence_id: 0}), (cls2:Noun {text: $cls2, sentence_id: 0})
+        MERGE (cls1)-[r:IS]->(cls2)
+        RETURN r
+        """, {
+            "cls1": cls1, "cls2": cls2,
+        })
+        if results:
+            logger.info(f"MERGE (cls1:Noun {{text: {cls1}}})-[r:IS]->(cls2:Noun {{text: {cls2}}})")
+        return results
+
+    async def link_noun_to_noun_class(self, noun: str, noun_class: str, sentence_id: int):
+        results = await self.driver.query("""
+        MATCH (noun:Noun {text: $noun, sentence_id: $sentence_id}), (cls:Noun {text: $cls, sentence_id: 0})
+        MERGE (noun)-[r:IS_A]->(cls)
+        RETURN r
+        """, {
+            "noun": noun, "cls": noun_class, "sentence_id": sentence_id,
+        })
+        if results:
+            logger.info(f"MERGE (noun:Noun {{text: {noun}}})-[r:IS_A]->(cls:Noun {{text: {noun_class}}})")
+        return results
+
+    async def link_noun_to_phrase(self, noun: str, phrase: str, sentence_id: int):
+        results = await self.driver.query("""
+        MATCH (noun:Noun {text: $noun, sentence_id: $sentence_id}), (phrase:Noun {text: $phrase, sentence_id: $sentence_id})
+        MERGE (phrase)-[r:CONTAINS]->(noun)
+        RETURN r
+        """, {
+            "noun": noun, "phrase": phrase, "sentence_id": sentence_id,
+        })
+        if results:
+            logger.info(f"MERGE (phrase:Noun {{text: {phrase}}})-[r:CONTAINS]->(noun:Noun {{text: {noun}}})")
+        return results
+
+    async def link_noun_to_possessor(self, possessor: str, noun: str, sentence_id: int):
+        results = await self.driver.query("""
+        MATCH (pos:Noun {text: $pos, sentence_id: $sentence_id}), (noun:Noun {text: $noun, sentence_id: $sentence_id})
+        MERGE (noun)-[r:BELONGING_TO]->(pos)
+        RETURN r
+        """, {
+            "pos": possessor, "noun": noun, "sentence_id": sentence_id,
+        })
+        if results:
+            logger.info(f"MERGE (noun:Noun {{text: {noun}}})-[r:OF]->(pos:Noun {{text: {possessor}}})")
+        return results
+
+    async def link_nouns_via_preposition(self, noun1: str, preposition: str, noun2: str, sentence_id: int):
         link_name = preposition.upper()
         results = await self.driver.query(f"""
-        MATCH (noun1:Noun {{text: $noun1}}), (noun2:Noun {{text: $noun2}})
+        MATCH (noun1:Noun {{text: $noun1, sentence_id: $sentence_id}}), (noun2:Noun {{text: $noun2, sentence_id: $sentence_id}})
         MERGE (noun1)-[r:{link_name}]->(noun2)
         RETURN r
         """, {
-            "noun1": noun1, "noun2": noun2,
+            "noun1": noun1, "noun2": noun2, "sentence_id": sentence_id,
         })
         if results:
             logger.info(f"MERGE (noun1:Noun {{text: {noun1}}})-[r:{link_name}]->(noun2:Noun {{text: {noun2}}})")
+        return results
+
+    async def link_nouns_via_verb(self, nsubj: str, base_verb: str, obj: str, sentence_id: int):
+        link_name = base_verb.upper()
+        results = await self.driver.query(f"""
+        MATCH (nsubj:Noun {{sentence_id: $sentence_id}}), (obj:Noun {{sentence_id: $sentence_id}})
+        WHERE $nsubj IN nsubj.forms AND $obj IN obj.forms
+        MERGE (nsubj)-[r:{link_name}]->(obj)
+        RETURN r
+        """, {
+            "nsubj": nsubj, "obj": obj, "sentence_id": sentence_id,
+        })
+        if results:
+            logger.info(f"MERGE (nsubj:Noun {{text: {nsubj}}})-[r:{link_name}]->(obj:Noun {{text: {obj}}})")
         return results
 
     async def link_page_element_to_chat_request(self, element_type: str, element_attrs,

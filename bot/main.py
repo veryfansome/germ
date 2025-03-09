@@ -8,7 +8,6 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 from typing import List
 import aiofiles
@@ -32,7 +31,7 @@ from bot.websocket import (WebSocketConnectionManager,
                            update_chat_session_is_hidden)
 from observability.logging import logging, setup_logging
 from observability.tracing import setup_tracing
-from settings import germ_settings, openai_settings
+from settings import germ_settings
 
 scheduler = AsyncIOScheduler()
 
@@ -76,6 +75,17 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(english_controller.dump_labeled_exps, "interval",
                       minutes=10)
 
+    if not await control_plane.get_paragraph(1):
+        await control_plane.add_paragraph("""
+        I am me.
+        I am an Assistant.
+        Assistants help users.
+        Users are people.
+        People made me to help them.
+        """, {
+            "_": {"bootstrap": True}
+        })
+
     assistant_helper = AssistantHelper()
     await assistant_helper.refresh_assistants()
     await assistant_helper.refresh_files()
@@ -87,30 +97,6 @@ async def lifespan(app: FastAPI):
 
     websocket_manager.add_receive_event_handler(chat_controller)
     websocket_manager.add_send_event_handler(chat_controller)
-
-    #if openai_settings.REASONING_MODEL:
-    #    # TODO:
-    #    #  - try using a basic sentiment classifier instead
-    #    #  - try using a simpler UI based approach
-    #    rejection_profiler = UserProfilingHandler(
-    #        control_plane,
-    #        {
-    #            "outcome": {
-    #                "type": "string",
-    #                "description": ("\"None\", if user's first message. "
-    #                                "\"User accepted\", if the assistant replied and the user is not criticizing "
-    #                                "or contesting the assistant's responses. "
-    #                                "\"User rejected\", if the user is criticizing, contesting, or seems otherwise  "
-    #                                "dissatisfied with the assistant's responses."),
-    #                "enum": ["None", "User accepted", "User rejected"]
-    #            },
-    #        },
-    #        model="o1",
-    #        tool_func_name="outcome_handler",
-    #        tool_func_description="Handles outcomes of user interactions.",
-    #        tool_parameter_description="Object containing an interaction's outcome classification.",
-    #    )
-    #    websocket_manager.add_receive_event_handler(rejection_profiler)
 
     #user_intent_profiler = UserProfilingHandler(
     #    control_plane,
