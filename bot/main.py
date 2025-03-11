@@ -78,10 +78,11 @@ async def lifespan(app: FastAPI):
     if not await control_plane.get_paragraph(1):
         await control_plane.add_paragraph("""
         I am me.
+        I am computer software.
         I am an Assistant.
-        Assistants help users.
-        Users are people.
+        Software assistants help people.
         People made me to help them.
+        Different people can interact with me as the user.
         """, {
             "_": {"bootstrap": True}
         })

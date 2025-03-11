@@ -115,7 +115,8 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
             idx_to_noun_joined_base_form = {}
             # Extract consecutive NN* groups and split further if needed.
             for noun_group in extract_label_idx_groups(ud_token_labels, "xpos", target_labels=NOUN_LABELS):
-                grp_stop_idx = noun_group[-1]
+                grp_stop_idx = noun_group[-1] + 1
+                grp_start_idx = None
                 joined_base_form = None
                 for idx in noun_group:
                     if (joined_base_form is None
@@ -124,9 +125,10 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                         joined_base_form = " ".join([get_noun_base_form(
                             ud_token_labels["tokens"][idx], ud_token_labels["xpos"][idx]
                         ).lower() for idx in noun_group])
+                        grp_start_idx = idx
                     if joined_base_form is not None:
                         # Map each idx to group and joined form
-                        idx_to_noun_group[idx] = noun_group[idx:grp_stop_idx]
+                        idx_to_noun_group[idx] = list(range(grp_start_idx, grp_stop_idx))
                         idx_to_noun_joined_base_form[idx] = joined_base_form
                     else:
                         # Map this idx to this token's base form
@@ -135,6 +137,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                             ud_token_labels["tokens"][idx], ud_token_labels["xpos"][idx]).lower()
             # Iterate through noun groups and determine if a class or a specific thing is being referred to
             idx_to_noun_det_or_pos = {}
+            logger.info(f"idx_to_noun_group: {idx_to_noun_group}")
             for noun_group in idx_to_noun_group.values():
                 dt_or_pos_idx = find_first_from_right(
                     ud_token_labels["xpos"][:noun_group[0]], {"DT", "POS", "PRP$"})
@@ -143,7 +146,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                     if ud_token_labels["xpos"][next_idx] in {"IN"}:
                         dt_or_pos_idx = find_first_from_left(
                             ud_token_labels["xpos"][next_idx+1:], {"NN", "NNS", "NNP", "NNPS", "PRP$"})
-                logger.info(f"noun: det_or_pos='{dt_or_pos_idx}' "
+                logger.info(f"noun: det_or_pos={dt_or_pos_idx} noun_group={noun_group} "
                             f"word_or_phrase='{idx_to_noun_joined_base_form[noun_group[0]]}'")
                 for idx in noun_group:
                     idx_to_noun_det_or_pos[idx] = dt_or_pos_idx
