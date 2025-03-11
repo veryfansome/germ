@@ -201,15 +201,45 @@ class ControlPlane:
                 logger.error(f"failed to add noun: '{noun}' sentence_id={sentence_id}")
         return results
 
-    async def add_noun_class(self, noun_class: str):
+    async def add_noun_class(self, noun: str):
         results = await self.driver.query("""
-        MERGE (cls:Noun {text: $cls, sentence_id: 0})
+        MATCH (cls:Noun {text: $cls, sentence_id: 0})
         RETURN cls
         """, {
-            "cls": noun_class,
+            "cls": noun
+        })
+        if not results:
+            results = await self.driver.query("""
+            MERGE (cls:Noun {text: $cls, sentence_id: 0})
+            WITH cls
+            UNWIND (COALESCE(cls.forms, []) + [$cls]) AS forms
+            WITH cls, COLLECT(DISTINCT forms) AS uniqueForms
+            SET cls.forms = uniqueForms
+            RETURN cls
+            """, {
+                "cls": noun
+            })
+            if results:
+                logger.info(f"MERGE (cls:Noun {{text: {noun}}})")
+            else:
+                logger.error(f"failed to add cls: '{noun}'")
+        return results
+
+    async def add_noun_class_form(self, noun: str, form: str):
+        results = await self.driver.query("""
+        MATCH (cls:Noun {text: $cls, sentence_id: 0})
+        WITH cls
+        UNWIND (COALESCE(cls.forms, []) + [$form]) AS forms
+        WITH cls, COLLECT(DISTINCT forms) AS uniqueForms
+        SET cls.forms = uniqueForms
+        RETURN cls
+        """, {
+            "cls": noun, "form": form
         })
         if results:
-            logger.info(f"MERGE (cls:Noun {{text: {noun_class}, sentence_id: 0}})")
+            logger.info(f"SET (cls:Noun {{{noun}}}).forms = {results[0]['cls']['forms']}}} << {form}")
+        else:
+            logger.error(f"failed to add noun class form: '{noun}' form='{form}'")
         return results
 
     async def add_noun_form(self, noun: str, form: str, sentence_id: int):

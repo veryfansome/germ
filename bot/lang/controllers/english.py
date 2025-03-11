@@ -113,11 +113,13 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
 
             idx_to_noun_group = {}
             idx_to_noun_joined_base_form = {}
+            idx_to_noun_joined_raw_form = {}
             # Extract consecutive NN* groups and split further if needed.
             for noun_group in extract_label_idx_groups(ud_token_labels, "xpos", target_labels=NOUN_LABELS):
                 grp_stop_idx = noun_group[-1] + 1
                 grp_start_idx = None
                 joined_base_form = None
+                joined_raw_form = None
                 for idx in noun_group:
                     if (joined_base_form is None
                             and is_plausible_noun_phrase(ud_token_labels["deprel"][idx:grp_stop_idx])):
@@ -125,29 +127,43 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                         joined_base_form = " ".join([get_noun_base_form(
                             ud_token_labels["tokens"][idx], ud_token_labels["xpos"][idx]
                         ).lower() for idx in noun_group])
+                        joined_raw_form = " ".join([ud_token_labels["tokens"][idx] for idx in noun_group])
                         grp_start_idx = idx
                     if joined_base_form is not None:
                         # Map each idx to group and joined form
                         idx_to_noun_group[idx] = list(range(grp_start_idx, grp_stop_idx))
                         idx_to_noun_joined_base_form[idx] = joined_base_form
+                        idx_to_noun_joined_raw_form[idx] = joined_raw_form
                     else:
                         # Map this idx to this token's base form
                         idx_to_noun_group[idx] = [idx]
                         idx_to_noun_joined_base_form[idx] = get_noun_base_form(
                             ud_token_labels["tokens"][idx], ud_token_labels["xpos"][idx]).lower()
+                        idx_to_noun_joined_raw_form[idx] = ud_token_labels["tokens"][idx]
             # Iterate through noun groups and determine if a class or a specific thing is being referred to
             idx_to_noun_det_or_pos = {}
             logger.info(f"idx_to_noun_group: {idx_to_noun_group}")
             for noun_group in idx_to_noun_group.values():
                 dt_or_pos_idx = find_first_from_right(
                     ud_token_labels["xpos"][:noun_group[0]], {"DT", "POS", "PRP$"})
-                if dt_or_pos_idx == -1:
+                if dt_or_pos_idx == -1 and noun_group[-1] < token_cnt-2:
                     next_idx = noun_group[-1]+1
                     if ud_token_labels["xpos"][next_idx] in {"IN"}:
                         dt_or_pos_idx = find_first_from_left(
                             ud_token_labels["xpos"][next_idx+1:], {"NN", "NNS", "NNP", "NNPS", "PRP$"})
                 logger.info(f"noun: det_or_pos={dt_or_pos_idx} noun_group={noun_group} "
                             f"word_or_phrase='{idx_to_noun_joined_base_form[noun_group[0]]}'")
+                if dt_or_pos_idx == -1:
+                    await self.control_plane.add_noun_class(
+                        idx_to_noun_joined_base_form[noun_group[0]])
+                    await self.control_plane.add_noun_class_form(
+                        idx_to_noun_joined_base_form[noun_group[0]], idx_to_noun_joined_raw_form[noun_group[0]])
+                else:
+                    await self.control_plane.add_noun(
+                        idx_to_noun_joined_base_form[noun_group[0]], sentence_id)
+                    await self.control_plane.add_noun_form(
+                        idx_to_noun_joined_base_form[noun_group[0]], idx_to_noun_joined_raw_form[noun_group[0]],
+                        sentence_id)
                 for idx in noun_group:
                     idx_to_noun_det_or_pos[idx] = dt_or_pos_idx
 
