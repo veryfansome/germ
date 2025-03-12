@@ -37,6 +37,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         self.adjectives_added = set()
         self.noun_classes_added = set()
         self.nouns_added = set()
+        self.pronouns_added = set()
 
     async def add_det_noun(self, det: str, noun: str, sentence_id: int):
         if det in {"a", "an"}:
@@ -96,15 +97,6 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
 
         token_cnt = len(ud_token_labels["tokens"])
         try:
-            # If bootstrap or internal, "I" and "me" are NNP.
-            if (("bootstrap" in sentence_context["_"] and sentence_context["_"]["bootstrap"])
-                    or ("internal" in sentence_context["_"] and sentence_context["_"]["internal"])):
-                for prp_group in extract_label_idx_groups(ud_token_labels, "xpos", target_labels={"PRP"}):
-                    if len(prp_group) != 1:
-                        continue
-                    if ud_token_labels["tokens"][prp_group[0]].lower() in {"i", "me"}:
-                        ud_token_labels["xpos"][prp_group[0]] = "NNP"
-
             # If first token is not a proper noun and only the first character is capitalized, lower the token.
             if ("P" not in ud_token_labels["xpos"][0]
                     and ud_token_labels["tokens"][0][0].isupper()
@@ -115,7 +107,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
             idx_to_noun_joined_base_form = {}
             idx_to_noun_joined_raw_form = {}
             # Extract consecutive NN* groups and split further if needed.
-            for noun_group in extract_label_idx_groups(ud_token_labels, "xpos", target_labels=NOUN_LABELS):
+            for noun_group in extract_label_groups(ud_token_labels, "xpos", target_labels=NOUN_LABELS):
                 grp_stop_idx = noun_group[-1] + 1
                 grp_start_idx = None
                 joined_base_form = None
@@ -140,9 +132,9 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                         idx_to_noun_joined_base_form[idx] = get_noun_base_form(
                             ud_token_labels["tokens"][idx], ud_token_labels["xpos"][idx]).lower()
                         idx_to_noun_joined_raw_form[idx] = ud_token_labels["tokens"][idx]
-            # Iterate through noun groups and determine if a class or a specific thing is being referred to
+            # Iterate through noun groups and determine if they have an associated determiner or possessive word
             idx_to_noun_det_or_pos = {}
-            logger.info(f"idx_to_noun_group: {idx_to_noun_group}")
+            logger.info(f"idx_to_noun_group: {idx_to_noun_group} {ud_token_labels['xpos']}")
             for noun_group in idx_to_noun_group.values():
                 dt_or_pos_idx = find_first_from_right(
                     ud_token_labels["xpos"][:noun_group[0]], {"DT", "POS", "PRP$"})
@@ -153,19 +145,75 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                             ud_token_labels["xpos"][next_idx+1:], {"NN", "NNS", "NNP", "NNPS", "PRP$"})
                 logger.info(f"noun: det_or_pos={dt_or_pos_idx} noun_group={noun_group} "
                             f"word_or_phrase='{idx_to_noun_joined_base_form[noun_group[0]]}'")
-                if dt_or_pos_idx == -1:
-                    await self.control_plane.add_noun_class(
-                        idx_to_noun_joined_base_form[noun_group[0]])
-                    await self.control_plane.add_noun_class_form(
-                        idx_to_noun_joined_base_form[noun_group[0]], idx_to_noun_joined_raw_form[noun_group[0]])
-                else:
+                noun_cache_key = f"{idx_to_noun_joined_base_form[noun_group[0]]}_{sentence_id}"
+                if noun_cache_key not in self.nouns_added:
                     await self.control_plane.add_noun(
                         idx_to_noun_joined_base_form[noun_group[0]], sentence_id)
                     await self.control_plane.add_noun_form(
                         idx_to_noun_joined_base_form[noun_group[0]], idx_to_noun_joined_raw_form[noun_group[0]],
                         sentence_id)
+                    self.nouns_added.add(noun_cache_key)
                 for idx in noun_group:
                     idx_to_noun_det_or_pos[idx] = dt_or_pos_idx
+            for pronoun_group in extract_label_groups(ud_token_labels, "xpos", target_labels={"PRP"}):
+                # Assume one because pronouns don't normally appear in groups
+                idx = pronoun_group[0]
+                token = ud_token_labels["tokens"][idx]
+                token_lowered = token.lower()
+                # Rules of pronouns:
+                # - Must agree with antecedents in number and gender when applicable
+                # - Typically refers to most immediate noun but proximity isn't the only rule
+                # - Reflexive pronouns refer back to the subject and need a clear and appropriate antecedent
+                pronoun_cache_key = f"{token_lowered}_{sentence_id}"
+                if token_lowered in {"it", "you"}:  # Subject or object
+                    pass
+                elif token_lowered in {"i", "he", "she", "we", "they"}:  # Subject
+                    pass
+                elif token_lowered in {"me", "him", "her", "us", "them"}: # Object
+                    pass
+                elif token_lowered.endswith("self") or token_lowered.endswith("selves"):  # Reflexive
+                    pass
+                if pronoun_cache_key not in self.pronouns_added:
+                    await self.control_plane.add_pronoun(token_lowered, sentence_id)
+                    self.pronouns_added.add(pronoun_cache_key)
+            # Look for adjectives
+            for pattern_name, start_positions in extract_consecutive_token_patterns(
+                   # Simplify noun labels for pattern matching
+                   simplify_pos_labels(ud_token_labels["xpos"]),
+                   [
+                       # Attributive adjective, noun
+                       ["JJ", "NN"],
+                       # Noun, is/am/are, adjective
+                       ["NN", "VB", "JJ"],
+                       # Personal pronoun, is/am/are, adjective
+                       ["PRP", "VB", "JJ"],
+                   ]
+            ).items():
+                if pattern_name in {"JJ-NN"}:
+                    for start_idx in start_positions:
+                        jj = ud_token_labels["tokens"][start_idx]
+                        jj_lowered = jj.lower()
+                        if jj_lowered not in self.adjectives_added:
+                            await self.control_plane.add_adjective(jj_lowered)
+                            await self.control_plane.add_adjective_form(jj_lowered, jj)
+                            self.adjectives_added.add(jj_lowered)
+                        await self.control_plane.link_noun_to_adjective(
+                            jj_lowered, idx_to_noun_joined_base_form[start_idx + 1], sentence_id)
+                elif pattern_name in {"PRP-VB-JJ", "NN-VB-JJ"}:
+                    for start_idx in start_positions:
+                        if ud_token_labels["tokens"][start_idx + 1].lower() in {"is", "am", "are", "'m", "'re"}:
+                            jj = ud_token_labels["tokens"][start_idx + 2]
+                            jj_lowered = jj.lower()
+                            if jj_lowered not in self.adjectives_added:
+                                await self.control_plane.add_adjective(jj_lowered)
+                                await self.control_plane.add_adjective_form(jj_lowered, jj)
+                                self.adjectives_added.add(jj_lowered)
+                            if ud_token_labels["xpos"][start_idx].startswith("NN"):
+                                await self.control_plane.link_noun_to_adjective(
+                                    jj_lowered, idx_to_noun_joined_base_form[start_idx], sentence_id)
+                            elif ud_token_labels["xpos"][start_idx] == "PRP":
+                                await self.control_plane.link_pronoun_to_adjective(
+                                    jj_lowered, ud_token_labels["tokens"][start_idx], sentence_id)
 
         except Exception as e:
             logger.error(f"failed to process sentence periodically\n{format_exc()}")
@@ -282,7 +330,7 @@ def extract_consecutive_token_patterns(pos_tags, patterns):
     return results
 
 
-def extract_entity_idx_groups(labels):
+def extract_entity_groups(labels):
     entities = []
     current_entity = None
     current_indices = []
@@ -316,7 +364,7 @@ def extract_entity_idx_groups(labels):
     return entities
 
 
-def extract_label_idx_groups(exp, feat, target_labels=None):
+def extract_label_groups(exp, feat, target_labels=None):
     """
     For example, given a list of labels (e.g. ["O", "O", "NN", "NN", "O", "O", "NNS", "O"]),
     this function will extract the index positions of the labels: NN, NNS, NNP, NNPS.

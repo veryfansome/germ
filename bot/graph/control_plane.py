@@ -304,6 +304,19 @@ class ControlPlane:
     def add_paragraph_merge_event_handler(self, handler: ParagraphMergeEventHandler):
         self.paragraph_merge_event_handlers.append(handler)
 
+    async def add_pronoun(self, pronoun: str, sentence_id: int):
+        results = await self.driver.query("""
+        MERGE (pronoun:Pronoun {text: $pronoun, sentence_id: $sentence_id})
+        RETURN pronoun
+        """, {
+            "pronoun": pronoun, "sentence_id": sentence_id,
+        })
+        if results:
+            logger.info(f"MERGE (pronoun:Pronoun {{text: {pronoun}, sentence_id: {sentence_id}}})")
+        else:
+            logger.error(f"failed to add pronoun: '{pronoun}' sentence_id={sentence_id}")
+        return results
+
     async def add_sentence(self, sentence: str, sentence_context):
         sentence = sentence.strip()
         # Generate signature for lookup in PostgreSQL
@@ -410,19 +423,7 @@ class ControlPlane:
             "adj": adj, "noun": noun, "sentence_id": sentence_id,
         })
         if results:
-            logger.info(f"MERGE (adj:Adjective {{text: {adj}}})-[r:PRECEDES]->(noun:Noun {{text: {noun}}})")
-        return results
-
-    async def equate_noun_to_noun(self, noun1: str, noun2: str, sentence_id: int):
-        results = await self.driver.query("""
-        MATCH (noun1:Noun {text: $noun1, sentence_id: $sentence_id}), (noun2:Noun {text: $noun2, sentence_id: $sentence_id})
-        MERGE (noun1)-[r:IS]->(noun2)
-        RETURN r
-        """, {
-            "noun1": noun1, "noun2": noun2, "sentence_id": sentence_id,
-        })
-        if results:
-            logger.info(f"MERGE (noun1:Noun {{text: {noun1}}})-[r:IS]->(noun:Noun {{text: {noun2}}})")
+            logger.info(f"MERGE (adj:Adjective {{text: {adj}}})-[r:DESCRIBES]->(noun:Noun {{text: {noun}}})")
         return results
 
     async def link_noun_cls1_is_cls2(self, cls1: str, cls2: str):
@@ -545,6 +546,18 @@ class ControlPlane:
             "paragraph_id": paragraph_id, "sentence_id": sentence_id
         })
         logger.info(f"sentence/paragraph link: {results}")
+        return results
+
+    async def link_pronoun_to_adjective(self, adj: str, pronoun: str, sentence_id: int):
+        results = await self.driver.query("""
+        MATCH (adj:Adjective {text: $adj}), (pronoun:Pronoun {text: $pronoun, sentence_id: $sentence_id})
+        MERGE (adj)-[r:DESCRIBES]->(pronoun)
+        RETURN r
+        """, {
+            "adj": adj, "pronoun": pronoun, "sentence_id": sentence_id,
+        })
+        if results:
+            logger.info(f"MERGE (adj:Adjective {{text: {adj}}})-[r:DESCRIBES]->(pronoun:Pronoun {{text: {pronoun}}})")
         return results
 
     async def link_reactive_sentence_to_chat_request(self, chat_request_received_id: int, sentence_id: int):
