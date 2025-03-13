@@ -51,7 +51,7 @@ def test_naive_tokenize_sure_i_can_did():
 
 def test_naive_tokenize_attention_squirrel():
     text = "I don't think I have a short attention—squirrel!!"
-    expected = ['I', 'don', "'t", 'think', 'I', 'have', 'a', 'short', 'attention', '—', 'squirrel', '!!']
+    expected = ['I', 'do', "n't", 'think', 'I', 'have', 'a', 'short', 'attention', '—', 'squirrel', '!!']
     assert naive_tokenize(text) == expected
 
 

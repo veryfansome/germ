@@ -19,6 +19,18 @@ logger = logging.getLogger(__name__)
 
 infect_eng = inflect.engine()
 
+CORE_SEMANTIC_LABELS = {
+    "ccomp",  # Clausal complements with internal subjects.
+    "conj",  # Word or phrase that is part of a coordination structure using "and" or "or"
+    "iobj",  # The indirect object.
+    "nmod",  # (nominal modifier): Indicates a noun functioning as a modifier within a larger phrase.
+    "nsubj",  # (nominal subject): Marks the main subject of a clause.
+    "nsubj:pass",  # A variant of nsubj capturing the subject in passive constructions.
+    "obj",  # (object): Denotes the direct object of a verb.
+    "obl",  # (oblique modifier): Elements that provide additional, non-core information such as location or time.
+    "root",  # Main predicate or anchor of the sentence structure.
+    "xcomp",  # Clausal complements with externally governed subjects
+}
 NOUN_LABELS = {"NN", "NNS", "NNP", "NNPS"}
 VERB_LABELS = {"VB", "VBD", "VBG", "VBP", "VBN", "VBZ"}
 STATE_OF_BEING_VERBS = {"am", "are", "be", "been", "being", "is", "was", "were"}
@@ -35,19 +47,10 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         self.unlabeled_sentences = []
 
         self.adjectives_added = set()
+        self.adverbs_added = set()
         self.noun_classes_added = set()
         self.nouns_added = set()
         self.pronouns_added = set()
-
-    async def add_det_noun(self, det: str, noun: str, sentence_id: int):
-        if det in {"a", "an"}:
-            if noun not in self.noun_classes_added:
-                await self.control_plane.add_noun_class(noun)
-                self.noun_classes_added.add(noun)
-        else:
-            if noun not in self.nouns_added:
-                await self.control_plane.add_noun(noun, sentence_id)
-                self.nouns_added.add(noun)
 
     async def dump_labeled_exps(self):
         async_tasks = []
@@ -152,6 +155,11 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                     await self.control_plane.add_noun_form(
                         idx_to_noun_joined_base_form[noun_group[0]], idx_to_noun_joined_raw_form[noun_group[0]],
                         sentence_id)
+                    deprel_label = ud_token_labels["deprel"][noun_group[-1]]
+                    if deprel_label in CORE_SEMANTIC_LABELS:
+                        await self.control_plane.link_noun_form_to_sentence(
+                            idx_to_noun_joined_base_form[noun_group[0]], idx_to_noun_joined_raw_form[noun_group[0]],
+                            deprel_label.replace(":", "_").upper(), sentence_id)
                     self.nouns_added.add(noun_cache_key)
                 for idx in noun_group:
                     idx_to_noun_det_or_pos[idx] = dt_or_pos_idx
@@ -169,12 +177,16 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                     pass
                 elif token_lowered in {"i", "he", "she", "we", "they"}:  # Subject
                     pass
-                elif token_lowered in {"me", "him", "her", "us", "them"}: # Object
+                elif token_lowered in {"me", "him", "her", "us", "them"}:  # Object
                     pass
                 elif token_lowered.endswith("self") or token_lowered.endswith("selves"):  # Reflexive
                     pass
                 if pronoun_cache_key not in self.pronouns_added:
                     await self.control_plane.add_pronoun(token_lowered, sentence_id)
+                    deprel_label = ud_token_labels["deprel"][pronoun_group[-1]]
+                    if deprel_label in CORE_SEMANTIC_LABELS:
+                        await self.control_plane.link_pronoun_to_sentence(
+                            token_lowered, deprel_label.replace(":", "_").upper(), sentence_id)
                     self.pronouns_added.add(pronoun_cache_key)
             # Look for adjectives
             for pattern_name, start_positions in extract_consecutive_token_patterns(
@@ -183,37 +195,102 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                    [
                        # Attributive adjective, noun
                        ["JJ", "NN"],
-                       # Noun, is/am/are, adjective
+                       # Noun, is/are, adjective
                        ["NN", "VB", "JJ"],
+                       # Noun, is/are, adverb, adjective
+                       ["NN", "VB", "RB", "JJ"],
+                       # Noun, is/are, either/neither, adjective, or/nor, adjective
+                       ['NN', 'VB', 'CC', 'JJ', 'CC', 'JJ'],
                        # Personal pronoun, is/am/are, adjective
                        ["PRP", "VB", "JJ"],
+                       # Personal pronoun, is/am/are, adverb, adjective
+                       ["PRP", "VB", "RB", "JJ"],
+                       # Noun, is/am/are, either/neither, adjective, or/nor, adjective
+                       ['PRP', 'VB', 'CC', 'JJ', 'CC', 'JJ'],
                    ]
             ).items():
                 if pattern_name in {"JJ-NN"}:
                     for start_idx in start_positions:
-                        jj = ud_token_labels["tokens"][start_idx]
-                        jj_lowered = jj.lower()
-                        if jj_lowered not in self.adjectives_added:
-                            await self.control_plane.add_adjective(jj_lowered)
-                            await self.control_plane.add_adjective_form(jj_lowered, jj)
-                            self.adjectives_added.add(jj_lowered)
-                        await self.control_plane.link_noun_to_adjective(
-                            jj_lowered, idx_to_noun_joined_base_form[start_idx + 1], sentence_id)
-                elif pattern_name in {"PRP-VB-JJ", "NN-VB-JJ"}:
-                    for start_idx in start_positions:
-                        if ud_token_labels["tokens"][start_idx + 1].lower() in {"is", "am", "are", "'m", "'re"}:
-                            jj = ud_token_labels["tokens"][start_idx + 2]
+                        bucket = [ud_token_labels["tokens"][start_idx]]
+                        # There can be multiple adjectives before a noun, sometimes separated by commas
+                        last_check_idx = start_idx
+                        while last_check_idx >= 0:
+                            check_idx = last_check_idx - 1
+                            if ud_token_labels["xpos"][check_idx] == "JJ":
+                                bucket.append(ud_token_labels["tokens"][check_idx])
+                            elif ud_token_labels["xpos"][check_idx] not in {",", "CC"}:
+                                break
+                            last_check_idx = check_idx
+                        for jj in bucket:
                             jj_lowered = jj.lower()
                             if jj_lowered not in self.adjectives_added:
                                 await self.control_plane.add_adjective(jj_lowered)
                                 await self.control_plane.add_adjective_form(jj_lowered, jj)
                                 self.adjectives_added.add(jj_lowered)
-                            if ud_token_labels["xpos"][start_idx].startswith("NN"):
-                                await self.control_plane.link_noun_to_adjective(
-                                    jj_lowered, idx_to_noun_joined_base_form[start_idx], sentence_id)
-                            elif ud_token_labels["xpos"][start_idx] == "PRP":
-                                await self.control_plane.link_pronoun_to_adjective(
-                                    jj_lowered, ud_token_labels["tokens"][start_idx], sentence_id)
+                            await self.control_plane.link_adj_as_noun_attr(
+                                jj_lowered, idx_to_noun_joined_base_form[start_idx + 1], sentence_id)
+                elif pattern_name in {"PRP-VB-JJ", "PRP-VB-RB-JJ", "NN-VB-JJ", "NN-VB-RB-JJ"}:
+                    jj_idx_shift = len(pattern_name.split("-")) - 1
+                    for start_idx in start_positions:
+                        if ud_token_labels["tokens"][start_idx + 1].lower() in {
+                            "am", "are", "is", "’m", "'m", "’re", "'re", "’s", "'s",
+                        }:
+                            bucket = [ud_token_labels["tokens"][start_idx + jj_idx_shift]]
+                            # There can be multiple adjectives after a linking verb
+                            last_check_idx = start_idx + jj_idx_shift
+                            while last_check_idx < token_cnt - 1:
+                                check_idx = last_check_idx + 1
+                                if ud_token_labels["xpos"][check_idx] == "JJ":
+                                    bucket.append(ud_token_labels["tokens"][check_idx])
+                                elif ud_token_labels["xpos"][check_idx] not in {",", "CC"}:
+                                    break
+                                last_check_idx = check_idx
+                            negative = False
+                            if (pattern_name.endswith("RB-JJ")
+                                    and ud_token_labels["tokens"][start_idx + jj_idx_shift - 1] in {
+                                        "not", "n’t", "n't"}):
+                                negative = True
+                            for jj in bucket:
+                                jj_lowered = jj.lower()
+                                if jj_lowered not in self.adjectives_added:
+                                    await self.control_plane.add_adjective(jj_lowered)
+                                    await self.control_plane.add_adjective_form(jj_lowered, jj)
+                                    self.adjectives_added.add(jj_lowered)
+                                if ud_token_labels["xpos"][start_idx].startswith("NN"):
+                                    await self.control_plane.link_adj_as_noun_attr(
+                                        jj_lowered, idx_to_noun_joined_base_form[start_idx], sentence_id,
+                                        negative=negative)
+                                elif ud_token_labels["xpos"][start_idx] == "PRP":
+                                    await self.control_plane.link_adj_as_pronoun_to_attr(
+                                        jj_lowered, ud_token_labels["tokens"][start_idx], sentence_id,
+                                        negative=negative)
+                elif pattern_name in {"NN-VB-CC-JJ-CC-JJ", "PRP-VB-CC-JJ-CC-JJ"}:
+                    for start_idx in start_positions:
+                        # TODO: Handle adjectives separated by conjunctions
+                        pass
+            # Look for adverbs
+            for pattern_name, start_positions in extract_consecutive_token_patterns(
+                    # Simplify noun labels for pattern matching
+                    simplify_pos_labels(ud_token_labels["xpos"]),
+                    [
+                        # Adverb, adjective
+                        ["RB", "JJ"],
+                    ]
+            ).items():
+                if pattern_name in {"RB-JJ"}:
+                    # TODO: A lot of adverbs are just adjectives + 'ly'
+                    for start_idx in start_positions:
+                        rb = ud_token_labels["tokens"][start_idx]
+                        rb_lowered = rb.lower()
+                        jj = ud_token_labels["tokens"][start_idx + 1]
+                        jj_lowered = jj.lower()
+                        if rb_lowered not in {"not", "n’t", "n't"}:
+                            if rb_lowered not in self.adverbs_added:
+                                await self.control_plane.add_adverb(rb_lowered)
+                                if rb != rb_lowered:
+                                    await self.control_plane.add_adverb_form(rb_lowered, rb)
+                                self.adverbs_added.add(rb_lowered)
+                            await self.control_plane.link_adv_to_adj(rb_lowered, jj_lowered)
 
         except Exception as e:
             logger.error(f"failed to process sentence periodically\n{format_exc()}")

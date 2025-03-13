@@ -26,6 +26,7 @@ from bot.db.neo4j import AsyncNeo4jDriver
 from bot.db.utils import db_stats_job
 from bot.graph.control_plane import ControlPlane
 from bot.lang.controllers.english import EnglishController
+#from bot.lang.dependencies import brown_words_pos
 from bot.websocket import (WebSocketConnectionManager,
                            get_chat_session_messages, get_chat_session_summaries,
                            update_chat_session_is_hidden)
@@ -77,11 +78,7 @@ async def lifespan(app: FastAPI):
 
     if not await control_plane.get_paragraph(1):
         await control_plane.add_paragraph("""
-        I am me.
-        I am computer software.
-        I am an Assistant.
-        Software assistants help people.
-        People made me to help them.
+        I am a software assistant, made to help people.
         Different people can interact with me as the user.
         """, {
             "_": {"bootstrap": True}
