@@ -66,13 +66,26 @@ class ControlPlane:
 
     async def add_adjective(self, adj: str):
         results = await self.driver.query("""
-        MERGE (adj:Adjective {text: $adj})
+        MATCH (adj:Adjective {text: $adj})
         RETURN adj
         """, {
             "adj": adj,
         })
-        if results:
-            logger.info(f"MERGE (adj:Adjective {{text: {adj}}})")
+        if not results:
+            results = await self.driver.query("""
+            MERGE (adj:Adjective {text: $adj})
+            WITH adj
+            UNWIND (COALESCE(adj.forms, []) + [$adj]) AS forms
+            WITH adj, COLLECT(DISTINCT forms) AS uniqueForms
+            SET adj.forms = uniqueForms
+            RETURN adj
+            """, {
+                "adj": adj,
+            })
+            if results:
+                logger.info(f"MERGE (adj:Adjective {{text: {adj}}})")
+            else:
+                logger.error(f"failed to add adj: '{adj}'")
         return results
 
     async def add_adjective_form(self, adj: str, form: str):
@@ -88,6 +101,49 @@ class ControlPlane:
         })
         if results:
             logger.info(f"SET (adj:Adjective {{{adj}}}).forms = {results[0]['adj']['forms']}}} << {form}")
+        else:
+            logger.error(f"failed to add adj form: '{adj}' form='{form}'")
+        return results
+
+    async def add_adverb(self, adv: str):
+        results = await self.driver.query("""
+        MATCH (adv:Adverb {text: $adv})
+        RETURN adv
+        """, {
+            "adv": adv,
+        })
+        if not results:
+            results = await self.driver.query("""
+            MERGE (adv:Adverb {text: $adv})
+            WITH adv
+            UNWIND (COALESCE(adv.forms, []) + [$adv]) AS forms
+            WITH adv, COLLECT(DISTINCT forms) AS uniqueForms
+            SET adv.forms = uniqueForms
+            RETURN adv
+            """, {
+                "adv": adv,
+            })
+            if results:
+                logger.info(f"MERGE (adv:Adverb {{text: {adv}}})")
+            else:
+                logger.error(f"failed to add adv: '{adv}'")
+        return results
+
+    async def add_adverb_form(self, adv: str, form: str):
+        results = await self.driver.query("""
+        MATCH (adv:Adverb {text: $adv})
+        WITH adv
+        UNWIND (COALESCE(adv.forms, []) + [$form]) AS form
+        WITH adv, COLLECT(DISTINCT form) AS uniqueForms
+        SET adv.forms = uniqueForms
+        RETURN adv
+        """, {
+            "adv": adv, "form": form
+        })
+        if results:
+            logger.info(f"SET (adv:Adverb {{{adv}}}).forms = {results[0]['adv']['forms']}}} << {form}")
+        else:
+            logger.error(f"failed to add adv form: '{adv}' form='{form}'")
         return results
 
     async def add_chat_request(self, chat_request_received_id: int):
@@ -362,6 +418,50 @@ class ControlPlane:
             "paragraph_id": paragraph_id,
         })
 
+    async def link_adj_as_noun_attr(self, adj: str, noun: str, sentence_id: int, negative: bool = False):
+        link_type = "NOT_ATTR_OF" if negative else "ATTR_OF"
+        results = await self.driver.query(f"""
+        MATCH (adj:Adjective {{text: $adj}}), (noun:Noun {{text: $noun, sentence_id: $sentence_id}})
+        MERGE (adj)-[r:{link_type}]->(noun)
+        RETURN r
+        """, {
+            "adj": adj, "noun": noun, "sentence_id": sentence_id,
+        })
+        if results:
+            logger.info(f"MERGE (adj:Adjective {{text: {adj}}})-[r:{link_type}]->(noun:Noun {{text: {noun}}})")
+        else:
+            logger.error(f"failed to link adjective '{adj}' to noun '{noun}'")
+        return results
+
+    async def link_adj_as_pronoun_to_attr(self, adj: str, pronoun: str, sentence_id: int, negative: bool = False):
+        link_type = "NOT_ATTR_OF" if negative else "ATTR_OF"
+        results = await self.driver.query(f"""
+        MATCH (adj:Adjective {{text: $adj}}), (pronoun:Pronoun {{text: $pronoun, sentence_id: $sentence_id}})
+        MERGE (adj)-[r:{link_type}]->(pronoun)
+        RETURN r
+        """, {
+            "adj": adj, "pronoun": pronoun, "sentence_id": sentence_id,
+        })
+        if results:
+            logger.info(f"MERGE (adj:Adjective {{text: {adj}}})-[r:{link_type}]->(pronoun:Pronoun {{text: {pronoun}}})")
+        else:
+            logger.error(f"failed to link adjective '{adj}' to pronoun '{pronoun}'")
+        return results
+
+    async def link_adv_to_adj(self, adv: str, adj: str):
+        results = await self.driver.query("""
+        MATCH (adv:Adverb {text: $adv}), (adj:Adjective {text: $adj})
+        MERGE (adv)-[r:ATTR_OF]->(adj)
+        RETURN r
+        """, {
+            "adv": adv, "adj": adj,
+        })
+        if results:
+            logger.info(f"MERGE (adv:Adverb {{text: {adv}}})-[r:ATTR_OF]->(adj:Adjective {{text: {adj}}})")
+        else:
+            logger.error(f"failed to link adverb '{adv}' to adjective '{adj}'")
+        return results
+
     async def link_chat_request_to_chat_session(self, chat_request_received_id: int, chat_session_id: int, time_occurred):
         results = await self.driver.query("""
         MATCH (req:ChatRequest {chat_request_received_id: $chat_request_received_id}), (session:ChatSession {chat_session_id: $chat_session_id})
@@ -412,42 +512,6 @@ class ControlPlane:
         })
         if results:
             logger.info(f"MERGE (noun:Noun {{text: {noun}}})-[r:{link_name} {{form: {form}}}]->(sentence:Sentence {{sentence_id: {sentence_id}}})")
-        return results
-
-    async def link_noun_to_adjective(self, adj: str, noun: str, sentence_id: int):
-        results = await self.driver.query("""
-        MATCH (adj:Adjective {text: $adj}), (noun:Noun {text: $noun, sentence_id: $sentence_id})
-        MERGE (adj)-[r:DESCRIBES]->(noun)
-        RETURN r
-        """, {
-            "adj": adj, "noun": noun, "sentence_id": sentence_id,
-        })
-        if results:
-            logger.info(f"MERGE (adj:Adjective {{text: {adj}}})-[r:DESCRIBES]->(noun:Noun {{text: {noun}}})")
-        return results
-
-    async def link_noun_cls1_is_cls2(self, cls1: str, cls2: str):
-        results = await self.driver.query("""
-        MATCH (cls1:Noun {text: $cls1, sentence_id: 0}), (cls2:Noun {text: $cls2, sentence_id: 0})
-        MERGE (cls1)-[r:IS]->(cls2)
-        RETURN r
-        """, {
-            "cls1": cls1, "cls2": cls2,
-        })
-        if results:
-            logger.info(f"MERGE (cls1:Noun {{text: {cls1}}})-[r:IS]->(cls2:Noun {{text: {cls2}}})")
-        return results
-
-    async def link_noun_to_noun_class(self, noun: str, noun_class: str, sentence_id: int):
-        results = await self.driver.query("""
-        MATCH (noun:Noun {text: $noun, sentence_id: $sentence_id}), (cls:Noun {text: $cls, sentence_id: 0})
-        MERGE (noun)-[r:IS_A]->(cls)
-        RETURN r
-        """, {
-            "noun": noun, "cls": noun_class, "sentence_id": sentence_id,
-        })
-        if results:
-            logger.info(f"MERGE (noun:Noun {{text: {noun}}})-[r:IS_A]->(cls:Noun {{text: {noun_class}}})")
         return results
 
     async def link_noun_to_phrase(self, noun: str, phrase: str, sentence_id: int):
@@ -548,16 +612,19 @@ class ControlPlane:
         logger.info(f"sentence/paragraph link: {results}")
         return results
 
-    async def link_pronoun_to_adjective(self, adj: str, pronoun: str, sentence_id: int):
-        results = await self.driver.query("""
-        MATCH (adj:Adjective {text: $adj}), (pronoun:Pronoun {text: $pronoun, sentence_id: $sentence_id})
-        MERGE (adj)-[r:DESCRIBES]->(pronoun)
+    async def link_pronoun_to_sentence(self, pronoun: str, link_name: str, sentence_id: int):
+        link_name = link_name.upper()
+        results = await self.driver.query(f"""
+        MATCH (pronoun:Pronoun {{text: $pronoun, sentence_id: $sentence_id}}), (sentence:Sentence {{sentence_id: $sentence_id}})
+        MERGE (pronoun)-[r:{link_name} {{sentence_id: $sentence_id}}]->(sentence)
         RETURN r
         """, {
-            "adj": adj, "pronoun": pronoun, "sentence_id": sentence_id,
+            "pronoun": pronoun, "sentence_id": sentence_id
         })
         if results:
-            logger.info(f"MERGE (adj:Adjective {{text: {adj}}})-[r:DESCRIBES]->(pronoun:Pronoun {{text: {pronoun}}})")
+            logger.info(f"MERGE (pronoun:Pronoun {{text: {pronoun}}})-[r:{link_name}]->(sentence:Sentence {{sentence_id: {sentence_id}}})")
+        else:
+            logger.error(f"failed to link pronoun '{pronoun}' to sentence_id {sentence_id}")
         return results
 
     async def link_reactive_sentence_to_chat_request(self, chat_request_received_id: int, sentence_id: int):
