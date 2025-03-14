@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from fastapi import WebSocket
-from httpx._client import ClientState
 from prometheus_client import Gauge
 from sqlalchemy.future import select as sql_select
 from sqlalchemy.sql import desc
@@ -13,7 +12,7 @@ from bot.api.models import ChatMessage, ChatRequest, ChatResponse, ChatSessionSu
 from bot.chat import async_openai_client
 from bot.db.models import AsyncSessionLocal, ChatSession, ChatRequestReceived, ChatResponseSent
 from bot.graph.control_plane import ControlPlane
-from settings.germ_settings import WEBSOCKET_CONNECTION_IDLE_TIMEOUT
+from settings.germ_settings import WEBSOCKET_CONNECTION_IDLE_TIMEOUT, WEBSOCKET_SESSION_MONITOR_INTERVAL_SECONDS
 from settings.openai_settings import MINI_MODEL, HTTPX_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -74,7 +73,7 @@ class WebSocketSender:
                                 chat_request_received_id=chat_request_received_id))
 
 
-class SessionMonitor(ABC):
+class WebSocketSessionMonitor(ABC):
     @abstractmethod
     async def on_tick(self, chat_session_id: int, ws_sender: WebSocketSender):
         pass
@@ -95,12 +94,12 @@ class WebSocketConnectionManager:
         self.monitor_tasks: dict[int, tuple[asyncio.Task, asyncio.Event]] = {}
         self.receive_event_handlers: list[WebSocketReceiveEventHandler] = []
         self.send_event_handlers: list[WebSocketSendEventHandler] = []
-        self.session_monitors: list[SessionMonitor] = []
+        self.session_monitors: list[WebSocketSessionMonitor] = []
 
     def add_send_event_handler(self, handler: WebSocketSendEventHandler):
         self.send_event_handlers.append(handler)
 
-    def add_session_monitor(self, handler: SessionMonitor):
+    def add_session_monitor(self, handler: WebSocketSessionMonitor):
         self.session_monitors.append(handler)
 
     def add_receive_event_handler(self, handler: WebSocketReceiveEventHandler):
@@ -160,13 +159,13 @@ class WebSocketConnectionManager:
                                     send_event_handlers=self.send_event_handlers)
         try:
             while not cancel_event.is_set():
-                # Wait for either 15s or the event to be set, whichever comes first.
+                # Wait for some seconds or until the cancel_event is set, whichever comes first.
                 try:
-                    await asyncio.wait_for(asyncio.shield(cancel_event.wait()), timeout=15.0)
+                    await asyncio.wait_for(asyncio.shield(cancel_event.wait()),
+                                           timeout=WEBSOCKET_SESSION_MONITOR_INTERVAL_SECONDS)
                 except asyncio.TimeoutError:
-                    logger.info(f"chat session {chat_session_id} is still active")
                     for monitor in self.session_monitors:
-                        asyncio.create_task(monitor.on_tick(chat_session_id, ws_sender))
+                        _ = asyncio.create_task(monitor.on_tick(chat_session_id, ws_sender))
         except asyncio.CancelledError:
             logger.info(f"Session monitor for {chat_session_id} was cancelled.")
         finally:

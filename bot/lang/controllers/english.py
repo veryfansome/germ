@@ -212,7 +212,22 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                 if pattern_name in {"JJ-NN"}:
                     for start_idx in start_positions:
                         bucket = [ud_token_labels["tokens"][start_idx]]
-                        # There can be multiple adjectives before a noun, sometimes separated by commas
+                        # There can be multiple adjectives before a noun, sometimes separated by commas. English
+                        # speakers generally follow a specific order for adjectives when they modify a noun:
+                        # - Quantity or number
+                        # - Quality or opinion
+                        # - Size
+                        # - Age
+                        # - Shape
+                        # - Color
+                        # - Origin
+                        # - Material
+                        # - Purpose
+                        #
+                        # Example: "Three beautiful large old round red French wooden dining tables.
+                        #
+                        # TODO: Maybe classifying the types can be done with the multi-tagger
+                        #
                         last_check_idx = start_idx
                         while last_check_idx >= 0:
                             check_idx = last_check_idx - 1
@@ -221,6 +236,17 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                             elif ud_token_labels["xpos"][check_idx] not in {",", "CC"}:
                                 break
                             last_check_idx = check_idx
+                        # Currently, when multiple adjectives are grouped together, we naively attribute all adjectives
+                        # to the same noun but this will mishandle some contexts. Attributes that can be reordered
+                        # without changing meaning should be separated by commas but are not guaranteed to be.
+                        #
+                        # Examples:
+                        # - "bright red car": "bright" describes "red", not "car"
+                        # - "crazy loud music": "crazy" describe "loud", not "music"
+                        #
+                        # TODO: When adjectives are grouped together AND separated by commas, treat the groupings as
+                        #       adjective phrases, e.g. "bright red".
+                        #
                         for jj in bucket:
                             jj_lowered = jj.lower()
                             if jj_lowered not in self.adjectives_added:
@@ -250,6 +276,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                                     and ud_token_labels["tokens"][start_idx + jj_idx_shift - 1] in {
                                         "not", "n’t", "n't"}):
                                 negative = True
+                            # Same naive attribution as above for JJ-NN
                             for jj in bucket:
                                 jj_lowered = jj.lower()
                                 if jj_lowered not in self.adjectives_added:

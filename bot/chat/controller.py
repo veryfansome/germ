@@ -5,13 +5,14 @@ import logging
 from bot.api.models import ChatRequest, ChatResponse
 from bot.graph.control_plane import ControlPlane
 from bot.lang.parsers import extract_markdown_page_elements
-from bot.websocket import WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender
+from bot.websocket import (WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender,
+                           WebSocketSessionMonitor)
 from observability.annotations import measure_exec_seconds
 
 logger = logging.getLogger(__name__)
 
 
-class ChatController(WebSocketReceiveEventHandler, WebSocketSendEventHandler):
+class ChatController(WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSessionMonitor):
 
     def __init__(self, control_plane: ControlPlane, remote: WebSocketReceiveEventHandler):
         self.control_plane = control_plane
@@ -56,6 +57,9 @@ class ChatController(WebSocketReceiveEventHandler, WebSocketSendEventHandler):
                 "chat_response_sent_id": chat_response_sent_id,
                 "chat_session_id": chat_session_id,
             })
+
+    async def on_tick(self, chat_session_id: int, ws_sender: WebSocketSender):
+        logger.info(f"chat session {chat_session_id} is still active")
 
     async def process_markdown_element(self, markdown_elements,
                                        element_link_func, element_link_func_args,

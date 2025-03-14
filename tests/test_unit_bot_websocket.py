@@ -9,7 +9,7 @@ from bot.websocket import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
-    SessionMonitor,
+    WebSocketSessionMonitor,
     WebSocketConnectionManager,
     WebSocketReceiveEventHandler,
     WebSocketSendEventHandler,
@@ -242,7 +242,7 @@ async def test_monitor_chat_session_basic():
     mock_ws.state = WebSocketState.CONNECTED
 
     # A sample SessionMonitor that just logs a call
-    class MockSessionMonitor(SessionMonitor):
+    class MockWebSocketSessionMonitor(WebSocketSessionMonitor):
         def __init__(self):
             self.tick_count = 0
 
@@ -250,7 +250,7 @@ async def test_monitor_chat_session_basic():
             self.tick_count += 1
 
     manager = WebSocketConnectionManager(control_plane=mock_control_plane)
-    mock_monitor = MockSessionMonitor()
+    mock_monitor = MockWebSocketSessionMonitor()
     manager.add_session_monitor(mock_monitor)
 
     # Instead of actually sleeping 15s, we patch `asyncio.wait_for`
