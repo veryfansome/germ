@@ -95,6 +95,7 @@ async def lifespan(app: FastAPI):
 
     websocket_manager.add_receive_event_handler(chat_controller)
     websocket_manager.add_send_event_handler(chat_controller)
+    websocket_manager.add_session_monitor(chat_controller)
 
     #user_intent_profiler = UserProfilingHandler(
     #    control_plane,
