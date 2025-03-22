@@ -30,8 +30,6 @@ tracer = trace.get_tracer(__name__)
 
 text_emotions_classifier = GoEmotionsPredictor(
     "veryfansome/deberta-goemotions", subfolder="pos_weight_best")
-conll_token_multi_classifier = MultiHeadPredictor(
-    "veryfansome/multi-classifier", subfolder="models/conll2012_en12_20250305")
 ud_token_multi_classifier = MultiHeadPredictor(
     "veryfansome/multi-classifier", subfolder="models/ud_augmented_jj_rb_types_20250320_v2")
 
@@ -79,11 +77,6 @@ async def get_metrics():
 @model_service.post("/text/classification/emotions")
 async def post_text_classification_emotions(payload: TextPayload):
     return await run_in_threadpool(text_emotions_classifier.predict, [payload.text], use_per_label=True)
-
-
-@model_service.post("/text/classification/conll")
-async def post_text_classification_conll(payload: TextPayload):
-    return await run_in_threadpool(conll_token_multi_classifier.predict, payload.text)
 
 
 @model_service.post("/text/classification/ud")
