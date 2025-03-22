@@ -42,7 +42,6 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
     def __init__(self, control_plane: ControlPlane, interval_seconds: int = 9):
         self.control_plane = control_plane
         self.interval_seconds = interval_seconds
-        self.labeled_examples_conll = []
         self.labeled_examples_ud = []
         self.unlabeled_sentences = []
 
@@ -55,12 +54,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
 
     async def dump_labeled_exps(self):
         async_tasks = []
-        conll_exps = []
         ud_exps = []
-        if self.labeled_examples_conll:
-            while self.labeled_examples_conll:
-                conll_exps.append(self.labeled_examples_conll.pop(0))
-            async_tasks.append(asyncio.create_task(run_in_threadpool(dump_labeled_exps, conll_exps, "conll")))
         if self.labeled_examples_ud:
             while self.labeled_examples_ud:
                 ud_exps.append(self.labeled_examples_ud.pop(0))
@@ -68,36 +62,13 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         await asyncio.gather(*async_tasks)
 
     async def label_sentence(self, sentence: str, sentence_id: int, sentence_context):
-        conll_token_labels, ud_token_labels = await asyncio.gather(
-            get_conll_token_classifications(sentence),
-            get_ud_token_classifications(sentence),
-        )
+        ud_token_labels = await get_ud_token_classifications(sentence)
         logger.info(f"sentence_context: \t{sentence_context}")
-        logger.info(f"conll labels: sentence_id={sentence_id}\n" + (
-            "\n".join([f"{head}\t{labels}" for head, labels in conll_token_labels.items()])))
         logger.info(f"ud labels: sentence_id={sentence_id}\n" + (
             "\n".join([f"{head}\t{labels}" for head, labels in ud_token_labels.items()])))
 
-        is_conll_ud_aligned = True
-        conll_token_len = len(conll_token_labels["tokens"])
-        ud_token_len = len(ud_token_labels["tokens"])
-        if conll_token_len != ud_token_len:
-            logger.warning(f"classifier token length mismatch: conll={conll_token_len} ud={ud_token_len}")
-        else:
-            for idx, conll_token in enumerate(conll_token_labels["tokens"]):
-                if conll_token != ud_token_labels['tokens'][idx]:
-                    logger.warning(f"CoNLL/UD token mismatch: idx={idx} "
-                                   f"conll={conll_token} "
-                                   f"ud={ud_token_labels['tokens'][idx]}")
-                    is_conll_ud_aligned = False
-                elif conll_token_labels["pos_tags"][idx] != ud_token_labels['xpos'][idx]:
-                    logger.warning(f"CoNLL/UD part-of-speech label mismatch: token={conll_token} "
-                                   f"conll={conll_token_labels['pos_tags'][idx]} "
-                                   f"ud={ud_token_labels['xpos'][idx]}")
-
-        if not ("bootstrap" in sentence_context["_"] and sentence_context["_"]["bootstrap"]):
-            self.labeled_examples_conll.append(conll_token_labels)
-            self.labeled_examples_ud.append(ud_token_labels)
+        #if not ("bootstrap" in sentence_context["_"] and sentence_context["_"]["bootstrap"]):
+        #    self.labeled_examples_ud.append(ud_token_labels)
 
         token_cnt = len(ud_token_labels["tokens"])
         try:
@@ -603,13 +574,6 @@ def find_first_from_right(labels, target_labels):
         if labels[i] in target_labels:
             return i
     return -1
-
-
-async def get_conll_token_classifications(text: str):
-    async with aiohttp.ClientSession() as session:
-        async with session.post("http://germ-models:9000/text/classification/conll",
-                                json={"text": text}) as response:
-            return await response.json()
 
 
 async def get_emotions_classifications(text: str):
