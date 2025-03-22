@@ -257,47 +257,6 @@ class ControlPlane:
                 logger.error(f"failed to add noun: '{noun}' sentence_id={sentence_id}")
         return results
 
-    async def add_noun_class(self, noun: str):
-        results = await self.driver.query("""
-        MATCH (cls:Noun {text: $cls, sentence_id: 0})
-        RETURN cls
-        """, {
-            "cls": noun
-        })
-        if not results:
-            results = await self.driver.query("""
-            MERGE (cls:Noun {text: $cls, sentence_id: 0})
-            WITH cls
-            UNWIND (COALESCE(cls.forms, []) + [$cls]) AS forms
-            WITH cls, COLLECT(DISTINCT forms) AS uniqueForms
-            SET cls.forms = uniqueForms
-            RETURN cls
-            """, {
-                "cls": noun
-            })
-            if results:
-                logger.info(f"MERGE (cls:Noun {{text: {noun}}})")
-            else:
-                logger.error(f"failed to add cls: '{noun}'")
-        return results
-
-    async def add_noun_class_form(self, noun: str, form: str):
-        results = await self.driver.query("""
-        MATCH (cls:Noun {text: $cls, sentence_id: 0})
-        WITH cls
-        UNWIND (COALESCE(cls.forms, []) + [$form]) AS forms
-        WITH cls, COLLECT(DISTINCT forms) AS uniqueForms
-        SET cls.forms = uniqueForms
-        RETURN cls
-        """, {
-            "cls": noun, "form": form
-        })
-        if results:
-            logger.info(f"SET (cls:Noun {{{noun}}}).forms = {results[0]['cls']['forms']}}} << {form}")
-        else:
-            logger.error(f"failed to add noun class form: '{noun}' form='{form}'")
-        return results
-
     async def add_noun_form(self, noun: str, form: str, sentence_id: int):
         results = await self.driver.query("""
         MATCH (noun:Noun {text: $noun, sentence_id: $sentence_id})
@@ -406,6 +365,47 @@ class ControlPlane:
 
     def add_sentence_merge_event_handler(self, handler: SentenceMergeEventHandler):
         self.sentence_merge_event_handlers.append(handler)
+
+    async def add_verb(self, verb: str, sentence_id: int):
+        results = await self.driver.query("""
+        MATCH (verb:Verb {text: $verb, sentence_id: $sentence_id})
+        RETURN verb
+        """, {
+            "verb": verb, "sentence_id": sentence_id,
+        })
+        if not results:
+            results = await self.driver.query("""
+            MERGE (verb:Verb {text: $verb, sentence_id: $sentence_id})
+            WITH verb
+            UNWIND (COALESCE(verb.forms, []) + [$verb]) AS forms
+            WITH verb, COLLECT(DISTINCT forms) AS uniqueForms
+            SET verb.forms = uniqueForms
+            RETURN verb
+            """, {
+                "verb": verb, "sentence_id": sentence_id,
+            })
+            if results:
+                logger.info(f"MERGE (verb:Verb {{text: {verb}}})")
+            else:
+                logger.error(f"failed to add verb: '{verb}' sentence_id={sentence_id}")
+        return results
+
+    async def add_verb_form(self, verb: str, form: str, sentence_id: int):
+        results = await self.driver.query("""
+        MATCH (verb:Verb {text: $verb, sentence_id: $sentence_id})
+        WITH verb
+        UNWIND (COALESCE(verb.forms, []) + [$form]) AS forms
+        WITH verb, COLLECT(DISTINCT forms) AS uniqueForms
+        SET verb.forms = uniqueForms
+        RETURN verb
+        """, {
+            "verb": verb, "form": form, "sentence_id": sentence_id,
+        })
+        if results:
+            logger.info(f"SET (verb:Verb {{{verb}}}).forms = {results[0]['verb']['forms']}}} << {form}")
+        else:
+            logger.error(f"failed to add verb form: '{verb}' form='{form}' sentence_id={sentence_id}")
+        return results
 
     async def close(self):
         await self.driver.shutdown()
@@ -684,6 +684,19 @@ class ControlPlane:
 
         })
         logger.info(f"sentence/previous link: {results}")
+        return results
+
+    async def link_verb_form_to_sentence(self, verb: str, form: str, link_name: str, sentence_id: int):
+        link_name = link_name.upper()
+        results = await self.driver.query(f"""
+        MATCH (verb:Verb {{text: $verb, sentence_id: $sentence_id}}), (sentence:Sentence {{sentence_id: $sentence_id}})
+        MERGE (verb)-[r:{link_name} {{form: $form, sentence_id: $sentence_id}}]->(sentence)
+        RETURN r
+        """, {
+            "verb": verb, "form": form, "sentence_id": sentence_id
+        })
+        if results:
+            logger.info(f"MERGE (verb:Verb {{text: {verb}}})-[r:{link_name} {{form: {form}}}]->(sentence:Sentence {{sentence_id: {sentence_id}}})")
         return results
 
     def signal_handler(self, sig, frame):
