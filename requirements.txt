@@ -24,6 +24,7 @@ opentelemetry-instrumentation-httpx
 opentelemetry-instrumentation-sqlalchemy
 opentelemetry-sdk
 prometheus_client
+psutil
 psycopg2-binary
 pydantic
 pytest

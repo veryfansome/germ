@@ -32,7 +32,7 @@ CORE_SEMANTIC_LABELS = {
     "xcomp",  # Clausal complements with externally governed subjects
 }
 NOUN_LABELS = {"NN", "NNS", "NNP", "NNPS"}
-VERB_LABELS = {"VB", "VBD", "VBG", "VBP", "VBN", "VBZ"}
+VERB_LABELS = {"MD", "VB", "VBD", "VBG", "VBP", "VBN", "VBZ", "RP"}
 STATE_OF_BEING_VERBS = {"am", "are", "be", "been", "being", "is", "was", "were"}
 SUBORDINATING_CONJUNCTIONS = {"after", "although", "because", "before", "if", "once", "since", "that", "though",
                               "unless", "until", "when", "while"}
@@ -51,6 +51,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         self.noun_classes_added = set()
         self.nouns_added = set()
         self.pronouns_added = set()
+        self.verbs_added = set()
 
     async def dump_labeled_exps(self):
         async_tasks = []
@@ -106,6 +107,40 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                     and sum(ch.isupper() for ch in ud_token_labels["tokens"][0]) == 1):
                 ud_token_labels["tokens"][0] = ud_token_labels["tokens"][0].lower()
 
+            # Extract consecutive VB* groups.
+            for verb_group in extract_label_groups(ud_token_labels, "xpos", target_labels=VERB_LABELS):
+                logger.info([(
+                    ud_token_labels["tokens"][i],
+                    wordnet_lemmatizer.lemmatize(ud_token_labels["tokens"][i], pos="v"),
+                    ud_token_labels["xpos"][i],
+                    ud_token_labels["deprel"][i],
+                    ud_token_labels["Number"][i],
+                    ud_token_labels["Person"][i],
+                    ud_token_labels["Tense"][i],
+                    ud_token_labels["VerbForm"][i],
+                ) for i in verb_group])
+
+                grp_stop_idx = verb_group[-1] + 1
+                grp_start_idx = verb_group[0]
+                for idx in verb_group:
+                    token = ud_token_labels["tokens"][idx]
+                    token_lower = token.lower()
+                    token_lemma = wordnet_lemmatizer.lemmatize(token_lower, pos="v")
+                    deprel_label = ud_token_labels["deprel"][idx]
+                    if deprel_label.startswith("aux"):
+                        pass
+                    elif deprel_label == "cop":
+                        pass
+                    else:
+                        verb_cache_key = f"{token_lemma}_{sentence_id}"
+                        if verb_cache_key not in self.verbs_added:
+                            await self.control_plane.add_verb(token_lemma, sentence_id)
+                            await self.control_plane.add_verb_form(token_lemma, token, sentence_id)
+                            await self.control_plane.link_verb_form_to_sentence(
+                                token_lemma, token,
+                                deprel_label.replace(":", "_").upper(), sentence_id)
+                            self.verbs_added.add(verb_cache_key)
+
             idx_to_noun_group = {}
             idx_to_noun_joined_base_form = {}
             idx_to_noun_joined_raw_form = {}
@@ -156,10 +191,9 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                         idx_to_noun_joined_base_form[noun_group[0]], idx_to_noun_joined_raw_form[noun_group[0]],
                         sentence_id)
                     deprel_label = ud_token_labels["deprel"][noun_group[-1]]
-                    if deprel_label in CORE_SEMANTIC_LABELS:
-                        await self.control_plane.link_noun_form_to_sentence(
-                            idx_to_noun_joined_base_form[noun_group[0]], idx_to_noun_joined_raw_form[noun_group[0]],
-                            deprel_label.replace(":", "_").upper(), sentence_id)
+                    await self.control_plane.link_noun_form_to_sentence(
+                        idx_to_noun_joined_base_form[noun_group[0]], idx_to_noun_joined_raw_form[noun_group[0]],
+                        deprel_label.replace(":", "_").upper(), sentence_id)
                     self.nouns_added.add(noun_cache_key)
                 for idx in noun_group:
                     idx_to_noun_det_or_pos[idx] = dt_or_pos_idx
@@ -184,9 +218,8 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                 if pronoun_cache_key not in self.pronouns_added:
                     await self.control_plane.add_pronoun(token_lowered, sentence_id)
                     deprel_label = ud_token_labels["deprel"][pronoun_group[-1]]
-                    if deprel_label in CORE_SEMANTIC_LABELS:
-                        await self.control_plane.link_pronoun_to_sentence(
-                            token_lowered, deprel_label.replace(":", "_").upper(), sentence_id)
+                    await self.control_plane.link_pronoun_to_sentence(
+                        token_lowered, deprel_label.replace(":", "_").upper(), sentence_id)
                     self.pronouns_added.add(pronoun_cache_key)
             # Look for adjectives
             for pattern_name, start_positions in extract_consecutive_token_patterns(

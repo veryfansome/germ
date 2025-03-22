@@ -33,7 +33,7 @@ text_emotions_classifier = GoEmotionsPredictor(
 conll_token_multi_classifier = MultiHeadPredictor(
     "veryfansome/multi-classifier", subfolder="models/conll2012_en12_20250305")
 ud_token_multi_classifier = MultiHeadPredictor(
-    "veryfansome/multi-classifier", subfolder="models/ud_ewt_gum_20250304")
+    "veryfansome/multi-classifier", subfolder="models/ud_augmented_jj_rb_types_20250320_v2")
 
 
 @asynccontextmanager
