@@ -46,8 +46,8 @@ scheduler = AsyncIOScheduler()
 setup_logging()
 logger = logging.getLogger(__name__)
 
-inet_if_info = {k: [e for e in v if e.family == AddressFamily.AF_INET].pop()
-                for k, v in psutil.net_if_addrs().items() if k != "lo"}
+inet_if_info = {k: v[0] for k, v in psutil.net_if_addrs().items()
+                if not k.startswith("lo") and v[0].family == AddressFamily.AF_INET}
 inet_if_cnt = len(inet_if_info)
 process_info = psutil.Process()
 process_parent_info = process_info.parent()
