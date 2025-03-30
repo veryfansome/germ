@@ -197,6 +197,12 @@ async def delete_chat_session_bookmark(chat_session_id: int):
     return await update_chat_session_is_hidden(chat_session_id)
 
 
+@bot.get("/", include_in_schema=False)
+async def get_landing():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
+    return FileResponse(file_path)
+
+
 @bot.get("/chat/sessions")
 async def get_chat_session_list() -> list[ChatSessionSummary]:
     return await get_chat_session_summaries()
@@ -213,10 +219,47 @@ async def get_favicon():
     return FileResponse(file_path)
 
 
-@bot.get("/", include_in_schema=False)
-async def get_landing():
-    file_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
-    return FileResponse(file_path)
+@bot.get("/graph")
+async def get_graph():
+    node_results, edge_results = await asyncio.gather(control_plane.get_nodes(), control_plane.get_edges())
+    combined_results = {
+        "nodes": [],
+        "edges": [],
+    }
+    for r in edge_results:
+        edge = {"id": r["edgeId"], "from": r["startNodeId"], "to": r["endNodeId"], "label": r["edge"][1]}
+        combined_results["edges"].append(edge)
+    for r in node_results:
+        node = {"id": r["nodeId"], **r["node"], "nodeLabels": r["nodeLabels"]}
+        if "ChatRequest" in r["nodeLabels"]:
+            node["color"] = "pink"
+            node["label"] = r["node"]["chat_request_received_id"]
+        elif "ChatResponse" in r["nodeLabels"]:
+            node["color"] = "purple"
+            node["label"] = r["node"]["chat_response_sent_id"]
+        elif "ChatSession" in r["nodeLabels"]:
+            node["color"] = "gray"
+            node["label"] = r["node"]["chat_session_id"]
+        elif "Paragraph" in r["nodeLabels"]:
+            node["color"] = "green"
+            node["label"] = f"paragraph_id:{r['node']['paragraph_id']}"
+        elif "Sentence" in r["nodeLabels"]:
+            node["color"] = "#658BA5FF"
+            node["label"] = r["node"]["text"]
+        elif "Adjective" in r["nodeLabels"]:
+            node["color"] = "orange"
+            node["label"] = r["node"]["text"]
+        elif "Noun" in r["nodeLabels"]:
+            node["color"] = "yellow"
+            node["label"] = r["node"]["text"]
+        elif "Pronoun" in r["nodeLabels"]:
+            node["color"] = "brown"
+            node["label"] = r["node"]["text"]
+        elif "Verb" in r["nodeLabels"]:
+            node["color"] = "red"
+            node["label"] = r["node"]["text"]
+        combined_results["nodes"].append(node)
+    return combined_results
 
 
 @bot.get("/healthz")
