@@ -232,32 +232,44 @@ async def get_graph():
     for r in node_results:
         node = {"id": r["nodeId"], **r["node"], "nodeLabels": r["nodeLabels"]}
         if "ChatRequest" in r["nodeLabels"]:
-            node["color"] = "pink"
-            node["label"] = r["node"]["chat_request_received_id"]
+            node["color"] = "#E74BFFFF"
+            node["label"] = f"chat_request_received_id:{r['node']['chat_request_received_id']}"
         elif "ChatResponse" in r["nodeLabels"]:
-            node["color"] = "purple"
-            node["label"] = r["node"]["chat_response_sent_id"]
+            node["color"] = "#AF4BFFFF"
+            node["label"] = f"chat_response_sent_id:{r['node']['chat_response_sent_id']}"
         elif "ChatSession" in r["nodeLabels"]:
-            node["color"] = "gray"
-            node["label"] = r["node"]["chat_session_id"]
+            node["color"] = "#658BA5FF"
+            node["label"] = f"chat_session_id:{r['node']['chat_session_id']}"
         elif "Paragraph" in r["nodeLabels"]:
-            node["color"] = "green"
+            node["color"] = "#9A9A9AFF"
             node["label"] = f"paragraph_id:{r['node']['paragraph_id']}"
         elif "Sentence" in r["nodeLabels"]:
-            node["color"] = "#658BA5FF"
-            node["label"] = r["node"]["text"]
+            node["color"] = "#C5C5C5FF"
+            if len(r["node"]["text"]) > 25:
+                node["label"] = r["node"]["text"][:25] + "..."
+            else:
+                node["label"] = r["node"]["text"]
+            node["title"] = r["node"]["text"]
         elif "Adjective" in r["nodeLabels"]:
-            node["color"] = "orange"
+            node["color"] = "#FFBA00FF"
             node["label"] = r["node"]["text"]
+            node["title"] = r["node"]["forms"]
+        elif "Adverb" in r["nodeLabels"]:
+            node["color"] = "#FF6A00FF"
+            node["label"] = r["node"]["text"]
+            node["title"] = r["node"]["forms"]
         elif "Noun" in r["nodeLabels"]:
-            node["color"] = "yellow"
+            node["color"] = "#60FF3DFF"
             node["label"] = r["node"]["text"]
+            node["title"] = r["node"]["forms"]
         elif "Pronoun" in r["nodeLabels"]:
             node["color"] = "brown"
             node["label"] = r["node"]["text"]
+            node["title"] = r["node"]["text"]
         elif "Verb" in r["nodeLabels"]:
             node["color"] = "red"
             node["label"] = r["node"]["text"]
+            node["title"] = r["node"]["forms"]
         combined_results["nodes"].append(node)
     return combined_results
 
