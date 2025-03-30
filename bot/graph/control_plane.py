@@ -410,6 +410,16 @@ class ControlPlane:
     async def close(self):
         await self.driver.shutdown()
 
+    async def get_edges(self):
+        return await self.driver.query("""
+        MATCH (start)-[edge]->(end) WHERE NOT start:__Neo4jMigration RETURN edge, id(edge) AS edgeId, id(start) AS startNodeId, id(end) AS endNodeId
+        """)
+
+    async def get_nodes(self):
+        return await self.driver.query("""
+        MATCH (node) WHERE NOT node:__Neo4jMigration RETURN node, id(node) AS nodeId, labels(node) AS nodeLabels
+        """)
+
     async def get_paragraph(self, paragraph_id: int):
         return await self.driver.query("""
         MATCH (paragraph:Paragraph {paragraph_id: $paragraph_id})
