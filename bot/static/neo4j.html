@@ -29,16 +29,10 @@
     <script>
     // create an array with nodes
     function loadGraph(data) {
-        const nodes = new vis.DataSet(data.nodes);
-        const edges = new vis.DataSet(data.edges);
-
-        // create a network
         let container = document.getElementById('graph-container');
-
-        // provide the data in the vis format
         let visData = {
-            nodes: nodes,
-            edges: edges
+            nodes: new vis.DataSet(data.nodes),
+            edges: new vis.DataSet(data.edges)
         };
         let options = {
             configure: {
@@ -56,7 +50,6 @@
                 shape: "box"
             },
         };
-        // initialize your network!
         new vis.Network(container, visData, options);
     }
     fetch('/graph')

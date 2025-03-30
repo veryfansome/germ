@@ -231,18 +231,23 @@ async def get_graph():
         combined_results["edges"].append(edge)
     for r in node_results:
         node = {"id": r["nodeId"], **r["node"], "nodeLabels": r["nodeLabels"]}
-        if "ChatRequest" in r["nodeLabels"]:
+        if "ChatSession" in r["nodeLabels"]:
+            node["color"] = "#658BA5FF"
+            node["label"] = f"chat_session_id:{r['node']['chat_session_id']}"
+        elif "ChatRequest" in r["nodeLabels"]:
             node["color"] = "#E74BFFFF"
             node["label"] = f"chat_request_received_id:{r['node']['chat_request_received_id']}"
         elif "ChatResponse" in r["nodeLabels"]:
             node["color"] = "#AF4BFFFF"
             node["label"] = f"chat_response_sent_id:{r['node']['chat_response_sent_id']}"
-        elif "ChatSession" in r["nodeLabels"]:
-            node["color"] = "#658BA5FF"
-            node["label"] = f"chat_session_id:{r['node']['chat_session_id']}"
+
+        elif "CodeBlock" in r["nodeLabels"]:
+            node["color"] = "#9A9A9AFF"
+            node["label"] = f"code_block_id:{r['node']['code_block_id']}"
         elif "Paragraph" in r["nodeLabels"]:
             node["color"] = "#9A9A9AFF"
             node["label"] = f"paragraph_id:{r['node']['paragraph_id']}"
+
         elif "Sentence" in r["nodeLabels"]:
             node["color"] = "#C5C5C5FF"
             if len(r["node"]["text"]) > 25:
