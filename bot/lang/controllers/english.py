@@ -61,14 +61,11 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
             async_tasks.append(asyncio.create_task(run_in_threadpool(dump_labeled_exps, ud_exps, "ud")))
         await asyncio.gather(*async_tasks)
 
-    async def label_sentence(self, sentence: str, sentence_id: int, sentence_context):
+    async def label_sentence(self, sentence: str, text_block_id: int, sentence_context):
         ud_token_labels = await get_ud_token_classifications(sentence)
         logger.info(f"sentence_context: \t{sentence_context}")
-        logger.info(f"ud labels: sentence_id={sentence_id}\n" + (
+        logger.info(f"ud labels: text_block_id={text_block_id}\n" + (
             "\n".join([f"{head}\t{labels}" for head, labels in ud_token_labels.items()])))
-
-        #if not ("bootstrap" in sentence_context["_"] and sentence_context["_"]["bootstrap"]):
-        #    self.labeled_examples_ud.append(ud_token_labels)
 
         token_cnt = len(ud_token_labels["tokens"])
         try:
@@ -103,13 +100,13 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                     elif deprel_label == "cop":
                         pass
                     else:
-                        verb_cache_key = f"{token_lemma}_{sentence_id}"
+                        verb_cache_key = f"{token_lemma}_{text_block_id}"
                         if verb_cache_key not in self.verbs_added:
-                            await self.control_plane.add_verb(token_lemma, sentence_id)
-                            await self.control_plane.add_verb_form(token_lemma, token, sentence_id)
+                            await self.control_plane.add_verb(token_lemma, text_block_id)
+                            await self.control_plane.add_verb_form(token_lemma, token, text_block_id)
                             await self.control_plane.link_verb_form_to_sentence(
                                 token_lemma, token,
-                                deprel_label.replace(":", "_").upper(), sentence_id)
+                                deprel_label.replace(":", "_").upper(), text_block_id)
                             self.verbs_added.add(verb_cache_key)
 
             idx_to_noun_group = {}
@@ -154,17 +151,17 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                             ud_token_labels["xpos"][next_idx+1:], {"NN", "NNS", "NNP", "NNPS", "PRP$"})
                 logger.info(f"noun: det_or_pos={dt_or_pos_idx} noun_group={noun_group} "
                             f"word_or_phrase='{idx_to_noun_joined_base_form[noun_group[0]]}'")
-                noun_cache_key = f"{idx_to_noun_joined_base_form[noun_group[0]]}_{sentence_id}"
+                noun_cache_key = f"{idx_to_noun_joined_base_form[noun_group[0]]}_{text_block_id}"
                 if noun_cache_key not in self.nouns_added:
                     await self.control_plane.add_noun(
-                        idx_to_noun_joined_base_form[noun_group[0]], sentence_id)
+                        idx_to_noun_joined_base_form[noun_group[0]], text_block_id)
                     await self.control_plane.add_noun_form(
                         idx_to_noun_joined_base_form[noun_group[0]], idx_to_noun_joined_raw_form[noun_group[0]],
-                        sentence_id)
+                        text_block_id)
                     deprel_label = ud_token_labels["deprel"][noun_group[-1]]
                     await self.control_plane.link_noun_form_to_sentence(
                         idx_to_noun_joined_base_form[noun_group[0]], idx_to_noun_joined_raw_form[noun_group[0]],
-                        deprel_label.replace(":", "_").upper(), sentence_id)
+                        deprel_label.replace(":", "_").upper(), text_block_id)
                     self.nouns_added.add(noun_cache_key)
                 for idx in noun_group:
                     idx_to_noun_det_or_pos[idx] = dt_or_pos_idx
@@ -177,7 +174,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                 # - Must agree with antecedents in number and gender when applicable
                 # - Typically refers to most immediate noun but proximity isn't the only rule
                 # - Reflexive pronouns refer back to the subject and need a clear and appropriate antecedent
-                pronoun_cache_key = f"{token_lowered}_{sentence_id}"
+                pronoun_cache_key = f"{token_lowered}_{text_block_id}"
                 if token_lowered in {"it", "you"}:  # Subject or object
                     pass
                 elif token_lowered in {"i", "he", "she", "we", "they"}:  # Subject
@@ -187,10 +184,10 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                 elif token_lowered.endswith("self") or token_lowered.endswith("selves"):  # Reflexive
                     pass
                 if pronoun_cache_key not in self.pronouns_added:
-                    await self.control_plane.add_pronoun(token_lowered, sentence_id)
+                    await self.control_plane.add_pronoun(token_lowered, text_block_id)
                     deprel_label = ud_token_labels["deprel"][pronoun_group[-1]]
                     await self.control_plane.link_pronoun_to_sentence(
-                        token_lowered, deprel_label.replace(":", "_").upper(), sentence_id)
+                        token_lowered, deprel_label.replace(":", "_").upper(), text_block_id)
                     self.pronouns_added.add(pronoun_cache_key)
             # Look for adjectives
             for pattern_name, start_positions in extract_consecutive_token_patterns(
@@ -258,7 +255,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                                 await self.control_plane.add_adjective_form(jj_lowered, jj)
                                 self.adjectives_added.add(jj_lowered)
                             await self.control_plane.link_adj_as_noun_attr(
-                                jj_lowered, idx_to_noun_joined_base_form[start_idx + 1], sentence_id)
+                                jj_lowered, idx_to_noun_joined_base_form[start_idx + 1], text_block_id)
                 elif pattern_name in {"PRP-VB-JJ", "PRP-VB-RB-JJ", "NN-VB-JJ", "NN-VB-RB-JJ"}:
                     jj_idx_shift = len(pattern_name.split("-")) - 1
                     for start_idx in start_positions:
@@ -289,11 +286,11 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                                     self.adjectives_added.add(jj_lowered)
                                 if ud_token_labels["xpos"][start_idx].startswith("NN"):
                                     await self.control_plane.link_adj_as_noun_attr(
-                                        jj_lowered, idx_to_noun_joined_base_form[start_idx], sentence_id,
+                                        jj_lowered, idx_to_noun_joined_base_form[start_idx], text_block_id,
                                         negative=negative)
                                 elif ud_token_labels["xpos"][start_idx] == "PRP":
                                     await self.control_plane.link_adj_as_pronoun_to_attr(
-                                        jj_lowered, ud_token_labels["tokens"][start_idx], sentence_id,
+                                        jj_lowered, ud_token_labels["tokens"][start_idx], text_block_id,
                                         negative=negative)
                 elif pattern_name in {"NN-VB-CC-JJ-CC-JJ", "PRP-VB-CC-JJ-CC-JJ"}:
                     for start_idx in start_positions:
@@ -333,20 +330,20 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
             while self.unlabeled_sentences:
                 todo.append(self.unlabeled_sentences.pop(0))
         for sentence_args in todo:
-            sentence, sentence_id, sentence_context = sentence_args
+            sentence, text_block_id, sentence_context = sentence_args
 
             emotion_labels = await get_emotions_classifications(sentence)
             ud_labels_task = asyncio.create_task(self.label_sentence(
-                sentence, sentence_id, {**sentence_context, "emotions": emotion_labels["emotions"]}))
+                sentence, text_block_id, {**sentence_context, "emotions": emotion_labels["emotions"]}))
             await asyncio.gather(*[
                 ud_labels_task,
             ])
 
-    async def on_code_block_merge(self, code_block: str, code_block_id: int):
-        logger.info(f"on_code_block_merge: code_block_id={code_block_id}, {code_block}")
+    async def on_code_block_merge(self, code_block: str, text_block_id: int):
+        logger.info(f"on_code_block_merge: text_block_id={text_block_id}, {code_block}")
 
-    async def on_paragraph_merge(self, paragraph: str, paragraph_id: int, paragraph_context):
-        logger.info(f"on_paragraph_merge: paragraph_id={paragraph_id}, {paragraph}")
+    async def on_paragraph_merge(self, paragraph: str, text_block_id: int, paragraph_context):
+        logger.info(f"on_paragraph_merge: text_block_id={text_block_id}, {paragraph}")
 
         paragraph_soup = await run_in_threadpool(get_html_soup, f"<p>{paragraph}</p>")
         paragraph_text, paragraph_elements = await strip_html_elements(paragraph_soup, "p")
@@ -376,7 +373,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
             async_tasks.extend(sentence_tasks)
 
             async_tasks.append(
-                asyncio.create_task(self.control_plane.link_paragraph_to_sentence(paragraph_id, sentence_id)))
+                asyncio.create_task(self.control_plane.link_paragraph_to_sentence(text_block_id, sentence_id)))
             if previous_sentence_id is not None:
                 async_tasks.append(
                     asyncio.create_task(
@@ -389,12 +386,12 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                 paragraph_text = ""
         await asyncio.gather(*async_tasks)
 
-    async def on_sentence_merge(self, sentence: str, sentence_id: int, sentence_context):
+    async def on_sentence_merge(self, sentence: str, text_block_id: int, sentence_context):
         if "deferred_labeling" in sentence_context["_"] and sentence_context["_"]["deferred_labeling"] is False:
-            await self.label_sentence(sentence, sentence_id, sentence_context)
+            await self.label_sentence(sentence, text_block_id, sentence_context)
         else:
             # Append for deferred processing to maintain viability in memory constrained settings.
-            self.unlabeled_sentences.append((sentence, sentence_id, sentence_context))
+            self.unlabeled_sentences.append((sentence, text_block_id, sentence_context))
 
 
 def dump_labeled_exps(exps, dir_name):

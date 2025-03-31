@@ -44,14 +44,23 @@
                     to: {
                         enabled: true,
                     }
-                }
+                },
+                smooth: false, // For performance
+            },
+            layout: {
+                improvedLayout: false,
             },
             nodes: {
-                shape: "box"
+                shape: "box",
+                shadow: false,  // For performance
+            },
+            physics: {
+                enabled: true,
             },
         };
         new vis.Network(container, visData, options);
     }
+    // TODO: limit call to active sessions vs all-time
     fetch('/graph')
         .then(response => response.json())
         .then(data => loadGraph(data))

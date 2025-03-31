@@ -14,12 +14,9 @@ from typing import List
 import aiofiles
 import asyncio
 import hashlib
-import ipaddress
 import os
-import platform
 import psutil
 import subprocess
-import sys
 import traceback
 
 from bot.api.models import ChatMessage, ChatSessionSummary, SqlRequest
@@ -85,48 +82,6 @@ async def lifespan(app: FastAPI):
                       seconds=english_controller.interval_seconds)
     scheduler.add_job(english_controller.dump_labeled_exps, "interval",
                       minutes=10)
-
-    if not await control_plane.get_paragraph(1):
-        await control_plane.add_paragraph("""
-I am a Python-based software assistant.
-My software stack includes two FastAPI-based services, a PostgreSQL database, and a Neo4j database.
-One FastAPI service, the "model" service, handles model serving.
-This service downloads custom pretrained models from Hugging Face and exposes REST-based access to these models.
-The other FastAPI service, the "bot" service, provides a simple web-based chat UI that enables chats over bi-directional
-websocket connections.
-""".replace("\n", " ").strip(), {
-            "_": {"bootstrap": True}
-        })
-        await control_plane.add_paragraph("""
-My users are people.
-Different people can interact with me as users.
-As of yet, I do not have a way of differentiating one user from another unless they explicitly identify themselves.
-""".replace("\n", " ").strip(), {
-            "_": {"bootstrap": True}
-        })
-    await control_plane.add_paragraph(f"""
-My current host is named {platform.node()} and it has {psutil.cpu_count()} {platform.machine()} CPUs with roughly
-{round(psutil.virtual_memory().total / 1e9)}GB total memory.
-My current host has {inet_if_cnt} network interface(s); {(", " if inet_if_cnt > 2 else " ").join([
-        (("and " if inet_if_cnt > 2 and i == inet_if_cnt - 1 else "")
-         + f"{p[0]} at {p[1].address} on {ipaddress.ip_network(p[1].address + '/' + p[1].netmask, strict=False)}")
-        for i, p in enumerate(inet_if_info.items())])}.
-My current operating system is {platform.system()} and the kernel release is {platform.release()}.
-My current OS boot time is {psutil.boot_time()}.
-My current Linux user is {process_info.username()} with user ID {os.getuid()}.
-My current HOME is {os.environ["HOME"]}.
-My current PATH is {os.environ["PATH"]}.
-My current PWD is {os.environ["PWD"]}.
-My current process creation time is {process_info.create_time()}.
-My current process ID is {process_info.pid} and my process' session ID is {os.getsid(process_info.pid)}.
-My current parent process' ID is {process_parent_info.pid} and its session ID is {os.getsid(process_parent_info.pid)}.
-My current Python executable path is {sys.executable}.
-My current Python version is {platform.python_version()} and the implementation is {platform.python_implementation()}
-compiled with {platform.python_compiler()}.
-My current C library is {"-".join(platform.libc_ver())}.
-""".replace("\n", " ").strip(), {
-        "_": {"bootstrap": True}
-    })
 
     assistant_helper = AssistantHelper()
     await assistant_helper.refresh_assistants()
@@ -243,10 +198,10 @@ async def get_graph():
 
         elif "CodeBlock" in r["nodeLabels"]:
             node["color"] = "#9A9A9AFF"
-            node["label"] = f"code_block_id:{r['node']['code_block_id']}"
+            node["label"] = f"code:text_block_id:{r['node']['text_block_id']}"
         elif "Paragraph" in r["nodeLabels"]:
             node["color"] = "#9A9A9AFF"
-            node["label"] = f"paragraph_id:{r['node']['paragraph_id']}"
+            node["label"] = f"paragraph:text_block_id:{r['node']['text_block_id']}"
 
         elif "Sentence" in r["nodeLabels"]:
             node["color"] = "#C5C5C5FF"
