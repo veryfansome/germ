@@ -27,12 +27,104 @@
     </div>
     <div id="graph-container" style="width: 100%; height: 100%; border: 1px solid #ccc;"></div>
     <script>
-    // create an array with nodes
     function loadGraph(data) {
         let container = document.getElementById('graph-container');
+
+        const newNodeList = [];
+        for (let i = 0; i < data.nodes.length; i++) {
+          const current = data.nodes[i];
+          if (current.nodeLabels.includes("ChatSession")) {
+              newNodeList.push({
+                  ...current,
+                  color: "pink",
+                  label: `session:${current.chat_session_id}`,
+              });
+          } else if (current.nodeLabels.includes("ChatRequest")) {
+              newNodeList.push({
+                  ...current,
+                  color: "#E74BFFFF",
+                  label: `received:chat_message_id:${current.chat_request_received_id}`,
+              });
+          } else if (current.nodeLabels.includes("ChatResponse")) {
+              newNodeList.push({
+                  ...current,
+                  color: "#AF4BFFFF",
+                  label: `sent:chat_message_id:${current.chat_response_sent_id}`,
+              });
+
+          } else if (current.nodeLabels.includes("CodeBlock")) {
+              newNodeList.push({
+                  ...current,
+                  color: "#9A9A9AFF",
+                  label: `code:${current.text_block_id}`,
+              });
+          } else if (current.nodeLabels.includes("Paragraph")) {
+              newNodeList.push({
+                  ...current,
+                  color: "#C5C5C5FF",
+                  label: `paragraph:${current.text_block_id}`,
+              });
+
+          } else if (current.nodeLabels.includes("Sentence")) {
+              newNodeList.push({
+                  ...current,
+                  color: "#C5C5C5FF",
+                  label: (current.text.length > 25) ? `${current.text.slice(0, 25)}...` : current.text,
+                  title: current.text,
+              });
+          } else if (current.nodeLabels.includes("Adjective")) {
+              newNodeList.push({
+                  ...current,
+                  color: "#FFBA00FF",
+                  label: current.text,
+                  title: current.forms,
+              });
+          } else if (current.nodeLabels.includes("Adverb")) {
+              newNodeList.push({
+                  ...current,
+                  color: "#FF6A00FF",
+                  label: current.text,
+                  title: current.forms,
+              });
+          } else if (current.nodeLabels.includes("Noun")) {
+              newNodeList.push({
+                  ...current,
+                  color: "#60FF3DFF",
+                  label: current.text,
+                  title: current.forms,
+              });
+          } else if (current.nodeLabels.includes("Pronoun")) {
+              newNodeList.push({
+                  ...current,
+                  color: "brown",
+                  label: current.text,
+              });
+          } else if (current.nodeLabels.includes("Verb")) {
+              newNodeList.push({
+                  ...current,
+                  color: "red",
+                  label: current.text,
+                  title: current.forms,
+              });
+
+          } else if (current.nodeLabels.includes("EntityType")) {
+              newNodeList.push({
+                  ...current,
+                  color: "#00D9FF",
+                  label: current.text,
+                  title: current.forms,
+              });
+          } else if (current.nodeLabels.includes("PartOfSpeech")) {
+              newNodeList.push({
+                  ...current,
+                  color: "#00e4a7",
+                  label: current.text,
+              });
+          }
+        }
         let visData = {
-            nodes: new vis.DataSet(data.nodes),
-            edges: new vis.DataSet(data.edges)
+            edges: new vis.DataSet(data.edges),
+            nodes: new vis.DataSet(newNodeList),
         };
         let options = {
             configure: {
