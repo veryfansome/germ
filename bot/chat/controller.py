@@ -97,11 +97,11 @@ class ChatController(WebSocketReceiveEventHandler, WebSocketSendEventHandler, We
             elif element[0] == "list":
                 list_type = "ul" if element[1] is False else "ol"
                 # Store as paragraph
-                _, paragraph_id, paragraph_tasks = await self.control_plane.add_paragraph(
+                _, text_block_id, paragraph_tasks = await self.control_plane.add_paragraph(
                     "\n".join([(f"• {e}" if list_type == 'ul' else f"{i+1}. {e}") for i, e in enumerate(list_elements)]),
                     {**merged_element_attrs, "list_size": len(list_elements), "list_type": list_type})
                 async_tasks.extend(paragraph_tasks)
-                this_element_attrs = {"paragraph_id": paragraph_id}
+                this_element_attrs = {"text_block_id": text_block_id}
                 list_elements = []
                 list_type = None
             else:
@@ -110,15 +110,15 @@ class ChatController(WebSocketReceiveEventHandler, WebSocketSendEventHandler, We
 
                 # `paragraph` and `code_block` are ordered at the top for frequency
                 if element[0] == "paragraph":
-                    _, paragraph_id, paragraph_tasks = await self.control_plane.add_paragraph(
+                    _, text_block_id, paragraph_tasks = await self.control_plane.add_paragraph(
                         element[1], merged_element_attrs)
                     async_tasks.extend(paragraph_tasks)
-                    this_element_attrs = {"paragraph_id": paragraph_id}
+                    this_element_attrs = {"text_block_id": text_block_id}
                 elif element[0] == "block_code":
-                    _, code_block_id, code_block_tasks = await self.control_plane.add_code_block(
+                    _, text_block_id, code_block_tasks = await self.control_plane.add_code_block(
                         element[2], {"language": str(element[1]), **merged_element_attrs})
                     async_tasks.extend(code_block_tasks)
-                    this_element_attrs = {"code_block_id": code_block_id}
+                    this_element_attrs = {"text_block_id": text_block_id}
                 elif element[0] == "heading":
                     if element[1] == 1:
                         h1 = element[2]

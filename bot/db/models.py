@@ -1,5 +1,5 @@
 from sqlalchemy import (create_engine, Boolean, Column, DateTime, ForeignKey,
-                        Index, Integer, JSON, String, UUID)
+                        Index, Integer, JSON, String)
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -53,22 +53,6 @@ class ChatResponseSent(Base):
     __table_args__ = (
         # Since we look up responses by session for bookmarks.
         Index("idx_chat_response_sent_chat_session_id", "chat_session_id"),
-    )
-
-
-class Sentence(Base):
-    __tablename__ = "sentence"
-    sentence_id = Column(Integer, primary_key=True, autoincrement=True)
-
-    sentence_openai_parameters = Column(JSON)
-    sentence_openai_parameters_time_changed = Column(DateTime(timezone=True))
-    sentence_openai_parameters_fetch_count = Column(Integer, default=0)
-
-    sentence_signature = Column(UUID)
-    text = Column(String)
-
-    __table_args__ = (
-        Index('idx__sentence__sentence_signature', 'sentence_signature'),  # Secondary index
     )
 
 
