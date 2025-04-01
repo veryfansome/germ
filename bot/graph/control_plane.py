@@ -5,10 +5,10 @@ from sqlalchemy import insert as sql_insert
 from typing import Optional
 import asyncio
 import uuid
+import logging
 
 from bot.db.models import AsyncSessionLocal, engine
 from bot.db.neo4j import AsyncNeo4jDriver
-from observability.logging import logging
 from settings.germ_settings import UUID5_NS
 
 logger = logging.getLogger(__name__)
@@ -213,6 +213,30 @@ class ControlPlane:
     def add_code_block_merge_event_handler(self, handler: CodeBlockMergeEventHandler):
         self.code_block_merge_event_handlers.append(handler)
 
+    async def add_entity_type(self, ent_type: str):
+        results = await self.driver.query("""
+        MATCH (ent_type:EntityType {text: $ent_type})
+        RETURN ent_type
+        """, {
+            "ent_type": ent_type,
+        })
+        if not results:
+            results = await self.driver.query("""
+            MERGE (ent_type:EntityType {text: $ent_type})
+            WITH ent_type
+            UNWIND (COALESCE(ent_type.forms, []) + [$ent_type]) AS forms
+            WITH ent_type, COLLECT(DISTINCT forms) AS uniqueForms
+            SET ent_type.forms = uniqueForms
+            RETURN ent_type
+            """, {
+                "ent_type": ent_type,
+            })
+            if results:
+                logger.info(f"MERGE (ent_type:EntityType {{text: {ent_type}}})")
+            else:
+                logger.error(f"failed to add ent_type: '{ent_type}'")
+        return results
+
     async def add_hyperlink(self, html_tag: str, url: str):
         results = await self.driver.query("""
         MERGE (hyperlink:Hyperlink {url: $url, html_tag: $html_tag})
@@ -292,6 +316,42 @@ class ControlPlane:
 
     def add_paragraph_merge_event_handler(self, handler: ParagraphMergeEventHandler):
         self.paragraph_merge_event_handlers.append(handler)
+
+    async def add_token(self, token: str):
+        params = {"token": token}
+        results = await self.driver.query("""
+        MATCH (token:Token {text: $token})
+        RETURN token
+        """, params)
+        if not results:
+            results = await self.driver.query("""
+            MERGE (token:Token {text: $token})
+            RETURN token
+            """, params)
+            if results:
+                logger.info(f"MERGE (token:Token {{text: {token}}})")
+            else:
+                logger.error(f"failed to add token: '{token}'")
+        return results
+
+    async def add_pos_tag(self, tag: str):
+        params = {
+            "tag": tag,
+        }
+        results = await self.driver.query("""
+        MATCH (tag:PartOfSpeech {text: $tag})
+        RETURN tag
+        """, params)
+        if not results:
+            results = await self.driver.query("""
+            MERGE (tag:PartOfSpeech {text: $tag})
+            RETURN tag
+            """, params)
+            if results:
+                logger.info(f"MERGE (tag:PartOfSpeech {{text: {tag}}})")
+            else:
+                logger.error(f"failed to add tag: '{tag}'")
+        return results
 
     async def add_pronoun(self, pronoun: str, text_block_id: int):
         results = await self.driver.query("""
@@ -706,3 +766,31 @@ def round_time_now_down_to_nearst_interval(interval_minutes: int = 5):
 
 def utc_now():
     return datetime.now(timezone.utc)
+
+
+if __name__ == "__main__":
+    from observability.logging import setup_logging
+    setup_logging()
+
+    async def main():
+        neo4j_driver = AsyncNeo4jDriver()
+        control_plane = ControlPlane(neo4j_driver)
+        # TODO:
+        #  - chunk tagger classifying type words vs instance words.
+        #  - ? how would I learn these patterns automatically on unlabled examples ?
+        #  - graph all POS labels
+        #  - enable manual modification of POS labels directly using graph UI to make it easier to manually adjust
+        #    new examples
+        #  - run automation on the graph to import label connections
+        await control_plane.initialize()
+        await control_plane.add_entity_type("animal")
+        await control_plane.add_entity_type("energy")
+        await control_plane.add_entity_type("fauna")
+        await control_plane.add_entity_type("flora")
+        await control_plane.add_entity_type("input")
+        await control_plane.add_entity_type("joke")
+        await control_plane.add_entity_type("person")
+        await control_plane.add_entity_type("phenomenon")
+        await control_plane.add_entity_type("plant")
+        await neo4j_driver.shutdown()
+    asyncio.run(main())

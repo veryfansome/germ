@@ -42,7 +42,6 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
     def __init__(self, control_plane: ControlPlane, interval_seconds: int = 9):
         self.control_plane = control_plane
         self.interval_seconds = interval_seconds
-        self.labeled_examples_ud = []
         self.unlabeled_sentences = []
 
         self.adjectives_added = set()
@@ -51,15 +50,6 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         self.nouns_added = set()
         self.pronouns_added = set()
         self.verbs_added = set()
-
-    async def dump_labeled_exps(self):
-        async_tasks = []
-        ud_exps = []
-        if self.labeled_examples_ud:
-            while self.labeled_examples_ud:
-                ud_exps.append(self.labeled_examples_ud.pop(0))
-            async_tasks.append(asyncio.create_task(run_in_threadpool(dump_labeled_exps, ud_exps, "ud")))
-        await asyncio.gather(*async_tasks)
 
     async def label_sentence(self, sentence: str, text_block_id: int, sentence_context):
         ud_token_labels = await get_ud_token_classifications(sentence)
@@ -76,38 +66,38 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                 ud_token_labels["tokens"][0] = ud_token_labels["tokens"][0].lower()
 
             # Extract consecutive VB* groups.
-            for verb_group in extract_label_groups(ud_token_labels, "xpos", target_labels=VERB_LABELS):
-                logger.info([(
-                    ud_token_labels["tokens"][i],
-                    wordnet_lemmatizer.lemmatize(ud_token_labels["tokens"][i], pos="v"),
-                    ud_token_labels["xpos"][i],
-                    ud_token_labels["deprel"][i],
-                    ud_token_labels["Number"][i],
-                    ud_token_labels["Person"][i],
-                    ud_token_labels["Tense"][i],
-                    ud_token_labels["VerbForm"][i],
-                ) for i in verb_group])
+            #for verb_group in extract_label_groups(ud_token_labels, "xpos", target_labels=VERB_LABELS):
+            #    logger.info([(
+            #        ud_token_labels["tokens"][i],
+            #        wordnet_lemmatizer.lemmatize(ud_token_labels["tokens"][i], pos="v"),
+            #        ud_token_labels["xpos"][i],
+            #        ud_token_labels["deprel"][i],
+            #        ud_token_labels["Number"][i],
+            #        ud_token_labels["Person"][i],
+            #        ud_token_labels["Tense"][i],
+            #        ud_token_labels["VerbForm"][i],
+            #    ) for i in verb_group])
 
-                grp_stop_idx = verb_group[-1] + 1
-                grp_start_idx = verb_group[0]
-                for idx in verb_group:
-                    token = ud_token_labels["tokens"][idx]
-                    token_lower = token.lower()
-                    token_lemma = wordnet_lemmatizer.lemmatize(token_lower, pos="v")
-                    deprel_label = ud_token_labels["deprel"][idx]
-                    if deprel_label.startswith("aux"):
-                        pass
-                    elif deprel_label == "cop":
-                        pass
-                    else:
-                        verb_cache_key = f"{token_lemma}_{text_block_id}"
-                        if verb_cache_key not in self.verbs_added:
-                            await self.control_plane.add_verb(token_lemma, text_block_id)
-                            await self.control_plane.add_verb_form(token_lemma, token, text_block_id)
-                            await self.control_plane.link_verb_form_to_sentence(
-                                token_lemma, token,
-                                deprel_label.replace(":", "_").upper(), text_block_id)
-                            self.verbs_added.add(verb_cache_key)
+            #    grp_stop_idx = verb_group[-1] + 1
+            #    grp_start_idx = verb_group[0]
+            #    for idx in verb_group:
+            #        token = ud_token_labels["tokens"][idx]
+            #        token_lower = token.lower()
+            #        token_lemma = wordnet_lemmatizer.lemmatize(token_lower, pos="v")
+            #        deprel_label = ud_token_labels["deprel"][idx]
+            #        if deprel_label.startswith("aux"):
+            #            pass
+            #        elif deprel_label == "cop":
+            #            pass
+            #        else:
+            #            verb_cache_key = f"{token_lemma}_{text_block_id}"
+            #            if verb_cache_key not in self.verbs_added:
+            #                await self.control_plane.add_verb(token_lemma, text_block_id)
+            #                await self.control_plane.add_verb_form(token_lemma, token, text_block_id)
+            #                await self.control_plane.link_verb_form_to_sentence(
+            #                    token_lemma, token,
+            #                    deprel_label.replace(":", "_").upper(), text_block_id)
+            #                self.verbs_added.add(verb_cache_key)
 
             idx_to_noun_group = {}
             idx_to_noun_joined_base_form = {}
@@ -165,30 +155,30 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                     self.nouns_added.add(noun_cache_key)
                 for idx in noun_group:
                     idx_to_noun_det_or_pos[idx] = dt_or_pos_idx
-            for pronoun_group in extract_label_groups(ud_token_labels, "xpos", target_labels={"PRP"}):
-                # Assume one because pronouns don't normally appear in groups
-                idx = pronoun_group[0]
-                token = ud_token_labels["tokens"][idx]
-                token_lowered = token.lower()
-                # Rules of pronouns:
-                # - Must agree with antecedents in number and gender when applicable
-                # - Typically refers to most immediate noun but proximity isn't the only rule
-                # - Reflexive pronouns refer back to the subject and need a clear and appropriate antecedent
-                pronoun_cache_key = f"{token_lowered}_{text_block_id}"
-                if token_lowered in {"it", "you"}:  # Subject or object
-                    pass
-                elif token_lowered in {"i", "he", "she", "we", "they"}:  # Subject
-                    pass
-                elif token_lowered in {"me", "him", "her", "us", "them"}:  # Object
-                    pass
-                elif token_lowered.endswith("self") or token_lowered.endswith("selves"):  # Reflexive
-                    pass
-                if pronoun_cache_key not in self.pronouns_added:
-                    await self.control_plane.add_pronoun(token_lowered, text_block_id)
-                    deprel_label = ud_token_labels["deprel"][pronoun_group[-1]]
-                    await self.control_plane.link_pronoun_to_sentence(
-                        token_lowered, deprel_label.replace(":", "_").upper(), text_block_id)
-                    self.pronouns_added.add(pronoun_cache_key)
+            #for pronoun_group in extract_label_groups(ud_token_labels, "xpos", target_labels={"PRP"}):
+            #    # Assume one because pronouns don't normally appear in groups
+            #    idx = pronoun_group[0]
+            #    token = ud_token_labels["tokens"][idx]
+            #    token_lowered = token.lower()
+            #    # Rules of pronouns:
+            #    # - Must agree with antecedents in number and gender when applicable
+            #    # - Typically refers to most immediate noun but proximity isn't the only rule
+            #    # - Reflexive pronouns refer back to the subject and need a clear and appropriate antecedent
+            #    pronoun_cache_key = f"{token_lowered}_{text_block_id}"
+            #    if token_lowered in {"it", "you"}:  # Subject or object
+            #        pass
+            #    elif token_lowered in {"i", "he", "she", "we", "they"}:  # Subject
+            #        pass
+            #    elif token_lowered in {"me", "him", "her", "us", "them"}:  # Object
+            #        pass
+            #    elif token_lowered.endswith("self") or token_lowered.endswith("selves"):  # Reflexive
+            #        pass
+            #    if pronoun_cache_key not in self.pronouns_added:
+            #        await self.control_plane.add_pronoun(token_lowered, text_block_id)
+            #        deprel_label = ud_token_labels["deprel"][pronoun_group[-1]]
+            #        await self.control_plane.link_pronoun_to_sentence(
+            #            token_lowered, deprel_label.replace(":", "_").upper(), text_block_id)
+            #        self.pronouns_added.add(pronoun_cache_key)
             # Look for adjectives
             for pattern_name, start_positions in extract_consecutive_token_patterns(
                    # Simplify noun labels for pattern matching
