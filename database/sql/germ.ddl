@@ -35,7 +35,6 @@ LANGUAGE 'plpgsql';
  *
  **/
 
-/* Single type table to avoid many smaller type tables */
 DROP TABLE IF EXISTS struct_type CASCADE;
 CREATE TABLE struct_type (
       struct_type_id                    						SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
@@ -50,6 +49,7 @@ CREATE TABLE struct_type (
 ;
 CREATE UNIQUE INDEX idx_struct_type_att_pub_ident               ON struct_type                      USING btree (group_name, att_pub_ident);
 SELECT update_dt_modified_column('struct_type');
+COMMENT ON TABLE struct_type IS 'This table functions as a single type table to avoid having many smaller type tables';
 
 
 DROP TABLE IF EXISTS text_block CASCADE;
@@ -65,6 +65,7 @@ CREATE TABLE text_block (
 ;
 CREATE UNIQUE INDEX idx_text_block_signature_uuid               ON text_block                       USING btree (signature_uuid);
 SELECT update_dt_modified_column('text_block');
+COMMENT ON TABLE text_block IS 'This table stores unique text blocks of various types, such as `code`, `paragraph`, and `sentence`';
 
 
 DROP TABLE IF EXISTS text_token CASCADE;
@@ -78,6 +79,7 @@ CREATE TABLE text_token (
 ;
 CREATE UNIQUE INDEX idx_text_token_token_text                   ON text_token                       USING btree (token_text);
 SELECT update_dt_modified_column('text_token');
+COMMENT ON TABLE text_token IS 'This table stores unique text tokens encountered while processing text blocks';
 
 
 DROP TABLE IF EXISTS text_token_label CASCADE;
@@ -105,6 +107,10 @@ CREATE TABLE text_token_label (
     , verbform_type_id                    				        SMALLINT                			NOT NULL
     , xpos_type_id                    				            SMALLINT                			NOT NULL
     , PRIMARY KEY (text_token_id, text_block_id, token_position)
+    /*
+    Foreign keys below have to be commented out if this table gets large enough that it needs to be partitioned. Alternatively,
+    when we get to that point, we can also start dropping data or moving it to cold-storage.
+    */
     , CONSTRAINT fk_text_token_label_struct_type_adjgrad    FOREIGN KEY (adjgrad_type_id)   REFERENCES struct_type  (struct_type_id)
     , CONSTRAINT fk_text_token_label_struct_type_adjpos     FOREIGN KEY (adjpos_type_id)    REFERENCES struct_type  (struct_type_id)
     , CONSTRAINT fk_text_token_label_struct_type_adjtype    FOREIGN KEY (adjtype_type_id)   REFERENCES struct_type  (struct_type_id)
@@ -127,6 +133,8 @@ CREATE TABLE text_token_label (
 )
 ;
 SELECT update_dt_modified_column('text_token_label');
+/* TODO: Also load model training examples for initial data */
+COMMENT ON TABLE text_token_label IS 'This table stores predicted token labels returned from the model serving';
 
 
 DROP TABLE IF EXISTS top_level_domain CASCADE;

@@ -52,12 +52,41 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         self.verbs_added = set()
 
     async def label_sentence(self, sentence: str, text_block_id: int, sentence_context):
-        ud_token_labels = await get_ud_token_classifications(sentence)
         logger.info(f"sentence_context: \t{sentence_context}")
-        logger.info(f"ud labels: text_block_id={text_block_id}\n" + (
-            "\n".join([f"{head}\t{labels}" for head, labels in ud_token_labels.items()])))
 
+        ud_token_labels = await get_ud_token_classifications(sentence)
         token_cnt = len(ud_token_labels["tokens"])
+        token_idx_positions = range(token_cnt)
+        longest_token_lengths = [0 for _ in token_idx_positions]
+        for idx in token_idx_positions:
+            # Get longest token lengths per position
+            for head in ud_token_labels.keys():
+                if head == "text":
+                    continue
+                else:
+                    label_len = len(ud_token_labels[head][idx])
+                    if label_len > longest_token_lengths[idx]:
+                        longest_token_lengths[idx] = label_len
+        log_blobs = []
+        for head, labels in ud_token_labels.items():
+            # Legible formatting for examples
+            if head == "text":
+                log_blobs.append(f"{head}{' ' * (12-len(head))}{labels}")
+                positions_blob = ''.join([
+                    f"{l},{' ' * (longest_token_lengths[i] - len(str(l)) + 3)}" if i != token_cnt - 1 else str(l)
+                    for i, l in enumerate(token_idx_positions)])
+                log_blobs.append(f"idx{' ' * 9} {positions_blob}")
+            else:
+                label_blobs = []
+                for idx, label in enumerate(labels):
+                    label_blobs.append(f"\"{label}\",{' ' * (longest_token_lengths[idx] - len(label) + 1)}" if idx != token_cnt - 1 else f"\"{label}\"")
+                    if head == "tokens":
+                        continue
+                    # TODO: Insert labels into Postgres
+
+                log_blobs.append(f"{head}{' ' * (12 - len(head))}[{''.join(label_blobs)}]")
+        logger.info(f"ud labels: text_block_id={text_block_id}\n" + ("\n".join(log_blobs)))
+
         try:
             # If first token is not a proper noun and only the first character is capitalized, lower the token.
             if ("P" not in ud_token_labels["xpos"][0]
@@ -130,7 +159,7 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
                         idx_to_noun_joined_raw_form[idx] = ud_token_labels["tokens"][idx]
             # Iterate through noun groups and determine if they have an associated determiner or possessive word
             idx_to_noun_det_or_pos = {}
-            logger.info(f"idx_to_noun_group: {idx_to_noun_group} {ud_token_labels['xpos']}")
+            logger.info(f"idx_to_noun_group: {idx_to_noun_group}")
             for noun_group in idx_to_noun_group.values():
                 dt_or_pos_idx = find_first_from_right(
                     ud_token_labels["xpos"][:noun_group[0]], {"DT", "POS", "PRP$"})
