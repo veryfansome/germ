@@ -49,7 +49,8 @@ class ChatModelEventHandler(RoutableChatEventHandler):
         return await async_openai_client.chat.completions.create(
             messages=[message.model_dump() for message in chat_request.messages] + [
                 {"role": "system",
-                 "content": "Answer in valid Markdown format only."}
+                 "content": ("Answer in valid Markdown format only. "
+                             "Don't use code blocks unnecessarily but always use them when dealing with code.")}
             ],
             model=self.model,
             n=1, timeout=HTTPX_TIMEOUT)
@@ -148,7 +149,8 @@ class ReasoningChatModelEventHandler(RoutableChatEventHandler):
         return await async_openai_client.chat.completions.create(
             messages=[message.model_dump() for message in chat_request.messages] + [
                 {"role": "system",
-                 "content": "Answer in valid Markdown format only."}
+                 "content": ("Answer in valid Markdown format only. "
+                             "Don't use code blocks unnecessarily but always use them when dealing with code.")}
             ],
             model=self.model,
             n=1, timeout=self.httpx_timeout,
@@ -253,7 +255,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                     {"role": "system",
                      "content": "Answer in valid Markdown format only."},
                     {"role": "system",
-                     "content": "Don't generate backtick code blocks. Always use a tool if code is needed."},
+                     "content": "Always use a tool when dealing with programming or highly technical topics."},
                 ],
                 model=self.model,
                 n=1, tools=tools,
