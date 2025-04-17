@@ -8,18 +8,13 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-from socket import AddressFamily
 from starlette.responses import Response
 from typing import List
 import aiofiles
 import asyncio
 import hashlib
-import ipaddress
 import os
-import platform
-import psutil
 import subprocess
-import sys
 import traceback
 
 from bot.api.models import ChatMessage, ChatSessionSummary, SqlRequest
@@ -46,12 +41,6 @@ scheduler = AsyncIOScheduler()
 setup_logging()
 logger = logging.getLogger(__name__)
 
-inet_if_info = {k: v[0] for k, v in psutil.net_if_addrs().items()
-                if not k.startswith("lo") and v[0].family == AddressFamily.AF_INET}
-inet_if_cnt = len(inet_if_info)
-process_info = psutil.Process()
-process_parent_info = process_info.parent()
-
 ##
 # Tracing
 
@@ -77,48 +66,14 @@ async def lifespan(app: FastAPI):
 
     # Graph controllers
     english_controller = EnglishController(control_plane)
+    await english_controller.initialize()
+
     control_plane.add_code_block_merge_event_handler(english_controller)
     control_plane.add_paragraph_merge_event_handler(english_controller)
     control_plane.add_sentence_merge_event_handler(english_controller)
     await control_plane.initialize()
     scheduler.add_job(english_controller.label_sentences_periodically, "interval",
                       seconds=english_controller.interval_seconds)
-
-    if not await control_plane.get_paragraph(1):
-        await control_plane.add_paragraph("""
-I am a Python-based software assistant.
-My software stack includes two FastAPI-based services, a PostgreSQL database, and a Neo4j database.
-One FastAPI service, the "model" service, handles model serving.
-This service downloads custom pretrained models from Hugging Face and exposes REST-based access to these models.
-The other FastAPI service, the "bot" service, provides a simple web-based chat UI that enables chats over bi-directional
-websocket connections.
-""".replace("\n", " ").strip(), {})
-        await control_plane.add_paragraph("""
-My users are people.
-Different people can interact with me as users.
-As of yet, I do not have a way of differentiating one user from another unless they explicitly identify themselves.
-""".replace("\n", " ").strip(), {})
-    await control_plane.add_paragraph(f"""
-My current host is named {platform.node()} and it has {psutil.cpu_count()} {platform.machine()} CPUs with roughly
-{round(psutil.virtual_memory().total / 1e9)}GB total memory.
-My current host has {inet_if_cnt} network interface(s); {(", " if inet_if_cnt > 2 else " ").join([
-    (("and " if inet_if_cnt > 2 and i == inet_if_cnt - 1 else "")
-     + f"{p[0]} at {p[1].address} on {ipaddress.ip_network(p[1].address + '/' + p[1].netmask, strict=False)}")
-    for i, p in enumerate(inet_if_info.items())])}.
-My current operating system is {platform.system()} and the kernel release is {platform.release()}.
-My current OS boot time is {psutil.boot_time()}.
-My current Linux user is {process_info.username()} with user ID {os.getuid()}.
-My current HOME is {os.environ["HOME"]}.
-My current PATH is {os.environ["PATH"]}.
-My current PWD is {os.environ["PWD"]}.
-My current process creation time is {process_info.create_time()}.
-My current process ID is {process_info.pid} and my process' session ID is {os.getsid(process_info.pid)}.
-My current parent process' ID is {process_parent_info.pid} and its session ID is {os.getsid(process_parent_info.pid)}.
-My current Python executable path is {sys.executable}.
-My current Python version is {platform.python_version()} and the implementation is {platform.python_implementation()}
-compiled with {platform.python_compiler()}.
-My current C library is {"-".join(platform.libc_ver())}.
-""".replace("\n", " ").strip(), {})
 
     assistant_helper = AssistantHelper()
     await assistant_helper.refresh_assistants()
@@ -157,7 +112,6 @@ My current C library is {"-".join(platform.libc_ver())}.
     yield
 
     # Stopping
-    await english_controller.dump_labeled_exps()
 
     websocket_manager_disconnect_task = asyncio.create_task(websocket_manager.disconnect_all())
     await assistant_helper.no_loose_files()

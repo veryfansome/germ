@@ -1,5 +1,7 @@
+from collections import defaultdict
 from datasets import Dataset
 from datetime import datetime
+from sqlalchemy import MetaData, Table, select, tuple_
 from starlette.concurrency import run_in_threadpool
 from traceback import format_exc
 import aiohttp
@@ -7,6 +9,7 @@ import asyncio
 import inflect
 import os
 
+from bot.db.models import AsyncSessionLocal, engine
 from bot.graph.control_plane import (CodeBlockMergeEventHandler, ControlPlane, ParagraphMergeEventHandler,
                                      SentenceMergeEventHandler)
 from bot.lang.dependencies import wordnet_lemmatizer
@@ -19,6 +22,71 @@ logger = logging.getLogger(__name__)
 
 infect_eng = inflect.engine()
 
+CLASSIFIER_LABELS = {
+    "text_token_adjgrad_type": {
+        "O", "no", "yes"
+    },
+    "text_token_adjpos_type": {
+        "O", "attributive", "postpositive", "predicative"
+    },
+    "text_token_adjtype_type": {
+        "O", "age", "color", "limiting", "material", "origin", "purpose", "quality", "quantifying",
+        "relational", "shape", "size"
+    },
+    "text_token_advtype_type": {
+        "O", "conjunctive", "degree", "disjunct", "focusing", "frequency", "manner", "modal", "negation",
+        "place", "time"
+    },
+    "text_token_case_type": {
+        "O", "Acc", "Nom"
+    },
+    "text_token_definite_type": {
+        "O", "Def", "Ind"
+    },
+    "text_token_degree_type": {
+        "O", "Cmp", "Pos", "Sup"
+    },
+    "text_token_deprel_type": {
+        "acl", "acl:relcl", "advcl", "advmod", "amod", "appos", "aux", "aux:pass", "case", "cc",
+        "cc:preconj", "ccomp", "compound", "compound:prt", "conj", "cop", "csubj", "det", "det:predet",
+        "discourse", "expl", "fixed", "flat", "iobj", "list", "mark", "nmod", "nmod:npmod", "nmod:poss",
+        "nmod:tmod", "nsubj", "nsubj:pass", "nummod", "obj", "obl", "obl:npmod", "obl:tmod", "parataxis",
+        "punct", "root", "vocative", "xcomp"
+    },
+    "text_token_gender_type": {
+        "O", "Fem", "Masc", "Neut"
+    },
+    "text_token_mood_type": {
+        "O", "Imp", "Ind"
+    },
+    "text_token_numtype_type": {
+        "O", "Card", "Mult", "Ord"
+    },
+    "text_token_number_type": {
+        "O", "Plur", "Sing"
+    },
+    "text_token_person_type": {
+        "O", "1", "2", "3"
+    },
+    "text_token_pos_type": {
+        "ADJ", "ADP", "ADV", "AUX", "CCONJ", "DET", "INTJ", "NOUN", "NUM", "PART", "PRON", "PROPN", "PUNCT",
+        "SCONJ", "SYM", "VERB", "X"  # TODO: Should 'X' be 'O'?
+    },
+    "text_token_prontype_type": {
+        "O", "Art", "Dem", "Int", "Prs", "Rel"
+    },
+    "text_token_tense_type": {
+        "O", "Past", "Pres"
+    },
+    "text_token_verbform_type": {
+        "O", "Fin", "Ger", "Inf", "Part"
+    },
+    "text_token_xpos_type": {
+        "''", "$", ",", "-LRB-", "-RRB-", ".", ":", "ADD", "CC", "CD", "DT", "EX", "FW", "HYPH", "IN", "JJ", "JJR",
+        "JJS", "LS", "MD", "NFP", "NN", "NNP", "NNPS", "NNS", "PDT", "POS", "PRP$", "PRP", "RB", "RBR", "RBS", "RP",
+        "SYM", "TO", "UH", "VB", "VBD", "VBG", "VBN", "VBP", "VBZ", "WDT", "WP$", "WP", "WRB", "``"
+    }
+}
 CORE_SEMANTIC_LABELS = {
     "ccomp",  # Clausal complements with internal subjects.
     "conj",  # Word or phrase that is part of a coordination structure using "and" or "or"
@@ -40,8 +108,11 @@ SUBORDINATING_CONJUNCTIONS = {"after", "although", "because", "before", "if", "o
 
 class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, SentenceMergeEventHandler):
     def __init__(self, control_plane: ControlPlane, interval_seconds: int = 9):
+        self.classifier_struct_type_ids = defaultdict(dict)
         self.control_plane = control_plane
         self.interval_seconds = interval_seconds
+        self.struct_type_table = None
+        self.text_token_label_table = None
         self.unlabeled_sentences = []
 
         self.adjectives_added = set()
@@ -50,6 +121,27 @@ class EnglishController(CodeBlockMergeEventHandler, ParagraphMergeEventHandler, 
         self.nouns_added = set()
         self.pronouns_added = set()
         self.verbs_added = set()
+
+    async def initialize(self):
+        self.struct_type_table = Table('struct_type', MetaData(), autoload_with=engine)
+        self.text_token_label_table = Table('text_token_label', MetaData(), autoload_with=engine)
+        async with AsyncSessionLocal() as rdb_session:
+            result = await rdb_session.execute(
+                select(
+                    self.struct_type_table.c.group_name,
+                    self.struct_type_table.c.att_pub_ident,
+                    self.struct_type_table.c.struct_type_id,
+                )
+                .where(
+                    tuple_(
+                        self.struct_type_table.c.group_name, self.struct_type_table.c.att_pub_ident,
+                    ).in_([
+                        (g, label) for g, labels in CLASSIFIER_LABELS.items() for label in labels
+                    ])
+                ))
+            for group_name, label_ident, struct_type_id in result:
+                self.classifier_struct_type_ids[group_name][label_ident] = struct_type_id
+        logger.info("classifier_struct_type_ids %s", self.classifier_struct_type_ids)
 
     async def label_sentence(self, sentence: str, text_block_id: int, sentence_context):
         logger.info(f"sentence_context: \t{sentence_context}")
