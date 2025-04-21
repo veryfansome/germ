@@ -13,9 +13,9 @@ SET search_path TO public;
 CREATE OR REPLACE FUNCTION set_dt_modified_column()
 RETURNS TRIGGER AS
 $$
-	BEGIN
-		NEW.dt_modified = NOW();
-	RETURN NEW;
+    BEGIN
+        NEW.dt_modified = NOW();
+    RETURN NEW;
 END;
 $$
 LANGUAGE 'plpgsql';
@@ -23,9 +23,9 @@ LANGUAGE 'plpgsql';
 CREATE OR REPLACE FUNCTION update_dt_modified_column(tablename REGCLASS)
 RETURNS VOID AS
 $$
-	BEGIN
-		EXECUTE FORMAT('CREATE TRIGGER set_dt_modified_column BEFORE UPDATE ON %s FOR EACH ROW WHEN (OLD IS DISTINCT FROM NEW) EXECUTE FUNCTION set_dt_modified_column();', CONCAT('"', tablename, '"'));
-	END;
+    BEGIN
+        EXECUTE FORMAT('CREATE TRIGGER set_dt_modified_column BEFORE UPDATE ON %s FOR EACH ROW WHEN (OLD IS DISTINCT FROM NEW) EXECUTE FUNCTION set_dt_modified_column();', CONCAT('"', tablename, '"'));
+    END;
 $$
 LANGUAGE 'plpgsql';
 
@@ -37,10 +37,10 @@ LANGUAGE 'plpgsql';
 
 DROP TABLE IF EXISTS chat_user CASCADE;
 CREATE TABLE chat_user (
-      user_id                  						            SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
-    , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , dt_modified                     							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , user_name											        TEXT							    NOT NULL
+      user_id                                                   SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
+    , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , user_name                                                 TEXT                                NOT NULL
     , PRIMARY KEY (user_id)
 )
 ;
@@ -51,11 +51,11 @@ COMMENT ON TABLE struct_type IS 'This table stores chat user records';
 
 DROP TABLE IF EXISTS user_session CASCADE;
 CREATE TABLE user_session (
-      session_id                  						        SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
-    , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , dt_modified                     							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , summary_sig											    UUID								NOT NULL
-    , user_id                    					            SMALLINT                			NOT NULL
+      session_id                                                SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
+    , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , summary_sig                                               UUID                                NOT NULL
+    , user_id                                                   SMALLINT                            NOT NULL
     , PRIMARY KEY (session_id)
     , CONSTRAINT fk_user_session_chat_user_user_id              FOREIGN KEY (user_id)               REFERENCES chat_user  (user_id)
 )
@@ -66,13 +66,13 @@ COMMENT ON TABLE struct_type IS 'This table stores user session records';
 
 DROP TABLE IF EXISTS chat_message CASCADE;
 CREATE TABLE chat_message (
-      message_id                  						        SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
-    , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , dt_modified                     							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , from_user											        BOOLEAN								NOT NULL
-    , json_sig											        UUID								NOT NULL
-    , parent_id                    					            SMALLINT                			NOT NULL  /* TODO: allow null? */
-    , session_id                    					        SMALLINT                			NOT NULL
+      message_id                                                SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
+    , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , from_user                                                 BOOLEAN                             NOT NULL
+    , json_sig                                                  UUID                                NOT NULL
+    , parent_id                                                 SMALLINT                            NOT NULL  /* TODO: allow null? */
+    , session_id                                                SMALLINT                            NOT NULL
     , PRIMARY KEY (session_id)
     , CONSTRAINT fk_chat_message_parent_id                      FOREIGN KEY (parent_id)             REFERENCES chat_message  (message_id)
     , CONSTRAINT fk_chat_message_user_session_session_id        FOREIGN KEY (session_id)            REFERENCES user_session  (session_id)
@@ -84,13 +84,13 @@ COMMENT ON TABLE struct_type IS 'This table stores chat message records';
 
 DROP TABLE IF EXISTS struct_type CASCADE;
 CREATE TABLE struct_type (
-      struct_type_id                    						SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
-    , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , dt_modified                     							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , att_pub_ident                     						TEXT                    			NOT NULL   /* exp: 3XL, 0000FF - identifier */
-    , att_value                         						TEXT                    			NOT NULL   /* exp: 3X Large, Blue - display name*/
-    , display_order                     						SMALLINT                			NOT NULL DEFAULT 1000   /* Set if needed */
-    , group_name                        						TEXT                    			NOT NULL   /* exp: t-shirt size, color - category name*/
+      struct_type_id                                            SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
+    , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , att_pub_ident                                             TEXT                                NOT NULL   /* exp: 3XL, 0000FF - identifier */
+    , att_value                                                 TEXT                                NOT NULL   /* exp: 3X Large, Blue - display name*/
+    , display_order                                             SMALLINT                            NOT NULL DEFAULT 1000   /* Set if needed */
+    , group_name                                                TEXT                                NOT NULL   /* exp: t-shirt size, color - category name*/
     , PRIMARY KEY (struct_type_id)
 )
 ;
@@ -101,13 +101,13 @@ COMMENT ON TABLE struct_type IS 'This table functions as a single type table to 
 
 DROP TABLE IF EXISTS top_level_domain CASCADE;
 CREATE TABLE top_level_domain (
-      top_level_domain_id                  						SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
-    , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , dt_last_verified                     						TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , dt_modified                     							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-	, domain_name												TEXT								NOT NULL
+      top_level_domain_id                                       SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
+    , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , dt_last_verified                                          TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , domain_name                                               TEXT                                NOT NULL
     , PRIMARY KEY (top_level_domain_id)
 )
 ;
-CREATE UNIQUE INDEX idx_top_level_domain_name               	ON top_level_domain                 USING btree (name);
+CREATE UNIQUE INDEX idx_top_level_domain_name                   ON top_level_domain                 USING btree (name);
 SELECT update_dt_modified_column('top_level_domain');
