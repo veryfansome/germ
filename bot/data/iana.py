@@ -28,7 +28,7 @@ class IanaTLDCacher:
         try:
             with SessionLocal() as session:
                 for tld_record in session.execute(top_level_domain_table.select()).fetchall():
-                    self.known_tld_names.add(tld_record.name)
+                    self.known_tld_names.add(tld_record.domain_name)
             logger.info(f"loaded {len(self.known_tld_names) - num_before_load} TLD records from PostgreSQL")
         except httpx.RequestError as e:
             logger.error("failed to load TLD records from PostgreSQL", e)
@@ -47,13 +47,13 @@ class IanaTLDCacher:
                     dt_now = datetime.now(timezone.utc)
                     if tld_name not in self.known_tld_names:
                         self.known_tld_names.add(tld_name)
-                        top_level_domain_table.insert().values({"name": tld_name})
+                        top_level_domain_table.insert().values({"domain_name": tld_name})
                     else:
-                        tld_stmt = top_level_domain_table.select().where(top_level_domain_table.c.name == tld_name)
+                        tld_stmt = top_level_domain_table.select().where(top_level_domain_table.c.domain_name == tld_name)
                         tld_record = session.execute(tld_stmt).fetchone()
                         if tld_record:
                             tld_update_stmt = update(top_level_domain_table).where(
-                                top_level_domain_table.c.name == tld_name).values(dt_last_verified=dt_now)
+                                top_level_domain_table.c.domain_name == tld_name).values(dt_last_verified=dt_now)
                             session.execute(tld_update_stmt)
                 session.commit()
             logger.info(f"added {len(self.known_tld_names) - num_before_load} TLDs from {IanaTLDCacher.data_src_url}")

@@ -23,9 +23,7 @@ from bot.chat.openai_beta import AssistantHelper
 from bot.chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
 from bot.db.models import DATABASE_URL, SessionLocal, engine
 from bot.db.neo4j import AsyncNeo4jDriver
-from bot.db.utils import db_stats_job
 from bot.graph.control_plane import ControlPlane
-from bot.lang.controllers.english import EnglishController
 from bot.websocket import (WebSocketConnectionManager,
                            get_chat_session_messages, get_chat_session_summaries,
                            update_chat_session_is_hidden)
@@ -64,17 +62,6 @@ async def lifespan(app: FastAPI):
     :return:
     """
 
-    # Graph controllers
-    english_controller = EnglishController(control_plane)
-    await english_controller.initialize()
-
-    control_plane.add_code_block_merge_event_handler(english_controller)
-    control_plane.add_paragraph_merge_event_handler(english_controller)
-    control_plane.add_sentence_merge_event_handler(english_controller)
-    await control_plane.initialize()
-    scheduler.add_job(english_controller.label_sentences_periodically, "interval",
-                      seconds=english_controller.interval_seconds)
-
     assistant_helper = AssistantHelper()
     await assistant_helper.refresh_assistants()
     await assistant_helper.refresh_files()
@@ -99,10 +86,6 @@ async def lifespan(app: FastAPI):
     #    post_func=lambda intent: intent if intent.startswith("The User") else f"The User {intent}"  # Needed sometimes
     #)
     #websocket_manager.add_receive_event_handler(user_intent_profiler)
-
-    # DB stats
-    await db_stats_job()  # Warms up DB connections on startup
-    scheduler.add_job(db_stats_job, "interval", minutes=5)
 
     # Scheduler
     scheduler.start()

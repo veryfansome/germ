@@ -9,7 +9,7 @@ from settings import germ_settings
 
 def setup_tracing(service_name: str):
     resource = Resource.create({
-        "service.name": "model-service",
+        "service.name": service_name,
     })
     provider = TracerProvider(resource=resource)
     trace.set_tracer_provider(provider)

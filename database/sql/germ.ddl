@@ -35,15 +35,62 @@ LANGUAGE 'plpgsql';
  *
  **/
 
+DROP TABLE IF EXISTS chat_user CASCADE;
+CREATE TABLE chat_user (
+      user_id                  						            SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
+    , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , dt_modified                     							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , user_name											        TEXT							    NOT NULL
+    , PRIMARY KEY (user_id)
+)
+;
+CREATE UNIQUE INDEX idx_chat_user_user_name                     ON chat_user                        USING btree user_name;
+SELECT update_dt_modified_column('chat_user');
+COMMENT ON TABLE struct_type IS 'This table stores chat user records';
+
+
+DROP TABLE IF EXISTS user_session CASCADE;
+CREATE TABLE user_session (
+      session_id                  						        SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
+    , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , dt_modified                     							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , summary_sig											    UUID								NOT NULL
+    , user_id                    					            SMALLINT                			NOT NULL
+    , PRIMARY KEY (session_id)
+    , CONSTRAINT fk_user_session_chat_user_user_id              FOREIGN KEY (user_id)               REFERENCES chat_user  (user_id)
+)
+;
+SELECT update_dt_modified_column('user_session');
+COMMENT ON TABLE struct_type IS 'This table stores user session records';
+
+
+DROP TABLE IF EXISTS chat_message CASCADE;
+CREATE TABLE chat_message (
+      message_id                  						        SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
+    , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , dt_modified                     							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , from_user											        BOOLEAN								NOT NULL
+    , json_sig											        UUID								NOT NULL
+    , parent_id                    					            SMALLINT                			NOT NULL  /* TODO: allow null? */
+    , session_id                    					        SMALLINT                			NOT NULL
+    , PRIMARY KEY (session_id)
+    , CONSTRAINT fk_chat_message_parent_id                      FOREIGN KEY (parent_id)             REFERENCES chat_message  (message_id)
+    , CONSTRAINT fk_chat_message_user_session_session_id        FOREIGN KEY (session_id)            REFERENCES user_session  (session_id)
+)
+;
+SELECT update_dt_modified_column('message');
+COMMENT ON TABLE struct_type IS 'This table stores chat message records';
+
+
 DROP TABLE IF EXISTS struct_type CASCADE;
 CREATE TABLE struct_type (
       struct_type_id                    						SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
     , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
     , dt_modified                     							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , display_order                     						SMALLINT                			NOT NULL DEFAULT 1000   /* Set if needed */
-    , group_name                        						TEXT                    			NOT NULL   /* exp: t-shirt size, color - category name*/
     , att_pub_ident                     						TEXT                    			NOT NULL   /* exp: 3XL, 0000FF - identifier */
     , att_value                         						TEXT                    			NOT NULL   /* exp: 3X Large, Blue - display name*/
+    , display_order                     						SMALLINT                			NOT NULL DEFAULT 1000   /* Set if needed */
+    , group_name                        						TEXT                    			NOT NULL   /* exp: t-shirt size, color - category name*/
     , PRIMARY KEY (struct_type_id)
 )
 ;
@@ -52,98 +99,13 @@ SELECT update_dt_modified_column('struct_type');
 COMMENT ON TABLE struct_type IS 'This table functions as a single type table to avoid having many smaller type tables';
 
 
-DROP TABLE IF EXISTS text_block CASCADE;
-CREATE TABLE text_block (
-      text_block_id                  						    SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
-    , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , dt_modified                     							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-	, signature_uuid											UUID								NOT NULL
-    , text_block_type_id                    					SMALLINT                			NOT NULL
-    , PRIMARY KEY (text_block_id)
-    , CONSTRAINT fk_text_block_struct_type FOREIGN KEY (text_block_type_id) REFERENCES struct_type (struct_type_id)
-)
-;
-CREATE UNIQUE INDEX idx_text_block_signature_uuid               ON text_block                       USING btree (signature_uuid);
-SELECT update_dt_modified_column('text_block');
-COMMENT ON TABLE text_block IS 'This table stores unique text blocks of various types, such as `code`, `paragraph`, and `sentence`';
-
-
-DROP TABLE IF EXISTS text_token CASCADE;
-CREATE TABLE text_token (
-      text_token_id                  						    SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
-    , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , dt_modified                     							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , token_text											    TEXT								NOT NULL
-    , PRIMARY KEY (text_token_id)
-)
-;
-CREATE UNIQUE INDEX idx_text_token_token_text                   ON text_token                       USING btree (token_text);
-SELECT update_dt_modified_column('text_token');
-COMMENT ON TABLE text_token IS 'This table stores unique text tokens encountered while processing text blocks';
-
-
-DROP TABLE IF EXISTS text_token_label CASCADE;
-CREATE TABLE text_token_label (
-      text_block_id                    					        SMALLINT                			NOT NULL
-    , text_token_id                  						    SMALLINT                			NOT NULL
-    , token_position                    				        SMALLINT                			NOT NULL
-    , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , dt_modified                     							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , adjgrad_type_id                    				        SMALLINT                			NOT NULL
-    , adjpos_type_id                    				        SMALLINT                			NOT NULL
-    , adjtype_type_id                    				        SMALLINT                			NOT NULL
-    , advtype_type_id                    				        SMALLINT                			NOT NULL
-    , case_type_id                    				            SMALLINT                			NOT NULL
-    , definite_type_id                    				        SMALLINT                			NOT NULL
-    , degree_type_id                    				        SMALLINT                			NOT NULL
-    , gender_type_id                    				        SMALLINT                			NOT NULL
-    , mood_type_id                    				            SMALLINT                			NOT NULL
-    , number_type_id                    				        SMALLINT                			NOT NULL
-    , numtype_type_id                    				        SMALLINT                			NOT NULL
-    , person_type_id                    				        SMALLINT                			NOT NULL
-    , pos_type_id                    				            SMALLINT                			NOT NULL
-    , prontype_type_id                    				        SMALLINT                			NOT NULL
-    , tense_type_id                    				            SMALLINT                			NOT NULL
-    , verbform_type_id                    				        SMALLINT                			NOT NULL
-    , xpos_type_id                    				            SMALLINT                			NOT NULL
-    , PRIMARY KEY (text_token_id, text_block_id, token_position)
-    /*
-    Foreign keys below have to be commented out if this table gets large enough that it needs to be partitioned. Alternatively,
-    when we get to that point, we can also start dropping data or moving it to cold-storage.
-    */
-    , CONSTRAINT fk_text_token_label_struct_type_adjgrad    FOREIGN KEY (adjgrad_type_id)   REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_adjpos     FOREIGN KEY (adjpos_type_id)    REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_adjtype    FOREIGN KEY (adjtype_type_id)   REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_advtype    FOREIGN KEY (advtype_type_id)   REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_case       FOREIGN KEY (case_type_id)      REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_definite   FOREIGN KEY (definite_type_id)  REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_degree     FOREIGN KEY (degree_type_id)    REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_gender     FOREIGN KEY (gender_type_id)    REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_mood       FOREIGN KEY (mood_type_id)      REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_number     FOREIGN KEY (number_type_id)    REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_numtype    FOREIGN KEY (numtype_type_id)   REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_person     FOREIGN KEY (person_type_id)    REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_pos        FOREIGN KEY (pos_type_id)       REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_prontype   FOREIGN KEY (prontype_type_id)  REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_tense      FOREIGN KEY (tense_type_id)     REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_verbform   FOREIGN KEY (verbform_type_id)  REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_struct_type_xpos       FOREIGN KEY (xpos_type_id)      REFERENCES struct_type  (struct_type_id)
-    , CONSTRAINT fk_text_token_label_text_block             FOREIGN KEY (text_block_id)     REFERENCES text_block   (text_block_id)
-    , CONSTRAINT fk_text_token_label_text_token             FOREIGN KEY (text_token_id)     REFERENCES text_token   (text_token_id)
-)
-;
-SELECT update_dt_modified_column('text_token_label');
-/* TODO: Also load model training examples for initial data */
-COMMENT ON TABLE text_token_label IS 'This table stores predicted token labels returned from the model serving';
-
-
 DROP TABLE IF EXISTS top_level_domain CASCADE;
 CREATE TABLE top_level_domain (
       top_level_domain_id                  						SMALLINT                			NOT NULL GENERATED ALWAYS AS IDENTITY
     , dt_created                      							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
     , dt_last_verified                     						TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
     , dt_modified                     							TIMESTAMPTZ             			NOT NULL DEFAULT CURRENT_TIMESTAMP
-	, name														TEXT								NOT NULL
+	, domain_name												TEXT								NOT NULL
     , PRIMARY KEY (top_level_domain_id)
 )
 ;
