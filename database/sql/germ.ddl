@@ -44,9 +44,9 @@ CREATE TABLE chat_user (
     , PRIMARY KEY (user_id)
 )
 ;
-CREATE UNIQUE INDEX idx_chat_user_user_name                     ON chat_user                        USING btree user_name;
+CREATE UNIQUE INDEX idx_chat_user_user_name                     ON chat_user                        USING btree (user_name);
 SELECT update_dt_modified_column('chat_user');
-COMMENT ON TABLE struct_type IS 'This table stores chat user records';
+COMMENT ON TABLE chat_user IS 'This table stores chat user records';
 
 
 DROP TABLE IF EXISTS user_session CASCADE;
@@ -54,14 +54,13 @@ CREATE TABLE user_session (
       session_id                                                SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
     , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , summary_sig                                               UUID                                NOT NULL
     , user_id                                                   SMALLINT                            NOT NULL
     , PRIMARY KEY (session_id)
     , CONSTRAINT fk_user_session_chat_user_user_id              FOREIGN KEY (user_id)               REFERENCES chat_user  (user_id)
 )
 ;
 SELECT update_dt_modified_column('user_session');
-COMMENT ON TABLE struct_type IS 'This table stores user session records';
+COMMENT ON TABLE user_session IS 'This table stores user session records';
 
 
 DROP TABLE IF EXISTS chat_message CASCADE;
@@ -71,15 +70,13 @@ CREATE TABLE chat_message (
     , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , from_user                                                 BOOLEAN                             NOT NULL
     , json_sig                                                  UUID                                NOT NULL
-    , parent_id                                                 SMALLINT                            NOT NULL  /* TODO: allow null? */
     , session_id                                                SMALLINT                            NOT NULL
     , PRIMARY KEY (session_id)
-    , CONSTRAINT fk_chat_message_parent_id                      FOREIGN KEY (parent_id)             REFERENCES chat_message  (message_id)
     , CONSTRAINT fk_chat_message_user_session_session_id        FOREIGN KEY (session_id)            REFERENCES user_session  (session_id)
 )
 ;
-SELECT update_dt_modified_column('message');
-COMMENT ON TABLE struct_type IS 'This table stores chat message records';
+SELECT update_dt_modified_column('chat_message');
+COMMENT ON TABLE chat_message IS 'This table stores chat message records';
 
 
 DROP TABLE IF EXISTS struct_type CASCADE;
@@ -109,5 +106,5 @@ CREATE TABLE top_level_domain (
     , PRIMARY KEY (top_level_domain_id)
 )
 ;
-CREATE UNIQUE INDEX idx_top_level_domain_name                   ON top_level_domain                 USING btree (name);
+CREATE UNIQUE INDEX idx_top_level_domain_name                   ON top_level_domain                 USING btree (domain_name);
 SELECT update_dt_modified_column('top_level_domain');

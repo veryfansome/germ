@@ -1,12 +1,4 @@
 
-const localDateOptions = {
-    year: '2-digit',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-};
-
 function initPopup(onLoadCallback, elementPrefix) {
     const popupMenuButton = document.getElementById(`${elementPrefix}-popup-button`);
     const popupMenuMenu = document.getElementById(`${elementPrefix}-popup-menu`);
@@ -178,14 +170,7 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function throwOrJson(response) {
-    if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-    return response.json();
-}
-
-    // Function to check button width and replace text with icon if needed
+// Function to check button width and replace text with icon if needed
 function updateSendButton() {
     const sendButton = document.getElementById('send-button');
     if (sendButton.offsetWidth < 60) { // Adjust the width as needed

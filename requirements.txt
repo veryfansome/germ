@@ -11,6 +11,7 @@ gunicorn
 httpx
 huggingface_hub
 inflect
+itsdangerous
 lxml
 mistune
 neo4j
@@ -33,7 +34,7 @@ pytest-cov
 pytest-xdist
 python-dotenv
 python-multipart
-sqlalchemy[asyncio] == 2.0.37
+sqlalchemy[asyncio]
 starlette
 torch
 transformers

@@ -1,32 +1,27 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, File, HTTPException, Path, UploadFile, WebSocket
-from fastapi.responses import FileResponse
+from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, status
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
-from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.responses import Response
 from typing import List
 import aiofiles
 import asyncio
-import hashlib
 import os
-import subprocess
-import traceback
 
-from bot.api.models import ChatMessage, ChatSessionSummary, SqlRequest
+from bot.auth import MAX_COOKIE_AGE, USER_COOKIE, get_user_id, sign_cookie
 from bot.chat.controller import ChatController
 from bot.chat.openai_beta import AssistantHelper
 from bot.chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
 from bot.db.models import DATABASE_URL, SessionLocal, engine
 from bot.db.neo4j import AsyncNeo4jDriver
 from bot.graph.control_plane import ControlPlane
-from bot.websocket import (WebSocketConnectionManager,
-                           get_chat_session_messages, get_chat_session_summaries,
-                           update_chat_session_is_hidden)
+from bot.websocket import WebSocketConnectionManager
 from observability.logging import logging, setup_logging
 from observability.tracing import setup_tracing
 from settings import germ_settings
@@ -104,6 +99,14 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
 
 
+async def require_user(germ_user: str | None = Cookie(None)):
+    user_id = get_user_id(germ_user)
+    if user_id is None:
+        # for HTML requests we prefer a redirect instead of JSON 401
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    return user_id
+
+
 bot = FastAPI(lifespan=lifespan)
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
 if os.path.exists("bot/static/tests"):
@@ -121,54 +124,17 @@ SQLAlchemyInstrumentor().instrument(engine=engine)
 # Endpoints
 
 
-@bot.delete("/chat/session/{chat_session_id}")
-async def delete_chat_session_bookmark(chat_session_id: int):
-    return await update_chat_session_is_hidden(chat_session_id)
-
-
-@bot.get("/", include_in_schema=False)
-async def get_landing():
-    file_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
-    return FileResponse(file_path)
-
-
-@bot.get("/chat/sessions")
-async def get_chat_session_list() -> list[ChatSessionSummary]:
-    return await get_chat_session_summaries()
-
-
-@bot.get("/chat/session/{chat_session_id}")
-async def get_chat_session_message_list(chat_session_id: int) -> list[ChatMessage]:
-    return await get_chat_session_messages(chat_session_id)
-
-
 @bot.get("/favicon.ico", include_in_schema=False)
 async def get_favicon():
     file_path = os.path.join(os.path.dirname(__file__), "static", "assets", "favicon.ico")
     return FileResponse(file_path)
 
 
-@bot.get("/graph")
-async def get_graph():
-    node_results, edge_results = await asyncio.gather(control_plane.get_nodes(), control_plane.get_edges())
-    combined_results = {
-        "nodes": [],
-        "edges": [],
-    }
-    for r in edge_results:
-        edge = {"id": r["edgeId"], "from": r["startNodeId"], "to": r["endNodeId"], "label": r["edge"][1]}
-        combined_results["edges"].append(edge)
-    for r in node_results:
-        node = {"id": r["nodeId"], **r["node"], "nodeLabels": r["nodeLabels"]}
-        combined_results["nodes"].append(node)
-    return combined_results
-
-
 @bot.get("/healthz")
 async def get_healthz():
     # Is PostgreSQL usable?
-    session = SessionLocal()
-    session.close()
+    pg_session = SessionLocal()
+    pg_session.close()
     # Is OpenAI usable?
     openai_client = OpenAI()
     openai_client.close()
@@ -179,47 +145,56 @@ async def get_healthz():
     }
 
 
+@bot.get("/", include_in_schema=False)
+async def get_landing(germ_user: str | None = Cookie(None)):
+    if get_user_id(germ_user) is None:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    file_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
+    return FileResponse(file_path)
+
+
+@bot.get("/login", include_in_schema=False)
+async def get_login_form():
+    # serve a *very* barebones static login page
+    file_path = os.path.join(os.path.dirname(__file__), "static", "login.html")
+    return FileResponse(file_path)
+
+
+@bot.get("/logout", include_in_schema=False)
+async def get_logout():
+    response = RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+    response.delete_cookie(USER_COOKIE)
+    return response
+
+
 @bot.get("/metrics")
 async def get_metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-@bot.post("/postgres/{db}/query")
-async def post_postgres_query(payload: SqlRequest,
-                              db: str = Path(..., title="Postgres DB")):
-    enabled_dbs = {
-        "germ": f"postgresql://{DATABASE_URL}"
+@bot.post("/login", include_in_schema=False)
+async def post_login_form(username: str = Form(...), password: str = Form(...)):
+    user_db = {  # username -> plain-text password (demo only!)
+        "alice": "wonderland",
+        "bob": "builder",
     }
-    if db not in enabled_dbs:
-        raise HTTPException(status_code=400, detail="Not supported")
+    logger.info(f"Username: {username}, password_lookup: {user_db.get(username)}, password: {password}")
+    if user_db.get(username) != password:
+        return RedirectResponse("/login?error=bad_credentials", status_code=status.HTTP_303_SEE_OTHER)
 
-    md5 = hashlib.md5()
-    md5.update(payload.sql.encode())
-    query_file = f"/tmp/{db}_query_{md5.hexdigest()}.sql"
-    with open(query_file, "w") as f:
-        f.write(payload.sql)
-    try:
-        cmd = subprocess.run(f"psql '{enabled_dbs[db]}' -f {query_file}",
-                             shell=True, capture_output=True, text=True, check=True)
-        os.remove(query_file)
-        return f"""**rc**: {cmd.returncode}\n
-**stdout**:
-```text
-{cmd.stdout}
-```
-**stderr**:
-```text
-{cmd.stderr}
-```
-"""
-    except Exception as e:
-        os.remove(query_file)
-        logger.error("%s: trace: %s", e, traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+    response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    response.set_cookie(
+        key=USER_COOKIE,
+        value=sign_cookie(username),
+        httponly=True,
+        samesite="lax",
+        max_age=MAX_COOKIE_AGE,
+    )
+    return response
 
 
 @bot.post("/upload")
-async def post_upload(files: List[UploadFile] = File(...)):
+async def post_upload(files: List[UploadFile] = File(...), user_id: str = Depends(require_user)):
     saved_files = []
     for file in files:
         save_path = os.path.join(germ_settings.UPLOAD_FOLDER, file.filename)
@@ -232,13 +207,19 @@ async def post_upload(files: List[UploadFile] = File(...)):
                         break
                     await f.write(chunk)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
         saved_files.append(file.filename)
     return {"files_saved": saved_files}
 
 
 @bot.websocket("/chat")
 async def websocket_chat(ws: WebSocket):
+    user_id = get_user_id(ws.cookies.get(USER_COOKIE))
+    if user_id is None:
+        # Fail with 4401 so browser JS gets onclose
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     chat_session_id = await websocket_manager.connect(ws)
     logger.info(f"starting session {chat_session_id}")
     await websocket_manager.conduct_chat_session(chat_session_id)

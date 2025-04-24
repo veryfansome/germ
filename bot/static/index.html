@@ -17,9 +17,7 @@
     <nav>
         <div class="logo"><a href="/"><i class="fa-solid fa-virus" style="padding-right: 4px"></i>GermBot</a></div>
         <div class="nav-links">
-            <a id="chat-nav-link" href="/"><i class="fa-solid fa-comment" style="padding-right: 4px"></i><u>Chat</u></a>
-            <a href="/static/neo4j.html"><i class="fa-solid fa-share-nodes" style="padding-right: 4px"></i>Neo4j</a>
-            <a href="/static/postgres.html"><i class="fa-solid fa-code" style="padding-right: 4px"></i>Postgres</a>
+            <i class="fa-solid fa-user" style="padding-right: 4px"></i> user [<a href="/logout">logout</a>]
         </div>
     </nav>
     <div id="error-popup" class="hidden">
@@ -35,9 +33,6 @@
             </button>
             <input type="file" id="file-input" style="display: none;" multiple>
         </div>
-        <div id="bookmarks-popup-menu" class="bookmarks-popup-menu">
-            <ul id="bookmarks-popup-menu-ul"></ul>
-        </div>
         <div id="settings-popup-menu" class="settings-popup-menu">
             <div class="settings-popup-menu-section-title">System Message</div>
             <label for="system-chat-message-input"></label>
@@ -47,7 +42,6 @@
             <label for="input"></label>
             <textarea id="input" placeholder="Type a message..."></textarea>
             <div class="button-container">
-                <button type="button" id="bookmarks-popup-button"><i class="fas fa-bookmark"></i></button>
                 <button type="button" id="settings-popup-button"><i class="fas fa-gear"></i></button>
                 <button type="submit" id="send-button">Send</button>
             </div>
@@ -59,62 +53,12 @@
 
     const host = window.location.hostname;
     const port = window.location.port;
-    const queryParams = getQueryParams();
 
     const chatbox = document.getElementById('chatbox');
     initErrorPopup();
     initSendButtonResize();
 
     // Popup menu
-    const bookmarkRefreshInterval = 15000; // 15 seconds
-    const bookmarkList = document.getElementById('bookmarks-popup-menu-ul');
-    const refreshBookmarks = () => {
-        bookmarkList.innerHTML = `<span style="color: gray;"><em>Have you had any conversations yet? Try sending a message!</em></span>`;
-        fetch('/chat/sessions')
-                .then(response => throwOrJson(response))
-                .then(data => {
-                    data.forEach(function (item, idx) {
-                        if (idx === 0) {
-                            bookmarkList.innerHTML = '';
-                        }
-                        const li = document.createElement('li');
-
-                        const remove_link = document.createElement('a');
-                        remove_link.innerHTML = '<i class="fa fa-trash-can"></i>';
-                        li.appendChild(remove_link);
-
-                        const dateStarted = new Date(item['time_started']);
-                        dateStarted.setHours(dateStarted.getHours() - 8)  // TODO: Configure via settings popup
-                        const timestamp = document.createElement('span');
-                        timestamp.innerHTML = `<i style="color: dimgray;">${dateStarted.toLocaleTimeString('en-US', localDateOptions)}</i><br/>`
-                        li.appendChild(timestamp);
-
-                        const load_link = document.createElement('a');
-                        load_link.href = `/?chat_session_id=${item['chat_session_id']}`;
-                        load_link.innerHTML = `<div style="padding: 3px;">${item['summary']}</div>`;
-                        li.appendChild(load_link);
-
-                        remove_link.addEventListener('click', function(event) {
-                            fetch(`/chat/session/${item['chat_session_id']}`, {
-                                method: 'DELETE'
-                            })
-                            .then(() => {
-                                li.remove();
-                            })
-                            .catch(error => {
-                                handleError(error, 'Delete failed:');
-                            })
-                        });
-
-                        bookmarkList.appendChild(li);
-                    })
-                })
-                .catch(error => handleError(error, 'Failed to session history:'));
-    };
-    initPopup(refreshBookmarks, "bookmarks");
-    setInterval(() => {
-        refreshBookmarks();
-    }, bookmarkRefreshInterval);
 
     const systemChatMessageInput = document.getElementById('system-chat-message-input');
     const refreshSettingsPopup = () => {
@@ -195,47 +139,6 @@
     });
 
     let chatCompletionMessageList = [];
-    if ('chat_session_id' in queryParams) {
-        // Reset the chatbox
-        chatbox.innerHTML = '';
-
-        // Show loading indicator
-        chatbox.appendChild(loadingIndicator);
-        scrollChatBoxToBottom();
-
-        fetch(`/chat/session/${queryParams["chat_session_id"]}`)
-                .then(response => {
-                    // Stop showing loading indicator
-                    loadingIndicator.remove();
-                    return throwOrJson(response);
-                })
-                .then(data => {
-                    data.map(chatFrameMessage => {
-                        if (chatFrameMessage['role'] === 'user') {
-                            const userMessageBox = getUserMessageBox(chatFrameMessage['content']);
-                            userMessageBox.appendChild(getCopyTextLink(chatFrameMessage['content']));
-                            chatbox.appendChild(userMessageBox);
-                            chatCompletionMessageList.push({ role: "user", content: chatFrameMessage['content'] });
-                        } else {
-                            const assistantMessageBox = getAssistantMessageBox('assistant(bookmark)', chatFrameMessage['content']);
-                            assistantMessageBox.appendChild(getCopyTextLink(chatFrameMessage['content']));
-                            chatbox.appendChild(assistantMessageBox);
-                            chatCompletionMessageList.push({ role: chatFrameMessage['role'], content: chatFrameMessage['content'] });
-                        }
-                        hljs.highlightAll();
-                        scrollChatBoxToBottom();
-                    });
-                    const url = new URL(window.location.href);
-                    url.search = '';
-                    history.replaceState(null, '', url);
-                })
-                .catch(error => {
-                    // Stop showing loading indicator
-                    loadingIndicator.remove();
-                    handleError(error, 'Query failed:');
-                });
-    }
-
     function handleMessageReceived(data) {
         const responseComplete = data['complete'];
         const responseModel = data['model'];

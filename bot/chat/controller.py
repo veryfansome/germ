@@ -3,14 +3,15 @@ import logging
 
 from bot.api.models import ChatRequest, ChatResponse
 from bot.graph.control_plane import ControlPlane
-from bot.websocket import (WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSender,
-                           WebSocketSessionMonitor)
+from bot.websocket import (WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler, WebSocketSendEventHandler,
+                           WebSocketSender, WebSocketSessionMonitor)
 from observability.annotations import measure_exec_seconds
 
 logger = logging.getLogger(__name__)
 
 
-class ChatController(WebSocketReceiveEventHandler, WebSocketSendEventHandler, WebSocketSessionMonitor):
+class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
+                     WebSocketSendEventHandler, WebSocketSessionMonitor):
 
     def __init__(self, control_plane: ControlPlane, remote: WebSocketReceiveEventHandler):
         self.control_plane = control_plane
@@ -20,6 +21,9 @@ class ChatController(WebSocketReceiveEventHandler, WebSocketSendEventHandler, We
             "paragraph": "Paragraph",
         }
         self.remote = remote
+
+    async def on_disconnect(self, chat_session_id: int):
+        pass
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self, chat_session_id: int, chat_request_received_id: int, chat_request: ChatRequest,
