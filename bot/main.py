@@ -14,7 +14,7 @@ import aiofiles
 import asyncio
 import os
 
-from bot.auth import MAX_COOKIE_AGE, USER_COOKIE, get_user_id, sign_cookie
+from bot.auth import MAX_COOKIE_AGE, USER_COOKIE, get_decoded_cookie, sign_cookie
 from bot.chat.controller import ChatController
 from bot.chat.openai_beta import AssistantHelper
 from bot.chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
@@ -100,11 +100,11 @@ async def lifespan(app: FastAPI):
 
 
 async def require_user(germ_user: str | None = Cookie(None)):
-    user_id = get_user_id(germ_user)
-    if user_id is None:
+    user_cookie = get_decoded_cookie(germ_user)
+    if user_cookie is None:
         # for HTML requests we prefer a redirect instead of JSON 401
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-    return user_id
+    return user_cookie
 
 
 bot = FastAPI(lifespan=lifespan)
@@ -147,15 +147,19 @@ async def get_healthz():
 
 @bot.get("/", include_in_schema=False)
 async def get_landing(germ_user: str | None = Cookie(None)):
-    if get_user_id(germ_user) is None:
+    if get_decoded_cookie(germ_user) is None:
         return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
     file_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
-    return FileResponse(file_path)
+    return FileResponse(
+        file_path,
+        headers={
+            "Cache-Control": "no-store"  # Prevents serving landing from cache after logout
+        }
+    )
 
 
 @bot.get("/login", include_in_schema=False)
 async def get_login_form():
-    # serve a *very* barebones static login page
     file_path = os.path.join(os.path.dirname(__file__), "static", "login.html")
     return FileResponse(file_path)
 
@@ -170,6 +174,14 @@ async def get_logout():
 @bot.get("/metrics")
 async def get_metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@bot.get("/user/info", include_in_schema=False)
+async def get_landing(germ_user: str | None = Cookie(None)):
+    user_cookie =  get_decoded_cookie(germ_user)
+    if user_cookie is None:
+        return {}
+    return {"username": user_cookie}
 
 
 @bot.post("/login", include_in_schema=False)
@@ -214,8 +226,8 @@ async def post_upload(files: List[UploadFile] = File(...), user_id: str = Depend
 
 @bot.websocket("/chat")
 async def websocket_chat(ws: WebSocket):
-    user_id = get_user_id(ws.cookies.get(USER_COOKIE))
-    if user_id is None:
+    user_cookie = get_decoded_cookie(ws.cookies.get(USER_COOKIE))
+    if user_cookie is None:
         # Fail with 4401 so browser JS gets onclose
         await ws.close(code=status.WS_1008_POLICY_VIOLATION)
         return

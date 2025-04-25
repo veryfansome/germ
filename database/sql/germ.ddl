@@ -37,6 +37,7 @@ LANGUAGE 'plpgsql';
 
 DROP TABLE IF EXISTS chat_user CASCADE;
 CREATE TABLE chat_user (
+    /* TODO: maybe the bot should be first user? */
       user_id                                                   SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
     , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -49,18 +50,18 @@ SELECT update_dt_modified_column('chat_user');
 COMMENT ON TABLE chat_user IS 'This table stores chat user records';
 
 
-DROP TABLE IF EXISTS user_session CASCADE;
-CREATE TABLE user_session (
+DROP TABLE IF EXISTS chat_session CASCADE;
+CREATE TABLE chat_session (
       session_id                                                SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
     , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , user_id                                                   SMALLINT                            NOT NULL
     , PRIMARY KEY (session_id)
-    , CONSTRAINT fk_user_session_chat_user_user_id              FOREIGN KEY (user_id)               REFERENCES chat_user  (user_id)
+    , CONSTRAINT fk_chat_session_chat_user_user_id              FOREIGN KEY (user_id)               REFERENCES chat_user  (user_id)
 )
 ;
-SELECT update_dt_modified_column('user_session');
-COMMENT ON TABLE user_session IS 'This table stores user session records';
+SELECT update_dt_modified_column('chat_session');
+COMMENT ON TABLE chat_session IS 'This table stores user session records';
 
 
 DROP TABLE IF EXISTS chat_message CASCADE;
@@ -68,11 +69,12 @@ CREATE TABLE chat_message (
       message_id                                                SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
     , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    /* TODO: instead of from_user, maybe this should be user_id... */
     , from_user                                                 BOOLEAN                             NOT NULL
     , json_sig                                                  UUID                                NOT NULL
     , session_id                                                SMALLINT                            NOT NULL
     , PRIMARY KEY (session_id)
-    , CONSTRAINT fk_chat_message_user_session_session_id        FOREIGN KEY (session_id)            REFERENCES user_session  (session_id)
+    , CONSTRAINT fk_chat_message_chat_session_session_id        FOREIGN KEY (session_id)            REFERENCES chat_session  (session_id)
 )
 ;
 SELECT update_dt_modified_column('chat_message');

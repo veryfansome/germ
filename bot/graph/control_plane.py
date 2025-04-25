@@ -43,7 +43,7 @@ class ControlPlane:
             "chat_session_id": chat_session_id, "time_started": round_time_now_down_to_nearst_interval()
         })
         if results:
-            logger.info(f"MERGE (session:ChatResponse {{chat_session_id: {chat_session_id}}})")
+            logger.info(f"MERGE (session:ChatSession {{chat_session_id: {chat_session_id}}})")
         return results
 
     async def close(self):

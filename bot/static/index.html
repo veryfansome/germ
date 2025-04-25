@@ -11,13 +11,13 @@
 
     <link rel="stylesheet" href="/static/css/ui.css">
     <script src="/static/js/ui.js"></script>
-    <style></style>
 </head>
 <body>
     <nav>
         <div class="logo"><a href="/"><i class="fa-solid fa-virus" style="padding-right: 4px"></i>GermBot</a></div>
         <div class="nav-links">
-            <i class="fa-solid fa-user" style="padding-right: 4px"></i> user [<a href="/logout">logout</a>]
+            <i class="fa-solid fa-user" style="padding-right: 4px"></i>
+            <span id="username">user</span> [<a href="/logout">logout</a>]
         </div>
     </nav>
     <div id="error-popup" class="hidden">
@@ -53,6 +53,20 @@
 
     const host = window.location.hostname;
     const port = window.location.port;
+
+    const usernamePromise = fetch("/user/info")
+        .then(r => {
+            if (!r.ok) throw new Error("unauth");
+            return r.json();
+        })
+        .then(({ username }) => {
+            document.getElementById("username").textContent = username;
+            return username;
+        })
+        .catch(() => {
+            // if the cookie expired mid-session, bounce to login
+            window.location = "/login";
+        });
 
     const chatbox = document.getElementById('chatbox');
     initErrorPopup();
@@ -210,7 +224,8 @@
         submittedText.push(message);
         document.getElementById('input').value = '';
 
-        const userMessageBox = getUserMessageBox(message);
+        const username = await usernamePromise;
+        const userMessageBox = getUserMessageBox(username, message);
         userMessageBox.appendChild(getCopyTextLink(message));
         chatbox.appendChild(userMessageBox);
         hljs.highlightAll();

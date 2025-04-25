@@ -1,15 +1,32 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Login – GermBot</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+    <link rel="stylesheet" href="/static/css/all.min.css" />
+    <link rel="stylesheet" href="/static/css/ui.css" />
 </head>
 <body>
-  <h2>Please log in</h2>
-  <form action="/login" method="post">
-    <label>Username <input name="username"></label><br>
-    <label>Password <input name="password" type="password"></label><br>
-    <button type="submit">Login</button>
-  </form>
+    <nav>
+        <div class="logo">
+            <a href="/"><i class="fa-solid fa-virus" style="padding-right:4px"></i>GermBot</a>
+        </div>
+        <div class="nav-links"></div>
+    </nav>
+    <div class="login-wrapper">
+        <form class="login-form" action="/login" method="post">
+            <h3 style="margin-top:0;text-align:center">Please log in</h3>
+            <label>
+                <span style="margin-bottom:5px;">Username</span>
+                <input name="username" />
+            </label>
+            <label>
+                <span style="margin-bottom:5px;">Password</span>
+                <input name="password" type="password" />
+            </label>
+            <button type="submit">Login</button>
+        </form>
+    </div>
 </body>
 </html>

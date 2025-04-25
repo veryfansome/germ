@@ -130,10 +130,10 @@ function getQueryParams() {
     return params;
 }
 
-function getUserMessageBox(message, codeBlockType = "") {
+function getUserMessageBox(username, message, codeBlockType = "") {
     const userMessageBox = document.createElement('div');
     userMessageBox.className = 'user-message-box';
-    userMessageBox.innerHTML = `<i class="chat-metadata fa fa-user"></i><b class="chat-metadata">user:</b>`;
+    userMessageBox.innerHTML = `<i class="chat-metadata fa fa-user"></i><b class="chat-metadata">${username}:</b>`;
     userMessageBox.innerHTML += `${marked.parse(codeBlockType === '' ? message : `\`\`\`${codeBlockType}\n${message}\n\`\`\``)}</br>`;
     userMessageBox.innerHTML += `<i class="chat-metadata">${new Date().toLocaleTimeString()}</i> | `;
     return userMessageBox;
