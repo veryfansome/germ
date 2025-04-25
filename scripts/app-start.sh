@@ -3,6 +3,7 @@
 TEMPLATED_STATIC_FILES=(
   "index.html"
   "login.html"
+  "register.html"
 )
 
 stop_app() {

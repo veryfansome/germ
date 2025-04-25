@@ -159,14 +159,16 @@ async def get_landing(germ_user: str | None = Cookie(None)):
 
 
 @bot.get("/login", include_in_schema=False)
-async def get_login_form():
+async def get_login_form(germ_user: str | None = Cookie(None)):
+    if get_decoded_cookie(germ_user) is not None:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
     file_path = os.path.join(os.path.dirname(__file__), "static", "login.html")
     return FileResponse(file_path)
 
 
 @bot.get("/logout", include_in_schema=False)
-async def get_logout():
-    response = RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+async def get_logout(return_url: str | None = "/login"):
+    response = RedirectResponse(url=return_url, status_code=status.HTTP_303_SEE_OTHER)
     response.delete_cookie(USER_COOKIE)
     return response
 
@@ -176,9 +178,17 @@ async def get_metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
+@bot.get("/register", include_in_schema=False)
+async def get_register(germ_user: str | None = Cookie(None)):
+    if get_decoded_cookie(germ_user) is not None:
+        return RedirectResponse(url="/logout?return_url=/register", status_code=status.HTTP_303_SEE_OTHER)
+    file_path = os.path.join(os.path.dirname(__file__), "static", "register.html")
+    return FileResponse(file_path)
+
+
 @bot.get("/user/info", include_in_schema=False)
-async def get_landing(germ_user: str | None = Cookie(None)):
-    user_cookie =  get_decoded_cookie(germ_user)
+async def get_user_info(germ_user: str | None = Cookie(None)):
+    user_cookie = get_decoded_cookie(germ_user)
     if user_cookie is None:
         return {}
     return {"username": user_cookie}
@@ -193,6 +203,21 @@ async def post_login_form(username: str = Form(...), password: str = Form(...)):
     logger.info(f"Username: {username}, password_lookup: {user_db.get(username)}, password: {password}")
     if user_db.get(username) != password:
         return RedirectResponse("/login?error=bad_credentials", status_code=status.HTTP_303_SEE_OTHER)
+
+    response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    response.set_cookie(
+        key=USER_COOKIE,
+        value=sign_cookie(username),
+        httponly=True,
+        samesite="lax",
+        max_age=MAX_COOKIE_AGE,
+    )
+    return response
+
+
+@bot.post("/register", include_in_schema=False)
+async def post_register(username: str = Form(...), password: str = Form(...), verify: str = Form(...)):
+    logger.info(f"Username: {username}, password: {password}, verify: {verify}")
 
     response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     response.set_cookie(

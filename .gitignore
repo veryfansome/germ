@@ -8,8 +8,7 @@
 .venv/
 __pycache__/
 
-bot/static/index.html
-bot/static/login.html
+bot/static/*.html
 bot/static/tests/report.xml
 bot/static/tests/cov/
 data/germ/multi_head_exps/

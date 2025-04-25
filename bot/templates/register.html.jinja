@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login</title>
+    <title>Register</title>
     <link rel="stylesheet" href="/static/css/all.min.css?v={{ version }}" />
     <link rel="stylesheet" href="/static/css/ui.css?v={{ version }}" />
 </head>
@@ -15,8 +15,8 @@
         <div class="nav-links"></div>
     </nav>
     <div class="login-wrapper">
-        <form class="login-form" action="/login" method="post">
-            <h3 style="margin-top:0;text-align:center">Please log in</h3>
+        <form class="login-form" action="/register" method="post">
+            <h3 style="margin-top:0;text-align:center">Choose a username and password</h3>
             <label>
                 <span style="margin-bottom:5px;">Username</span>
                 <input name="username" />
@@ -25,9 +25,13 @@
                 <span style="margin-bottom:5px;">Password</span>
                 <input name="password" type="password" />
             </label>
-            <button type="submit">Login</button>
+            <label>
+                <span style="margin-bottom:5px;">Verify password</span>
+                <input name="verify" type="password" />
+            </label>
+            <button type="submit">Create</button>
             <hr style="width: 100%">
-            <a href="/register">Create new user</a>
+            <a href="/login">Log in</a>
         </form>
     </div>
 </body>
