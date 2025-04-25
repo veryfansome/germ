@@ -12,6 +12,8 @@ httpx
 huggingface_hub
 inflect
 itsdangerous
+jinja2
+jinja2-cli
 lxml
 mistune
 neo4j
