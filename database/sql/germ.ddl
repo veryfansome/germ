@@ -37,10 +37,10 @@ LANGUAGE 'plpgsql';
 
 DROP TABLE IF EXISTS chat_user CASCADE;
 CREATE TABLE chat_user (
-    /* TODO: maybe the bot should be first user? */
       user_id                                                   SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
     , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , password_hash                                             TEXT                                NOT NULL
     , user_name                                                 TEXT                                NOT NULL
     , PRIMARY KEY (user_id)
 )

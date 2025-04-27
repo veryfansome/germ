@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Register</title>
     <link rel="stylesheet" href="/static/css/all.min.css?v={{ version }}" />
-    <link rel="stylesheet" href="/static/css/ui.css?v={{ version }}" />
+
+    <link rel="stylesheet" href="/static/css/ui.css?v={{ version }}">
+    <script src="/static/js/ui.js?v={{ version }}"></script>
 </head>
 <body>
     <nav>
@@ -14,6 +16,10 @@
         </div>
         <div class="nav-links"></div>
     </nav>
+    <div id="error-popup" class="hidden">
+        <button id="close-error-popup"><i class="fa fa-x"></i></button>
+        <span id="error-popup-message-text"></span>
+    </div>
     <div class="login-wrapper">
         <form class="login-form" action="/register" method="post">
             <h3 style="margin-top:0;text-align:center">Choose a username and password</h3>
@@ -34,5 +40,11 @@
             <a href="/login">Log in</a>
         </form>
     </div>
+    <script>
+        const queryParams = getQueryParams()
+        if ("error" in queryParams) {
+            showErrorPopup(queryParams["error"])
+        }
+    </script>
 </body>
 </html>

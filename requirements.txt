@@ -3,10 +3,10 @@ aiofiles
 apscheduler
 asyncpg
 beautifulsoup4
+bcrypt
 datasets
 dnspython
 fastapi
-google-cloud-storage
 gunicorn
 httpx
 huggingface_hub
@@ -27,7 +27,6 @@ opentelemetry-instrumentation-httpx
 opentelemetry-instrumentation-sqlalchemy
 opentelemetry-sdk
 prometheus_client
-psutil
 psycopg2-binary
 pydantic
 pytest

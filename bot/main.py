@@ -10,11 +10,13 @@ from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.responses import Response
 from typing import List
+from urllib.parse import urlencode
 import aiofiles
 import asyncio
 import os
 
-from bot.auth import MAX_COOKIE_AGE, USER_COOKIE, get_decoded_cookie, sign_cookie
+from bot.auth import (MAX_COOKIE_AGE, USER_COOKIE, add_new_user, get_decoded_cookie, get_user_password_hash,
+                      sign_cookie, verify_password)
 from bot.chat.controller import ChatController
 from bot.chat.openai_beta import AssistantHelper
 from bot.chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
@@ -196,38 +198,44 @@ async def get_user_info(germ_user: str | None = Cookie(None)):
 
 @bot.post("/login", include_in_schema=False)
 async def post_login_form(username: str = Form(...), password: str = Form(...)):
-    user_db = {  # username -> plain-text password (demo only!)
-        "alice": "wonderland",
-        "bob": "builder",
-    }
-    logger.info(f"Username: {username}, password_lookup: {user_db.get(username)}, password: {password}")
-    if user_db.get(username) != password:
-        return RedirectResponse("/login?error=bad_credentials", status_code=status.HTTP_303_SEE_OTHER)
+    password_hash = await get_user_password_hash(username)
+    if password_hash is None:
+        error_params = urlencode({"error": "No such user."})
+    elif not verify_password(password, password_hash):
+        error_params = urlencode({"error": "Invalid password."})
+    else:
+        response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+        response.set_cookie(
+            key=USER_COOKIE,
+            value=sign_cookie(username),
+            httponly=True,
+            samesite="lax",
+            max_age=MAX_COOKIE_AGE,
+        )
+        return response
+    return RedirectResponse(f"/login?{error_params}", status_code=status.HTTP_303_SEE_OTHER)
 
-    response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
-    response.set_cookie(
-        key=USER_COOKIE,
-        value=sign_cookie(username),
-        httponly=True,
-        samesite="lax",
-        max_age=MAX_COOKIE_AGE,
-    )
-    return response
 
 
 @bot.post("/register", include_in_schema=False)
 async def post_register(username: str = Form(...), password: str = Form(...), verify: str = Form(...)):
-    logger.info(f"Username: {username}, password: {password}, verify: {verify}")
-
-    response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
-    response.set_cookie(
-        key=USER_COOKIE,
-        value=sign_cookie(username),
-        httponly=True,
-        samesite="lax",
-        max_age=MAX_COOKIE_AGE,
-    )
-    return response
+    if (await get_user_password_hash(username)) is not None:
+        error_params = urlencode({"error": "Username already exists."})
+    elif password != verify:
+        error_params = urlencode({"error": "'Password' and 'Verify password' did not match."})
+    elif await add_new_user(username, password):
+        response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+        response.set_cookie(
+            key=USER_COOKIE,
+            value=sign_cookie(username),
+            httponly=True,
+            samesite="lax",
+            max_age=MAX_COOKIE_AGE,
+        )
+        return response
+    else:
+        error_params = urlencode({"error": "Failed to create new user."})
+    return RedirectResponse(f"/register?{error_params}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @bot.post("/upload")
