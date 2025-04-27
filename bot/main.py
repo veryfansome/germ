@@ -170,6 +170,9 @@ async def get_login_form(germ_user: str | None = Cookie(None)):
 
 @bot.get("/logout", include_in_schema=False)
 async def get_logout(return_url: str | None = "/login"):
+    if return_url not in {"/login", "/register"}:
+        logger.warning(f"Overrode user supplied `return_url` {return_url}, which is not allowed")
+        return_url = "/login"
     response = RedirectResponse(url=return_url, status_code=status.HTTP_303_SEE_OTHER)
     response.delete_cookie(USER_COOKIE)
     return response
