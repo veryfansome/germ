@@ -46,18 +46,34 @@ class ControlPlane:
             logger.info(f"MERGE (session:ChatSession {{chat_session_id: {chat_session_id}}})")
         return results
 
+    async def add_chat_user(self, user_id: int):
+        results = await self.driver.query("""
+        MERGE (user:ChatUser {user_id: $user_id})
+        RETURN user
+        """, {
+            "user_id": user_id,
+        })
+        if results:
+            logger.info(f"MERGE (user:ChatUser {{user_id: {user_id}}})")
+        return results
+
     async def close(self):
         await self.driver.shutdown()
 
-    async def get_edges(self):
-        return await self.driver.query("""
-        MATCH (start)-[edge]->(end) WHERE NOT start:__Neo4jMigration RETURN edge, id(edge) AS edgeId, id(start) AS startNodeId, id(end) AS endNodeId
-        """)
+    async def link_chat_user_to_chat_session(self, user_id: int, chat_session_id: int):
+        results = await self.driver.query("""
+        MATCH (user:ChatUser {user_id: $user_id}), (session:ChatSession {chat_session_id: $chat_session_id})
+        MERGE (session)-[r:WITH]->(user)
+        RETURN r
+        """, {
+            "user_id": user_id, "chat_session_id": chat_session_id,
 
-    async def get_nodes(self):
-        return await self.driver.query("""
-        MATCH (node) WHERE NOT node:__Neo4jMigration RETURN node, id(node) AS nodeId, labels(node) AS nodeLabels
-        """)
+        })
+        if results:
+            logger.info("MERGE "
+                        f"(session:ChatSession {{chat_session_id: {chat_session_id}}})-[r:WITH]->"
+                        f"(user:ChatUser {{user_id: {user_id}}})")
+        return results
 
     async def link_chat_request_to_chat_session(self, chat_request_received_id: int, chat_session_id: int, time_occurred):
         results = await self.driver.query("""

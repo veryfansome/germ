@@ -15,8 +15,9 @@ import aiofiles
 import asyncio
 import os
 
-from bot.auth import (MAX_COOKIE_AGE, USER_COOKIE, add_new_user, get_decoded_cookie, get_user_password_hash,
-                      sign_cookie, verify_password)
+from bot.api.models import CookieData
+from bot.auth import (MAX_COOKIE_AGE, USER_COOKIE, add_new_user, get_decoded_cookie,
+                      get_user_id, get_user_password_hash, sign_cookie, verify_password)
 from bot.chat.controller import ChatController
 from bot.chat.openai_beta import AssistantHelper
 from bot.chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
@@ -102,11 +103,11 @@ async def lifespan(app: FastAPI):
 
 
 async def require_user(germ_user: str | None = Cookie(None)):
-    user_cookie = get_decoded_cookie(germ_user)
-    if user_cookie is None:
+    cookie_data = get_decoded_cookie(germ_user)
+    if cookie_data is None:
         # for HTML requests we prefer a redirect instead of JSON 401
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-    return user_cookie
+    return cookie_data
 
 
 bot = FastAPI(lifespan=lifespan)
@@ -193,10 +194,10 @@ async def get_register(germ_user: str | None = Cookie(None)):
 
 @bot.get("/user/info", include_in_schema=False)
 async def get_user_info(germ_user: str | None = Cookie(None)):
-    user_cookie = get_decoded_cookie(germ_user)
-    if user_cookie is None:
-        return {}
-    return {"username": user_cookie}
+    cookie_data = get_decoded_cookie(germ_user)
+    if cookie_data is None:
+        return CookieData(user_id=-1, username="unknown")
+    return cookie_data
 
 
 @bot.post("/login", include_in_schema=False)
@@ -207,10 +208,11 @@ async def post_login_form(username: str = Form(...), password: str = Form(...)):
     elif not verify_password(password, password_hash):
         error_params = urlencode({"error": "Invalid password."})
     else:
+        user_id = await get_user_id(username)
         response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
         response.set_cookie(
             key=USER_COOKIE,
-            value=sign_cookie(username),
+            value=sign_cookie(CookieData(user_id=user_id, username=username).model_dump_json()),
             httponly=True,
             samesite="lax",
             max_age=MAX_COOKIE_AGE,
@@ -226,18 +228,21 @@ async def post_register(username: str = Form(...), password: str = Form(...), ve
         error_params = urlencode({"error": "Username already exists."})
     elif password != verify:
         error_params = urlencode({"error": "'Password' and 'Verify password' did not match."})
-    elif await add_new_user(username, password):
-        response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
-        response.set_cookie(
-            key=USER_COOKIE,
-            value=sign_cookie(username),
-            httponly=True,
-            samesite="lax",
-            max_age=MAX_COOKIE_AGE,
-        )
-        return response
     else:
-        error_params = urlencode({"error": "Failed to create new user."})
+        user_id = await add_new_user(username, password)
+        if user_id is None:
+            error_params = urlencode({"error": "Failed to create new user."})
+        else:
+            await control_plane.add_chat_user(user_id)
+            response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+            response.set_cookie(
+                key=USER_COOKIE,
+                value=sign_cookie(CookieData(user_id=user_id, username=username).model_dump_json()),
+                httponly=True,
+                samesite="lax",
+                max_age=MAX_COOKIE_AGE,
+            )
+            return response
     return RedirectResponse(f"/register?{error_params}", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -262,12 +267,13 @@ async def post_upload(files: List[UploadFile] = File(...), user_id: str = Depend
 
 @bot.websocket("/chat")
 async def websocket_chat(ws: WebSocket):
-    user_cookie = get_decoded_cookie(ws.cookies.get(USER_COOKIE))
-    if user_cookie is None:
+    cookie_data = get_decoded_cookie(ws.cookies.get(USER_COOKIE))
+    if cookie_data is None:
         # Fail with 4401 so browser JS gets onclose
         await ws.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    chat_session_id = await websocket_manager.connect(ws)
-    logger.info(f"starting session {chat_session_id}")
-    await websocket_manager.conduct_chat_session(chat_session_id)
+    chat_session_id = await websocket_manager.connect(cookie_data.user_id, ws)
+    await control_plane.link_chat_user_to_chat_session(cookie_data.user_id, chat_session_id)
+    logger.info(f"starting session {chat_session_id} with user {cookie_data.user_id}")
+    await websocket_manager.conduct_chat_session(cookie_data.user_id, chat_session_id)
