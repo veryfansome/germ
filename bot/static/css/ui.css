@@ -14,15 +14,6 @@ body {
 button {
     padding: 10px;
 }
-/**
-Using flex: 1 on form might cause issues if the form does not behave as expected.
-Consider using flex-grow: 1 instead.
-*/
-form {
-    display: flex;
-    /* flex: 1; */
-    flex-grow: 1;
-}
 nav {
     background-color: #2C9286;
     color: white;
@@ -34,7 +25,6 @@ nav a {
     color: white;
     text-decoration: none;
     text-underline-offset: 4px;
-    padding: 0 10px;
 }
 nav a:hover {
     text-decoration: underline;
@@ -58,10 +48,6 @@ pre code {
     white-space: pre;       /* Preserve white space */
     overflow-x: auto;       /* Horizontal scroll for long lines */
 }
-/**
-`max-height: 70vh and min-height: 8.5vh could potentially cause overflow issues on smaller screens.
-Make sure these values are appropriate for all screen sizes.
-*/
 textarea {
     box-sizing: border-box;
     flex: 1;
@@ -142,6 +128,10 @@ Ensure the opacity is low enough to not interfere with the text but still visibl
     display: flex;
     padding: 10px;
 }
+#input-container form {
+    display: flex;
+    flex-grow: 1;
+}
 /* Container that shows selected filenames or file info */
 #selected-files-container {
     display: flex;
@@ -158,14 +148,7 @@ Ensure the opacity is low enough to not interfere with the text but still visibl
 }
 /**
 Popup and Send button settings
-Setting width: 100% for buttons might cause layout issues if not properly contained within their parent
-elements. Ensure the parent elements manage the layout appropriately.
 */
-#bookmarks-popup-button {
-    cursor: pointer;
-    padding: 3px 0px 2px 0px; /* Adjust padding if needed */
-    width: 100%; /* Set equal width */
-}
 #send-button {
     cursor: pointer;
 
@@ -198,8 +181,6 @@ elements. Ensure the parent elements manage the layout appropriately.
 
 /**
 Button container to position buttons vertically
-`width: 5% might be too small or too large depending on screen size. Consider using relative units like em or
-rem for better responsiveness.
 */
 .button-container {
     display: flex;
@@ -215,6 +196,13 @@ rem for better responsiveness.
 }
 .chat-metadata {
     color: dimgray;
+}
+.chatbox-message-link {
+    text-decoration: none; /* Remove underline by default */
+}
+.chatbox-message-link:hover {
+    color: blue; /* You can set any color you like */
+    cursor: pointer;
 }
 .clicked-chatbox-message-link {
     color: blue; /* Set the same as `.chatbox-message-link:hover` */
@@ -238,44 +226,52 @@ rem for better responsiveness.
     height: 12px;
     width: 12px;
 }
-/* Default link style */
-.chatbox-message-link {
-    text-decoration: none; /* Remove underline by default */
-}
-.chatbox-message-link:hover {
-    color: blue; /* You can set any color you like */
-    cursor: pointer;
-}
-/* Pop-up menu settings */
-.bookmarks-popup-menu {
-    max-height: 90%;
-    overflow-y: auto;
-    background: white;
-    border-radius: 5px;
+.login-form {
+    background: #fffefa;
     border: 1px solid #ccc;
-    bottom: 50px; /* Position above the button */
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-    display: none; /* Start as hidden */
-    position: absolute;
-    right: 10px; /* Adjust as necessary */
-    width: 50vh;
-    z-index: 10;
+    border-radius: 8px;
+    padding: 30px 40px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    min-width: 280px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
-.bookmarks-popup-menu ul {
-    list-style: none;
-    margin: 0;
-    padding: 10px;
-    font-size: small;
-}
-.bookmarks-popup-menu li {
+.login-form button {
+    align-self: flex-end;
+    padding: 8px 28px;
+    margin-top: 12px;
+    background: #2C9286;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    font-size: 1rem;
+    font-weight: 600;
     cursor: pointer;
-    padding: 5px 10px;
+    font-family: "Menlo", Courier, sans-serif, monospace;
 }
-.bookmarks-popup-menu li:hover {
-    background-color: #f0f0f0;
+.login-form button:hover {
+    opacity: .92;
 }
-.bookmarks-popup-menu i:hover {
-    color: #a60101ff;
+.login-form input {
+    width: 100%;
+    padding: 10px 12px;
+    box-sizing: border-box;
+    font-size: 1rem;
+    font-family: "Menlo", Courier, sans-serif, monospace;
+}
+.login-form label {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    font-weight: 600;
+}
+.login-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
 }
 .remove-file-button {
     background: none;

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from openai.types.chat.chat_completion import ChatCompletion
-from typing import Callable, Optional
+from typing import Optional
 import asyncio
 import json
 import logging
@@ -270,96 +270,16 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
 # Internal chat handlers
 
 
-class UserProfileConsumer(ABC):
-    @abstractmethod
-    async def on_new_user_profile(self, user_profile, chat_session_id: int, chat_request_received_id: id,
-                                  chat_request: ChatRequest, ws_sender: WebSocketSender):
-        pass
-
-
 class UserProfilingHandler(WebSocketReceiveEventHandler):
-    def __init__(self, control_plane: ControlPlane, tool_properties_spec,
-                 consumers: list[UserProfileConsumer] = None,
-                 model: str = CHAT_MODEL,
-                 post_func: Callable[[str], str] = None,
-                 tool_func_description: str = "",
-                 tool_func_name: str = "",
-                 tool_parameter_description: str = ""):
-        self.consumers: list[UserProfileConsumer] = consumers if consumers else []
+    def __init__(self, control_plane: ControlPlane,
+                 model: str = CHAT_MODEL):
         self.control_plane = control_plane
         self.model = model
-        self.post_func = post_func
-        self.tool_properties_spec = tool_properties_spec
-        self.tool_func_name = tool_func_name if tool_func_name else "store_user_profile"
-        self.tool_func_description = (tool_func_description
-                                      if tool_func_description
-                                      else "Store user profile generated from an analysis of the conversation.")
-        self.tool_parameter_description = (tool_parameter_description
-                                           if tool_parameter_description
-                                           else "Analysis of the user and the conversation to store.")
-        self.tool = {
-            "type": "function",
-            "function": {
-                "name": self.tool_func_name,
-                "description": self.tool_func_description,
-                "parameters": {
-                    "type": "object",
-                    "description": self.tool_parameter_description,
-                    "properties": tool_properties_spec,
-                    "required": list(tool_properties_spec.keys()),
-                    "additionalProperties": False,
-                },
-            },
-        }
-
-    def add_consumer(self, consumer: UserProfileConsumer):
-        self.consumers.append(consumer)
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self, chat_session_id: int, chat_request_received_id: id,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
-        user_profile = await self.process_chat_request(chat_session_id, chat_request)
-        processed_profile = {}
-        async_tasks = []
-        for profile_name, profile_text in user_profile["profile"].items():
-            if self.post_func:
-                profile_text = self.post_func(profile_text)
-            processed_profile[profile_name] = profile_text
-            _, sentence_id, sentence_tasks = await self.control_plane.add_paragraph(profile_text, {})
-            async_tasks.extend(sentence_tasks)
-            async_tasks.append(asyncio.create_task(
-                self.control_plane.link_reactive_sentence_to_chat_request(chat_request_received_id, sentence_id)
-            ))
-            # Get how many nodes are linked to session
-            # If first node, create starts link
-        user_profile["profile"] = processed_profile
-        for consumer in self.consumers:
-            async_tasks.append(asyncio.create_task(
-                consumer.on_new_user_profile(
-                    user_profile, chat_session_id, chat_request_received_id, chat_request, ws_sender)
-            ))
-        await asyncio.gather(*async_tasks)
-
-    async def process_chat_request(self, chat_session_id: int, chat_request: ChatRequest):
-        completion = await async_openai_client.chat.completions.create(
-            messages=[message.model_dump() for message in chat_request.messages if message.role != "system"],
-            model=self.model, n=1,
-            tool_choice={
-                "type": "function",
-                "function": {"name": self.tool_func_name}
-            },
-            tools=[self.tool],
-            timeout=HTTPX_TIMEOUT)
-        profile_parameters = json.loads(completion.choices[0].message.tool_calls[0].function.arguments)
-        user_profile = {
-            "chat_session_id": chat_session_id,
-            "system_messages": [
-                message.model_dump() for message in chat_request.messages if message.role == "system"],
-            "messages": chat_request.messages,
-            "profile": profile_parameters,
-        }
-        return user_profile
-
+        logger.info(f"chat_request: {chat_request_received_id}: {chat_request}")
 
 ##
 # Functions

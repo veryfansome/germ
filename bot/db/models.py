@@ -25,7 +25,7 @@ class ChatSession(Base):
     A session is created each time a websocket connection is established. Messages received and sent on that connection
     are associated with the session.
     """
-    __tablename__ = "chat_session"
+    __tablename__ = "legacy_chat_session"
     chat_session_id = Column(Integer, primary_key=True, autoincrement=True)
     is_hidden = Column(Boolean, default=False)
     summary = Column(String)
@@ -35,7 +35,7 @@ class ChatSession(Base):
 
 class ChatRequestReceived(Base):
     __tablename__ = "chat_request_received"
-    chat_session_id = Column(Integer, ForeignKey("chat_session.chat_session_id"), nullable=False)
+    chat_session_id = Column(Integer, ForeignKey("legacy_chat_session.chat_session_id"), nullable=False)
     chat_request_received_id = Column(Integer, primary_key=True, autoincrement=True)
     chat_request = Column(JSON)
     time_received = Column(DateTime(timezone=True))
@@ -43,7 +43,7 @@ class ChatRequestReceived(Base):
 
 class ChatResponseSent(Base):
     __tablename__ = "chat_response_sent"
-    chat_session_id = Column(Integer, ForeignKey("chat_session.chat_session_id"), nullable=False)
+    chat_session_id = Column(Integer, ForeignKey("legacy_chat_session.chat_session_id"), nullable=False)
     chat_request_received_id = Column(Integer, ForeignKey("chat_request_received.chat_request_received_id"),
                                       nullable=True)
     chat_response_sent_id = Column(Integer, primary_key=True, autoincrement=True)
@@ -52,7 +52,7 @@ class ChatResponseSent(Base):
 
     __table_args__ = (
         # Since we look up responses by session for bookmarks.
-        Index("idx_chat_response_sent_chat_session_id", "chat_session_id"),
+        Index("idx_chat_response_sent_legacy_chat_session_id", "chat_session_id"),
     )
 
 

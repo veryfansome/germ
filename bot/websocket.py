@@ -8,12 +8,10 @@ import asyncio
 import datetime
 import logging
 
-from bot.api.models import ChatMessage, ChatRequest, ChatResponse, ChatSessionSummary
-from bot.chat import async_openai_client
+from bot.api.models import ChatMessage, ChatRequest, ChatResponse
 from bot.db.models import AsyncSessionLocal, ChatSession, ChatRequestReceived, ChatResponseSent
 from bot.graph.control_plane import ControlPlane
 from settings.germ_settings import WEBSOCKET_CONNECTION_IDLE_TIMEOUT, WEBSOCKET_SESSION_MONITOR_INTERVAL_SECONDS
-from settings.openai_settings import MINI_MODEL, HTTPX_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +20,12 @@ logger = logging.getLogger(__name__)
 
 METRIC_CHAT_SESSIONS_IN_PROGRESS = Gauge(
     "chat_sessions_in_progress", "Number of connected sessions that have yet to be disconnected")
+
+
+class WebSocketDisconnectEventHandler(ABC):
+    @abstractmethod
+    async def on_disconnect(self, chat_session_id: int):
+        pass
 
 
 class WebSocketSendEventHandler(ABC):
@@ -91,19 +95,23 @@ class WebSocketConnectionManager:
     def __init__(self, control_plane: ControlPlane):
         self.active_connections: dict[int, WebSocket] = {}
         self.control_plane = control_plane
+        self.disconnect_event_handlers: list[WebSocketDisconnectEventHandler] = []
         self.monitor_tasks: dict[int, tuple[asyncio.Task, asyncio.Event]] = {}
         self.receive_event_handlers: list[WebSocketReceiveEventHandler] = []
         self.send_event_handlers: list[WebSocketSendEventHandler] = []
         self.session_monitors: list[WebSocketSessionMonitor] = []
+
+    def add_disconnect_event_handler(self, handler: WebSocketDisconnectEventHandler):
+        self.disconnect_event_handlers.append(handler)
+
+    def add_receive_event_handler(self, handler: WebSocketReceiveEventHandler):
+        self.receive_event_handlers.append(handler)
 
     def add_send_event_handler(self, handler: WebSocketSendEventHandler):
         self.send_event_handlers.append(handler)
 
     def add_session_monitor(self, handler: WebSocketSessionMonitor):
         self.session_monitors.append(handler)
-
-    def add_receive_event_handler(self, handler: WebSocketReceiveEventHandler):
-        self.receive_event_handlers.append(handler)
 
     async def conduct_chat_session(self, chat_session_id: int):
         try:
@@ -145,7 +153,8 @@ class WebSocketConnectionManager:
 
         METRIC_CHAT_SESSIONS_IN_PROGRESS.dec()
         await update_chat_session_time_stopped(chat_session_id)
-        await update_chat_session_summary(chat_session_id)
+        for handler in self.disconnect_event_handlers:
+            _ = asyncio.create_task(handler.on_disconnect(chat_session_id))
 
     async def disconnect_all(self):
         await asyncio.gather(*[self.disconnect(chat_session_id) for chat_session_id in self.active_connections])
@@ -217,26 +226,6 @@ async def get_chat_session_messages(chat_session_id: int) -> list[ChatMessage]:
     return messages
 
 
-async def get_chat_session_summaries() -> list[ChatSessionSummary]:
-    cs_list: list[ChatSessionSummary] = []
-    async with (AsyncSessionLocal() as rdb_session):
-        async with rdb_session.begin():
-            chat_session_select_stmt = sql_select(ChatSession).where(
-                ChatSession.is_hidden.is_(False),
-                ChatSession.summary.is_not(None),
-                ChatSession.time_stopped.is_not(None))
-            chat_session_select_result = await rdb_session.execute(chat_session_select_stmt)
-            chat_session_records = chat_session_select_result.scalars().all()
-            for cs in chat_session_records:
-                cs_list.append(ChatSessionSummary(
-                    chat_session_id=cs.chat_session_id,
-                    summary=cs.summary,
-                    time_started=cs.time_started,
-                    time_stopped=cs.time_stopped,
-                ))
-    return cs_list
-
-
 async def new_chat_request_received(chat_session_id: int, chat_request: ChatRequest) -> int:
     async with (AsyncSessionLocal() as rdb_session):
         async with rdb_session.begin():
@@ -289,35 +278,6 @@ async def update_chat_session_is_hidden(chat_session_id: int):
                 await rdb_session.commit()
             else:
                 logger.error(f"ChatSession.chat_session_id == {chat_session_id} not found")
-
-
-async def update_chat_session_summary(chat_session_id: int) -> int:
-    messages = await get_chat_session_messages(chat_session_id)
-    message_cnt = len(messages)
-    if message_cnt > 1:  # A conversation should have at least a message and a reply
-        completion = await async_openai_client.chat.completions.create(
-            messages=([m.model_dump() for m in messages] + [{
-                "role": "user", "content": " ".join((
-                    "Summarize this conversation using no more than 20 words.",
-                    "What did the I want?",
-                    "What was your response?"
-                ))
-            }]),
-            model=MINI_MODEL, n=1,
-            timeout=HTTPX_TIMEOUT)
-        async with (AsyncSessionLocal() as rdb_session):
-            async with rdb_session.begin():
-                chat_session_select_stmt = sql_select(ChatSession).where(ChatSession.chat_session_id == chat_session_id)
-                chat_session_select_result = await rdb_session.execute(chat_session_select_stmt)
-                chat_session_record = chat_session_select_result.scalars().first()
-                if chat_session_record:
-                    chat_session_record.summary = completion.choices[0].message.content
-                    await rdb_session.commit()
-                else:
-                    logger.error(f"ChatSession.chat_session_id == {chat_session_id} not found")
-    else:
-        logger.info("skipped adding chat session summary")
-    return message_cnt
 
 
 async def update_chat_session_time_stopped(chat_session_id: int):

@@ -3,9 +3,10 @@ import uuid
 
 # Service
 
+COOKIE_SIGNING_SECRET = os.getenv("COOKIE_SIGNING_SECRET", "CHANGE_ME")
 DATA_DIR = os.getenv("DATA_DIR", "/src/data/germ")
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "/tmp")
-UUID5_NS = uuid.UUID("246a5463-afae-4571-a6e0-f319d74147d3")  # Changes sentences signatures
+UUID5_NS = uuid.UUID("246a5463-afae-4571-a6e0-f319d74147d3")
 WEBSOCKET_CONNECTION_IDLE_TIMEOUT = 3600
 WEBSOCKET_SESSION_MONITOR_INTERVAL_SECONDS = 15.0
 

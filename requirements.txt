@@ -3,14 +3,17 @@ aiofiles
 apscheduler
 asyncpg
 beautifulsoup4
+bcrypt
 datasets
 dnspython
 fastapi
-google-cloud-storage
 gunicorn
 httpx
 huggingface_hub
 inflect
+itsdangerous
+jinja2
+jinja2-cli
 lxml
 mistune
 neo4j
@@ -24,7 +27,6 @@ opentelemetry-instrumentation-httpx
 opentelemetry-instrumentation-sqlalchemy
 opentelemetry-sdk
 prometheus_client
-psutil
 psycopg2-binary
 pydantic
 pytest
@@ -33,7 +35,7 @@ pytest-cov
 pytest-xdist
 python-dotenv
 python-multipart
-sqlalchemy[asyncio] == 2.0.37
+sqlalchemy[asyncio]
 starlette
 torch
 transformers
