@@ -60,21 +60,6 @@ class ControlPlane:
     async def close(self):
         await self.driver.shutdown()
 
-    async def link_chat_user_to_chat_session(self, user_id: int, chat_session_id: int):
-        results = await self.driver.query("""
-        MATCH (user:ChatUser {user_id: $user_id}), (session:ChatSession {chat_session_id: $chat_session_id})
-        MERGE (session)-[r:WITH]->(user)
-        RETURN r
-        """, {
-            "user_id": user_id, "chat_session_id": chat_session_id,
-
-        })
-        if results:
-            logger.info("MERGE "
-                        f"(session:ChatSession {{chat_session_id: {chat_session_id}}})-[r:WITH]->"
-                        f"(user:ChatUser {{user_id: {user_id}}})")
-        return results
-
     async def link_chat_request_to_chat_session(self, chat_request_received_id: int, chat_session_id: int, time_occurred):
         results = await self.driver.query("""
         MATCH (req:ChatRequest {chat_request_received_id: $chat_request_received_id}), (session:ChatSession {chat_session_id: $chat_session_id})
@@ -121,6 +106,21 @@ class ControlPlane:
             logger.info("MERGE "
                         f"(session:ChatSession {{chat_session_id: {chat_session_id}}})-[r:SENT]->"
                         f"(resp:ChatResponse {{chat_response_sent_id: {chat_response_sent_id}}})")
+        return results
+
+    async def link_chat_user_to_chat_session(self, user_id: int, chat_session_id: int):
+        results = await self.driver.query("""
+        MATCH (user:ChatUser {user_id: $user_id}), (session:ChatSession {chat_session_id: $chat_session_id})
+        MERGE (session)-[r:WITH]->(user)
+        RETURN r
+        """, {
+            "user_id": user_id, "chat_session_id": chat_session_id,
+
+        })
+        if results:
+            logger.info("MERGE "
+                        f"(session:ChatSession {{chat_session_id: {chat_session_id}}})-[r:WITH]->"
+                        f"(user:ChatUser {{user_id: {user_id}}})")
         return results
 
 
