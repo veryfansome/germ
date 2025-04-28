@@ -1,20 +1,15 @@
-from itsdangerous import TimestampSigner, BadSignature, SignatureExpired
 from sqlalchemy import MetaData, Table, insert, select
 import bcrypt
-import json
 import logging
 
-from bot.api.models import CookieData
 from bot.db.models import AsyncSessionLocal, engine
-from settings.germ_settings import COOKIE_SIGNING_SECRET
 
 logger = logging.getLogger(__name__)
 
-USER_COOKIE = "germ_user"
+SESSION_COOKIE_NAME = "ssid"
 MAX_COOKIE_AGE: int = 60 * 60 * 24 * 7   # 7 days
 
 chat_user_table = Table('chat_user', MetaData(), autoload_with=engine)
-ts_signer = TimestampSigner(COOKIE_SIGNING_SECRET, salt="germ-user-cookie")
 
 
 async def add_new_user(username: str, plain_text_password: str) -> int | None:
@@ -47,16 +42,6 @@ async def get_single_chat_user_attr_by_username(username: str, attr):
                 return record[0]
 
 
-def get_decoded_cookie(signed_cookie: str) -> CookieData | None:
-    if not signed_cookie:
-        return None
-    try:
-        encoded_cookie = ts_signer.unsign(signed_cookie, max_age=MAX_COOKIE_AGE)
-        return CookieData.model_validate(json.loads(encoded_cookie.decode()))
-    except (BadSignature, SignatureExpired):
-        return None
-
-
 async def get_user_id(username: str):
     return await get_single_chat_user_attr_by_username(username, chat_user_table.c.user_id)
 
@@ -70,14 +55,6 @@ def hash_password(plain_text_password: str) -> str:
         plain_text_password.encode('utf-8'),
         bcrypt.gensalt()
     ).decode('utf-8')
-
-
-def new_cookie(user_id: int, username: str) -> str:
-    return json.dumps({"user_id": user_id, "username": username})
-
-
-def sign_cookie(cookie: str) -> str:
-    return ts_signer.sign(cookie.encode()).decode()
 
 
 def verify_password(plain_text_password: str, stored_hash: str) -> bool:

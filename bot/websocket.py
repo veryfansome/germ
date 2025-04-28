@@ -126,7 +126,6 @@ class WebSocketConnectionManager:
 
     async def connect(self, user_id: int, ws: WebSocket) -> int:
         chat_session_id = await new_chat_session(user_id)
-        await ws.accept()
         self.active_connections[chat_session_id] = ws
 
         # Create and store a cancellation event, and start a monitor task

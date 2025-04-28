@@ -19,10 +19,5 @@ class ChatResponse(ChatMessage):
     role: str = "assistant"
 
 
-class CookieData(BaseModel):
-    user_id: int
-    username: str
-
-
 class TextPayload(BaseModel):
     text: str

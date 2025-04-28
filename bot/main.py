@@ -1,6 +1,6 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
-from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, status
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
@@ -8,16 +8,19 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from redis.asyncio import Redis
+from starlette.middleware import Middleware
 from starlette.responses import Response
+from starsessions import SessionMiddleware, load_session
+from starsessions.stores.redis import RedisStore
 from typing import List
 from urllib.parse import urlencode
 import aiofiles
 import asyncio
 import os
 
-from bot.api.models import CookieData
-from bot.auth import (MAX_COOKIE_AGE, USER_COOKIE, add_new_user, get_decoded_cookie,
-                      get_user_id, get_user_password_hash, sign_cookie, verify_password)
+from bot.auth import (MAX_COOKIE_AGE, SESSION_COOKIE_NAME, add_new_user,
+                      get_user_id, get_user_password_hash, verify_password)
 from bot.chat.controller import ChatController
 from bot.chat.openai_beta import AssistantHelper
 from bot.chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
@@ -44,9 +47,17 @@ setup_tracing("bot-service")
 tracer = trace.get_tracer(__name__)
 
 ##
-# App
+# Databases
 
 neo4j_driver = AsyncNeo4jDriver()
+redis_client = Redis.from_url(
+    f"redis://{germ_settings.REDIS_HOST}:{germ_settings.REDIS_PORT}",
+    decode_responses=False
+)
+
+##
+# App
+
 control_plane = ControlPlane(neo4j_driver)
 websocket_manager = WebSocketConnectionManager(control_plane)
 
@@ -98,19 +109,24 @@ async def lifespan(app: FastAPI):
     await assistant_helper.no_loose_files()
     await assistant_helper.no_loose_threads()
     await neo4j_driver.shutdown()
+    await redis_client.close()
     await websocket_manager_disconnect_task
     scheduler.shutdown()
 
 
-async def require_user(germ_user: str | None = Cookie(None)):
-    cookie_data = get_decoded_cookie(germ_user)
-    if cookie_data is None:
-        # for HTML requests we prefer a redirect instead of JSON 401
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-    return cookie_data
-
-
-bot = FastAPI(lifespan=lifespan)
+bot = FastAPI(
+    lifespan=lifespan,
+    middleware=[
+        Middleware(
+            SessionMiddleware,
+            store=RedisStore(connection=redis_client, prefix="sess:"),
+            cookie_name=SESSION_COOKIE_NAME,
+            cookie_https_only=False,
+            lifetime=MAX_COOKIE_AGE,
+            rolling=True,
+        )
+    ]
+)
 bot.mount("/static", StaticFiles(directory="bot/static"), name="static")
 if os.path.exists("bot/static/tests"):
     bot.mount("/tests", StaticFiles(directory="bot/static/tests"), name="tests")
@@ -149,8 +165,10 @@ async def get_healthz():
 
 
 @bot.get("/", include_in_schema=False)
-async def get_landing(germ_user: str | None = Cookie(None)):
-    if get_decoded_cookie(germ_user) is None:
+async def get_landing(request: Request):
+    await load_session(request)
+    session = request.session
+    if not session:
         return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
     file_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
     return FileResponse(
@@ -162,21 +180,20 @@ async def get_landing(germ_user: str | None = Cookie(None)):
 
 
 @bot.get("/login", include_in_schema=False)
-async def get_login_form(germ_user: str | None = Cookie(None)):
-    if get_decoded_cookie(germ_user) is not None:
+async def get_login_form(request:  Request):
+    await load_session(request)
+    session = request.session
+    if session:
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
     file_path = os.path.join(os.path.dirname(__file__), "static", "login.html")
     return FileResponse(file_path)
 
 
 @bot.get("/logout", include_in_schema=False)
-async def get_logout(return_url: str | None = "/login"):
-    if return_url not in {"/login", "/register"}:
-        logger.warning(f"Overrode user supplied `return_url` {return_url}, which is not allowed")
-        return_url = "/login"
-    response = RedirectResponse(url=return_url, status_code=status.HTTP_303_SEE_OTHER)
-    response.delete_cookie(USER_COOKIE)
-    return response
+async def get_logout(request: Request):
+    await load_session(request)
+    request.session.clear()
+    return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @bot.get("/metrics")
@@ -185,23 +202,27 @@ async def get_metrics():
 
 
 @bot.get("/register", include_in_schema=False)
-async def get_register(germ_user: str | None = Cookie(None)):
-    if get_decoded_cookie(germ_user) is not None:
-        return RedirectResponse(url="/logout?return_url=/register", status_code=status.HTTP_303_SEE_OTHER)
+async def get_register(request:  Request):
+    await load_session(request)
+    session = request.session
+    if session:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
     file_path = os.path.join(os.path.dirname(__file__), "static", "register.html")
     return FileResponse(file_path)
 
 
 @bot.get("/user/info", include_in_schema=False)
-async def get_user_info(germ_user: str | None = Cookie(None)):
-    cookie_data = get_decoded_cookie(germ_user)
-    if cookie_data is None:
-        return CookieData(user_id=-1, username="unknown")
-    return cookie_data
+async def get_user_info(request:  Request):
+    await load_session(request)
+    session = request.session
+    if not session:
+        return RedirectResponse(f"/login", status_code=status.HTTP_303_SEE_OTHER)
+    return session
 
 
 @bot.post("/login", include_in_schema=False)
-async def post_login_form(username: str = Form(...), password: str = Form(...)):
+async def post_login_form(request: Request, username: str = Form(...), password: str = Form(...)):
+    load_session_task = asyncio.create_task(load_session(request))
     password_hash = await get_user_password_hash(username)
     if password_hash is None:
         error_params = urlencode({"error": "No such user."})
@@ -209,21 +230,17 @@ async def post_login_form(username: str = Form(...), password: str = Form(...)):
         error_params = urlencode({"error": "Invalid password."})
     else:
         user_id = await get_user_id(username)
-        response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
-        response.set_cookie(
-            key=USER_COOKIE,
-            value=sign_cookie(CookieData(user_id=user_id, username=username).model_dump_json()),
-            httponly=True,
-            samesite="lax",
-            max_age=MAX_COOKIE_AGE,
-        )
-        return response
+        await load_session_task
+        request.session.clear()
+        request.session.update({"user_id": user_id, "username": username})
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(f"/login?{error_params}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 
 @bot.post("/register", include_in_schema=False)
-async def post_register(username: str = Form(...), password: str = Form(...), verify: str = Form(...)):
+async def post_register(request:  Request, username: str = Form(...), password: str = Form(...), verify: str = Form(...)):
+    load_session_task = asyncio.create_task(load_session(request))
     if (await get_user_password_hash(username)) is not None:
         error_params = urlencode({"error": "Username already exists."})
     elif password != verify:
@@ -234,20 +251,20 @@ async def post_register(username: str = Form(...), password: str = Form(...), ve
             error_params = urlencode({"error": "Failed to create new user."})
         else:
             await control_plane.add_chat_user(user_id)
-            response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
-            response.set_cookie(
-                key=USER_COOKIE,
-                value=sign_cookie(CookieData(user_id=user_id, username=username).model_dump_json()),
-                httponly=True,
-                samesite="lax",
-                max_age=MAX_COOKIE_AGE,
-            )
-            return response
+            await load_session_task
+            request.session.clear()
+            request.session.update({"user_id": user_id, "username": username})
+            return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(f"/register?{error_params}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @bot.post("/upload")
-async def post_upload(files: List[UploadFile] = File(...), user_id: str = Depends(require_user)):
+async def post_upload(request:  Request, files: List[UploadFile] = File(...)):
+    await load_session(request)
+    session = request.session
+    if not session:
+        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
     saved_files = []
     for file in files:
         save_path = os.path.join(germ_settings.UPLOAD_FOLDER, file.filename)
@@ -267,13 +284,15 @@ async def post_upload(files: List[UploadFile] = File(...), user_id: str = Depend
 
 @bot.websocket("/chat")
 async def websocket_chat(ws: WebSocket):
-    cookie_data = get_decoded_cookie(ws.cookies.get(USER_COOKIE))
-    if cookie_data is None:
-        # Fail with 4401 so browser JS gets onclose
+    await ws.accept()
+    await load_session(ws)
+    session = ws.scope.get("session")
+    if not session or "user_id" not in session:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    chat_session_id = await websocket_manager.connect(cookie_data.user_id, ws)
-    await control_plane.link_chat_user_to_chat_session(cookie_data.user_id, chat_session_id)
-    logger.info(f"starting session {chat_session_id} with user {cookie_data.user_id}")
-    await websocket_manager.conduct_chat_session(cookie_data.user_id, chat_session_id)
+    user_id = session["user_id"]
+    chat_session_id = await websocket_manager.connect(user_id, ws)
+    await control_plane.link_chat_user_to_chat_session(user_id, chat_session_id)
+    logger.info(f"starting session {chat_session_id} with user {user_id}")
+    await websocket_manager.conduct_chat_session(user_id, chat_session_id)

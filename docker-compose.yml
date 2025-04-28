@@ -214,6 +214,13 @@ services:
     working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
 
+  redis:
+    networks: [bots]
+    container_name: germ-redis
+    image: redis:latest
+    ports:
+      - "6379:6379"
+
   test:
     networks: [bots]
     container_name: germ-test
