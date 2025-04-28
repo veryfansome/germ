@@ -160,10 +160,10 @@ const showErrorPopup = (message) => {
     errorPopup.classList.remove('hidden');
     errorMessageText.innerHTML = message;
 
-    // Auto-hide after 5 seconds
+    // Auto-hide after 1 minute
     setTimeout(() => {
         errorPopup.classList.add('hidden');
-    }, 5000);
+    }, 60000);
 };
 
 function sleep(ms) {

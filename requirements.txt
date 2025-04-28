@@ -35,6 +35,8 @@ pytest-cov
 pytest-xdist
 python-dotenv
 python-multipart
+redis
+starsessions[redis]
 sqlalchemy[asyncio]
 starlette
 torch

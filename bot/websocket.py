@@ -113,25 +113,24 @@ class WebSocketConnectionManager:
     def add_session_monitor(self, handler: WebSocketSessionMonitor):
         self.session_monitors.append(handler)
 
-    async def conduct_chat_session(self, chat_session_id: int):
+    async def conduct_chat_session(self, user_id: int, chat_session_id: int):
         try:
             while True:
-                await asyncio.wait_for(self.receive(chat_session_id),
+                await asyncio.wait_for(self.receive(user_id, chat_session_id),
                                        timeout=WEBSOCKET_CONNECTION_IDLE_TIMEOUT)
         except asyncio.TimeoutError:
-            logger.info(f"chat session {chat_session_id} timed out")
+            logger.info(f"chat session {chat_session_id} with user {user_id} timed out")
             await self.disconnect(chat_session_id)
         except WebSocketDisconnect:
             await self.disconnect(chat_session_id)
 
-    async def connect(self, ws: WebSocket) -> int:
-        chat_session_id = await new_chat_session()
-        await ws.accept()
+    async def connect(self, user_id: int, ws: WebSocket) -> int:
+        chat_session_id = await new_chat_session(user_id)
         self.active_connections[chat_session_id] = ws
 
         # Create and store a cancellation event, and start a monitor task
         cancel_event = asyncio.Event()
-        monitor_task = asyncio.create_task(self.monitor_chat_session(chat_session_id, ws, cancel_event))
+        monitor_task = asyncio.create_task(self.monitor_chat_session(user_id, chat_session_id, ws, cancel_event))
         self.monitor_tasks[chat_session_id] = (monitor_task, cancel_event)
 
         METRIC_CHAT_SESSIONS_IN_PROGRESS.inc()
@@ -159,7 +158,7 @@ class WebSocketConnectionManager:
     async def disconnect_all(self):
         await asyncio.gather(*[self.disconnect(chat_session_id) for chat_session_id in self.active_connections])
 
-    async def monitor_chat_session(self, chat_session_id: int, ws: WebSocket, cancel_event: asyncio.Event):
+    async def monitor_chat_session(self, user_id, chat_session_id: int, ws: WebSocket, cancel_event: asyncio.Event):
         """
         Runs in the background to do periodic or event-driven checks.
         Closes automatically when cancel_event is set.
@@ -181,7 +180,7 @@ class WebSocketConnectionManager:
             # Clean-up logic if needed
             pass
 
-    async def receive(self, chat_session_id: int):
+    async def receive(self, user_id: int, chat_session_id: int):
         connection: WebSocket = self.active_connections[chat_session_id]
         chat_request = ChatRequest.model_validate(await connection.receive_json())
 
@@ -258,7 +257,7 @@ async def new_chat_response_sent(chat_session_id: int, chat_response: ChatRespon
             return rdb_record.chat_response_sent_id
 
 
-async def new_chat_session() -> int:
+async def new_chat_session(user_id: int) -> int:
     async with (AsyncSessionLocal() as rdb_session):
         async with rdb_session.begin():
             rdb_record = ChatSession(time_started=datetime.datetime.now(datetime.timezone.utc))

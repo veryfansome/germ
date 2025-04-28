@@ -191,12 +191,22 @@
         ws.onclose = (event) => {
             wsConnectionAttemptInProgress = false
             loadingIndicator.remove(); // Stop showing loading indicator if error
-            console.log('WebSocket connection closed:', event);
+            switch (event.code) {
+                case 1008:
+                    console.log("Session not found: code=1008");
+                    showErrorPopup(`Session not found, try <a href="/login" target="_blank" rel="noopener noreferrer">Logging in</a> from another tab.`)
+                    break;
+                default:
+                    console.log(`Socket connection lost: code=${event.code}, reason=${event.reason}`);
+                    showErrorPopup("Socket connection lost.")
+                    break;
+            }
         };
         ws.onerror = (event) => {
             wsConnectionAttemptInProgress = false
             loadingIndicator.remove(); // Stop showing loading indicator if error
-            console.log('WebSocket connection errored:', event);
+            console.log('Socket connection errored:', event);
+            showErrorPopup("Socket connection error.")
         };
     }
     async function sendMessage() {
