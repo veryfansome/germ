@@ -21,4 +21,5 @@ for STATIC_FILE in ${TEMPLATED_STATIC_FILES[*]}; do
     jinja2 bot/templates/${STATIC_FILE}.jinja -D version=${VERSION_SIGNATURE:0:7} -o bot/static/$STATIC_FILE
 done
 
+mkdir -p /var/lib/germ/messages
 gunicorn -c gunicorn_config.py "$1" --bind "0.0.0.0:$2"

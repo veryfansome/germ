@@ -30,10 +30,10 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         await remote_response_task
 
     async def on_send(self,
-                      chat_response_sent_id: int,
+                      sent_message_id: int,
                       chat_response: ChatResponse,
                       chat_session_id: int,
-                      chat_request_received_id: int = None):
+                      received_message_id: int = None):
         pass
 
     async def on_tick(self, chat_session_id: int, ws_sender: WebSocketSender):

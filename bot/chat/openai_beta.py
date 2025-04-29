@@ -146,7 +146,7 @@ class ThreadEventHandler(AsyncAssistantEventHandler):
     @override
     async def on_end(self) -> None:
         logger.info(f"on_end called")
-        await self.ws_sender.return_chat_response(
+        await self.ws_sender.send_reply(
             self.chat_request_received_id,
             ChatResponse(complete=True,
                          content=f"Thread {self.thread.id} ended.",
@@ -155,7 +155,7 @@ class ThreadEventHandler(AsyncAssistantEventHandler):
 
     @override
     async def on_message_done(self, message) -> None:
-        await self.ws_sender.return_chat_response(
+        await self.ws_sender.send_reply(
             self.chat_request_received_id,
             ChatResponse(complete=False,
                          content=message.content[0].text.value,
@@ -164,7 +164,7 @@ class ThreadEventHandler(AsyncAssistantEventHandler):
 
     @override
     async def on_tool_call_created(self, tool_call):
-        await self.ws_sender.return_chat_response(
+        await self.ws_sender.send_reply(
             self.chat_request_received_id,
             ChatResponse(complete=False,
                          content=f"One moment, using tool: `{tool_call.type}`.",

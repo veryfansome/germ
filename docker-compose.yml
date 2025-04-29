@@ -2,9 +2,8 @@ networks:
   bots: {}
 
 volumes:
-  flair-data: {}
+  bot-data: {}
   grafana-storage: {}
-  nltk-data: {}
 
 services:
   bot:
@@ -22,8 +21,7 @@ services:
     image: "germ:latest"
     volumes:
       - ./:/src:rw
-      - flair-data:/root/.flair
-      - nltk-data:/root/nltk_data
+      - bot-data:/var/lib/germ
     environment: &local-dev
       HF_HOME: &hf-home ${HF_HOME:-/src/data/huggingface}
       NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
@@ -124,8 +122,6 @@ services:
     image: "germ:latest"
     volumes:
       - ./:/src:rw
-      - flair-data:/root/.flair
-      - nltk-data:/root/nltk_data
     environment:
       HF_HOME: *hf-home
     working_dir: /src

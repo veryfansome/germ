@@ -11,8 +11,7 @@ import logging
 
 from bot.api.models import ChatRequest, ChatResponse
 from bot.graph.control_plane import ControlPlane
-from settings.germ_settings import (DATA_DIR, UUID5_NS,
-                                    WEBSOCKET_CONNECTION_IDLE_TIMEOUT, WEBSOCKET_SESSION_MONITOR_INTERVAL_SECONDS)
+from settings.germ_settings import DATA_DIR, UUID5_NS, WEBSOCKET_IDLE_TIMEOUT, WEBSOCKET_MONITOR_INTERVAL_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +30,8 @@ class WebSocketDisconnectEventHandler(ABC):
 
 class WebSocketSendEventHandler(ABC):
     @abstractmethod
-    async def on_send(self,
-                      chat_response_sent_id: int,
-                      chat_response: ChatResponse,
-                      chat_session_id: int,
-                      chat_request_received_id: int = None):
+    async def on_send(self, sent_message_id: int, chat_response: ChatResponse, chat_session_id: int,
+                      received_message_id: int = None):
         pass
 
 
@@ -51,39 +47,39 @@ class WebSocketSender:
         self.send_event_handlers: list[WebSocketSendEventHandler] = (
             send_event_handlers if send_event_handlers is not None else [])
 
-    async def send_chat_response(self, chat_response: ChatResponse):
+    async def send_message(self, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
-        chat_response_sent_id = await self.new_chat_message_sent(self.chat_session_id, chat_response)
+        sent_message_id = await self.new_chat_message_sent(self.chat_session_id, chat_response)
 
-        _, time_occurred = await self.control_plane.add_chat_response(chat_response_sent_id)
+        _, time_occurred = await self.control_plane.add_chat_response(sent_message_id)
         await self.control_plane.link_chat_response_to_chat_session(
-            chat_response_sent_id, self.chat_session_id, time_occurred)
+            sent_message_id, self.chat_session_id, time_occurred)
 
         handler_tasks = []
         for handler in self.send_event_handlers:
             handler_tasks.append(
                 asyncio.create_task(
-                    handler.on_send(chat_response_sent_id, chat_response, self.chat_session_id)
+                    handler.on_send(sent_message_id, chat_response, self.chat_session_id)
                 )
             )
         await asyncio.gather(*handler_tasks)
 
-    async def return_chat_response(self, chat_request_received_id: int, chat_response: ChatResponse):
+    async def send_reply(self, received_message_id: int, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
-        chat_response_sent_id = await self.new_chat_message_sent(self.chat_session_id, chat_response)
+        sent_message_id = await self.new_chat_message_sent(self.chat_session_id, chat_response)
 
-        _, time_occurred = await self.control_plane.add_chat_response(chat_response_sent_id)
+        _, time_occurred = await self.control_plane.add_chat_response(sent_message_id)
         await self.control_plane.link_chat_response_to_chat_request(
-            chat_request_received_id, chat_response_sent_id, self.chat_session_id, time_occurred)
+            received_message_id, sent_message_id, self.chat_session_id, time_occurred)
         await self.control_plane.link_chat_response_to_chat_session(
-            chat_response_sent_id, self.chat_session_id, time_occurred)
+            sent_message_id, self.chat_session_id, time_occurred)
 
         handler_tasks = []
         for handler in self.send_event_handlers:
             handler_tasks.append(
                 asyncio.create_task(
-                    handler.on_send(chat_response_sent_id, chat_response, self.chat_session_id,
-                                    chat_request_received_id=chat_request_received_id)
+                    handler.on_send(sent_message_id, chat_response, self.chat_session_id,
+                                    received_message_id=received_message_id)
                 )
             )
         await asyncio.gather(*handler_tasks)
@@ -153,7 +149,7 @@ class WebSocketConnectionManager:
         try:
             while True:
                 await asyncio.wait_for(self.receive(user_id, chat_session_id),
-                                       timeout=WEBSOCKET_CONNECTION_IDLE_TIMEOUT)
+                                       timeout=WEBSOCKET_IDLE_TIMEOUT)
         except asyncio.TimeoutError:
             logger.info(f"chat session {chat_session_id} with user {user_id} timed out")
             await self.disconnect(chat_session_id)
@@ -208,7 +204,7 @@ class WebSocketConnectionManager:
                 # Wait for some seconds or until the cancel_event is set, whichever comes first.
                 try:
                     await asyncio.wait_for(asyncio.shield(cancel_event.wait()),
-                                           timeout=WEBSOCKET_SESSION_MONITOR_INTERVAL_SECONDS)
+                                           timeout=WEBSOCKET_MONITOR_INTERVAL_SECONDS)
                 except asyncio.TimeoutError:
                     for monitor in self.session_monitors:
                         _ = asyncio.create_task(monitor.on_tick(chat_session_id, ws_sender))
