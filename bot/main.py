@@ -1,14 +1,16 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, status
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, status
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from openai import OpenAI
 from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.redis import RedisInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from redis.asyncio import Redis
+from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine, AsyncSession
 from starlette.middleware import Middleware
 from starlette.responses import Response
 from starsessions import SessionMiddleware, load_session
@@ -24,7 +26,7 @@ from bot.auth import (MAX_COOKIE_AGE, SESSION_COOKIE_NAME, add_new_user,
 from bot.chat.controller import ChatController
 from bot.chat.openai_beta import AssistantHelper
 from bot.chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
-from bot.db.models import DATABASE_URL, SessionLocal, engine
+from bot.db.pg import DATABASE_URL, TableHelper
 from bot.db.neo4j import AsyncNeo4jDriver
 from bot.graph.control_plane import ControlPlane
 from bot.websocket import WebSocketConnectionManager
@@ -50,6 +52,14 @@ tracer = trace.get_tracer(__name__)
 # Databases
 
 neo4j_driver = AsyncNeo4jDriver()
+pg_async_engine = create_async_engine(f"postgresql+asyncpg://{DATABASE_URL}", echo=False)
+pg_async_session = async_sessionmaker(
+    bind=pg_async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False
+)
+pg_sync_engine = create_engine(f"postgresql+psycopg2://{DATABASE_URL}", echo=False)
+pg_table_helper = TableHelper(pg_sync_engine)
 redis_client = Redis.from_url(
     f"redis://{germ_settings.REDIS_HOST}:{germ_settings.REDIS_PORT}",
     decode_responses=False
@@ -136,7 +146,9 @@ if os.path.exists("bot/static/tests"):
 ##
 # Enabled instrumentation
 FastAPIInstrumentor.instrument_app(bot)
-SQLAlchemyInstrumentor().instrument(engine=engine)
+RedisInstrumentor().instrument(client=redis_client)
+SQLAlchemyInstrumentor().instrument(engine=pg_async_engine.sync_engine)  # Async is a facade backed by a sync engine
+SQLAlchemyInstrumentor().instrument(engine=pg_sync_engine)
 
 
 ##
@@ -151,14 +163,7 @@ async def get_favicon():
 
 @bot.get("/healthz")
 async def get_healthz():
-    # Is PostgreSQL usable?
-    pg_session = SessionLocal()
-    pg_session.close()
-    # Is OpenAI usable?
-    openai_client = OpenAI()
-    openai_client.close()
     return {
-        "db_url": DATABASE_URL,
         "environ": os.environ,
         "status": "OK",
     }
@@ -235,7 +240,6 @@ async def post_login_form(request: Request, username: str = Form(...), password:
         request.session.update({"user_id": user_id, "username": username})
         return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(f"/login?{error_params}", status_code=status.HTTP_303_SEE_OTHER)
-
 
 
 @bot.post("/register", include_in_schema=False)

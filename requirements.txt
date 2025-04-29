@@ -24,6 +24,7 @@ opentelemetry-api
 opentelemetry-exporter-otlp-proto-grpc
 opentelemetry-instrumentation-fastapi
 opentelemetry-instrumentation-httpx
+opentelemetry-instrumentation-redis
 opentelemetry-instrumentation-sqlalchemy
 opentelemetry-sdk
 prometheus_client

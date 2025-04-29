@@ -15,11 +15,6 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
     def __init__(self, control_plane: ControlPlane, remote: WebSocketReceiveEventHandler):
         self.control_plane = control_plane
-        self.node_types = {
-            "block_code": "CodeBlock",
-            "list": "Paragraph",
-            "paragraph": "Paragraph",
-        }
         self.remote = remote
 
     async def on_disconnect(self, chat_session_id: int):
