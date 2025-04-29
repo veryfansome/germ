@@ -36,9 +36,3 @@ fi
 # Update cached MD5s
 echo "$CURRENT_GERM_HASH" > "/tmp/germ.ddl.md5"
 echo "$CURRENT_GERM_DATA_HASH" > "/tmp/germ_data.sql.md5"
-
-
-# TODO: Remove below and completely migrate to ^
-cd /src || exit 1
-source germ_venv/bin/activate
-python -m bot.db.models

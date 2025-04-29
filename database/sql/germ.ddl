@@ -69,11 +69,10 @@ CREATE TABLE chat_message (
       message_id                                                SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
     , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
-    /* TODO: instead of from_user, maybe this should be user_id... */
-    , from_user                                                 BOOLEAN                             NOT NULL
     , json_sig                                                  UUID                                NOT NULL
+    , received                                                  BOOLEAN                             NOT NULL
     , session_id                                                SMALLINT                            NOT NULL
-    , PRIMARY KEY (session_id)
+    , PRIMARY KEY (message_id)
     , CONSTRAINT fk_chat_message_chat_session_session_id        FOREIGN KEY (session_id)            REFERENCES chat_session  (session_id)
 )
 ;

@@ -1,13 +1,16 @@
 from datetime import datetime, timezone
-from sqlalchemy import MetaData, Table, update
+from sqlalchemy import MetaData, Table, create_engine as create_pg_engine, update
+from sqlalchemy.orm import sessionmaker
 import httpx
 import logging
 
-from bot.db.models import SessionLocal, engine
+from bot.db.pg import DATABASE_URL
 
 logger = logging.getLogger(__name__)
 
-top_level_domain_table = Table('top_level_domain', MetaData(), autoload_with=engine)
+pg_engine = create_pg_engine(f"postgresql+psycopg2://{DATABASE_URL}", echo=False)
+pg_session_maker = sessionmaker(autocommit=False, autoflush=False, bind=pg_engine)
+top_level_domain_table = Table('top_level_domain', MetaData(), autoload_with=pg_engine)
 
 
 class IanaTLDCacher:
@@ -26,7 +29,7 @@ class IanaTLDCacher:
     def load_from_db(self):
         num_before_load = len(self.known_tld_names)
         try:
-            with SessionLocal() as session:
+            with pg_session_maker() as session:
                 for tld_record in session.execute(top_level_domain_table.select()).fetchall():
                     self.known_tld_names.add(tld_record.domain_name)
             logger.info(f"loaded {len(self.known_tld_names) - num_before_load} TLD records from PostgreSQL")
@@ -37,7 +40,7 @@ class IanaTLDCacher:
         num_before_load = len(self.known_tld_names)
         try:
             resp = httpx.get(IanaTLDCacher.data_src_url)
-            with SessionLocal() as session:
+            with pg_session_maker() as session:
                 for line in resp.text.splitlines():
                     line = line.strip()
                     if line.startswith("#"):

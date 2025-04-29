@@ -9,8 +9,10 @@ from opentelemetry.instrumentation.redis import RedisInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from redis.asyncio import Redis
-from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine, AsyncSession
+from sqlalchemy import create_engine as create_pg_engine
+from sqlalchemy.ext.asyncio import (async_sessionmaker as async_pg_session_maker,
+                                    create_async_engine as create_async_pg_engine,
+                                    AsyncSession)
 from starlette.middleware import Middleware
 from starlette.responses import Response
 from starsessions import SessionMiddleware, load_session
@@ -21,8 +23,7 @@ import aiofiles
 import asyncio
 import os
 
-from bot.auth import (MAX_COOKIE_AGE, SESSION_COOKIE_NAME, add_new_user,
-                      get_user_id, get_user_password_hash, verify_password)
+from bot.auth import MAX_COOKIE_AGE, SESSION_COOKIE_NAME, AuthHelper, verify_password
 from bot.chat.controller import ChatController
 from bot.chat.openai_beta import AssistantHelper
 from bot.chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
@@ -52,14 +53,13 @@ tracer = trace.get_tracer(__name__)
 # Databases
 
 neo4j_driver = AsyncNeo4jDriver()
-pg_async_engine = create_async_engine(f"postgresql+asyncpg://{DATABASE_URL}", echo=False)
-pg_async_session = async_sessionmaker(
-    bind=pg_async_engine,
+pg_engine = create_async_pg_engine(f"postgresql+asyncpg://{DATABASE_URL}", echo=False)
+pg_session_maker = async_pg_session_maker(
+    bind=pg_engine,
     class_=AsyncSession,
     expire_on_commit=False
 )
-pg_sync_engine = create_engine(f"postgresql+psycopg2://{DATABASE_URL}", echo=False)
-pg_table_helper = TableHelper(pg_sync_engine)
+pg_table_helper = TableHelper(create_pg_engine(f"postgresql+psycopg2://{DATABASE_URL}", echo=False))
 redis_client = Redis.from_url(
     f"redis://{germ_settings.REDIS_HOST}:{germ_settings.REDIS_PORT}",
     decode_responses=False
@@ -68,8 +68,14 @@ redis_client = Redis.from_url(
 ##
 # App
 
+auth_helper = AuthHelper(pg_table_helper.chat_user_table, pg_session_maker)
 control_plane = ControlPlane(neo4j_driver)
-websocket_manager = WebSocketConnectionManager(control_plane)
+websocket_manager = WebSocketConnectionManager(
+    pg_table_helper.chat_message_table,
+    pg_table_helper.chat_session_table,
+    control_plane,
+    pg_session_maker,
+)
 
 
 @asynccontextmanager
@@ -147,8 +153,7 @@ if os.path.exists("bot/static/tests"):
 # Enabled instrumentation
 FastAPIInstrumentor.instrument_app(bot)
 RedisInstrumentor().instrument(client=redis_client)
-SQLAlchemyInstrumentor().instrument(engine=pg_async_engine.sync_engine)  # Async is a facade backed by a sync engine
-SQLAlchemyInstrumentor().instrument(engine=pg_sync_engine)
+SQLAlchemyInstrumentor().instrument(engine=pg_engine.sync_engine)  # Async is a facade backed by a sync engine
 
 
 ##
@@ -228,13 +233,13 @@ async def get_user_info(request:  Request):
 @bot.post("/login", include_in_schema=False)
 async def post_login_form(request: Request, username: str = Form(...), password: str = Form(...)):
     load_session_task = asyncio.create_task(load_session(request))
-    password_hash = await get_user_password_hash(username)
+    password_hash = await auth_helper.get_user_password_hash(username)
     if password_hash is None:
         error_params = urlencode({"error": "No such user."})
     elif not verify_password(password, password_hash):
         error_params = urlencode({"error": "Invalid password."})
     else:
-        user_id = await get_user_id(username)
+        user_id = await auth_helper.get_user_id(username)
         await load_session_task
         request.session.clear()
         request.session.update({"user_id": user_id, "username": username})
@@ -245,12 +250,12 @@ async def post_login_form(request: Request, username: str = Form(...), password:
 @bot.post("/register", include_in_schema=False)
 async def post_register(request:  Request, username: str = Form(...), password: str = Form(...), verify: str = Form(...)):
     load_session_task = asyncio.create_task(load_session(request))
-    if (await get_user_password_hash(username)) is not None:
+    if (await auth_helper.get_user_password_hash(username)) is not None:
         error_params = urlencode({"error": "Username already exists."})
     elif password != verify:
         error_params = urlencode({"error": "'Password' and 'Verify password' did not match."})
     else:
-        user_id = await add_new_user(username, password)
+        user_id = await auth_helper.add_new_user(username, password)
         if user_id is None:
             error_params = urlencode({"error": "Failed to create new user."})
         else:
@@ -296,7 +301,6 @@ async def websocket_chat(ws: WebSocket):
         return
 
     user_id = session["user_id"]
-    chat_session_id = await websocket_manager.connect(user_id, ws)
-    await control_plane.link_chat_user_to_chat_session(user_id, chat_session_id)
-    logger.info(f"starting session {chat_session_id} with user {user_id}")
-    await websocket_manager.conduct_chat_session(user_id, chat_session_id)
+    session_id = await websocket_manager.connect(user_id, ws)
+    logger.info(f"starting session {session_id} with user {user_id}")
+    await websocket_manager.conduct_chat_session(user_id, session_id)
