@@ -66,7 +66,7 @@ class ChatModelEventHandler(RoutableChatEventHandler):
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await self.do_chat_completion(chat_request)
-        await ws_sender.return_chat_response(
+        await ws_sender.send_reply(
             chat_request_received_id,
             ChatResponse(
                 complete=True,
@@ -114,7 +114,7 @@ class ImageModelEventHandler(RoutableChatEventHandler):
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         markdown_image = await self.generate_markdown_image(chat_request)
         _ = asyncio.create_task(
-            ws_sender.return_chat_response(
+            ws_sender.send_reply(
                 chat_request_received_id, ChatResponse(complete=True, content=markdown_image, model=self.model)))
 
 
@@ -168,7 +168,7 @@ class ReasoningChatModelEventHandler(RoutableChatEventHandler):
                          chat_session_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await self.do_chat_completion(chat_request)
-        await ws_sender.return_chat_response(
+        await ws_sender.send_reply(
             chat_request_received_id,
             ChatResponse(
                 complete=True,
@@ -211,7 +211,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
         else:
             completion = await self.do_chat_completion(chat_request)
             if completion is None:
-                await ws_sender.return_chat_response(
+                await ws_sender.send_reply(
                     chat_request_received_id,
                     ChatResponse(complete=True, content="Sorry, I'm unable to access my language model."))
                 return
@@ -229,7 +229,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                         )
                     # Let user know you're delegating
                     tool_names = [f"`{t.function.name}`" for t in completion.choices[0].message.tool_calls]
-                    await ws_sender.return_chat_response(
+                    await ws_sender.send_reply(
                         chat_request_received_id,
                         ChatResponse(complete=False, content=f"One moment, using tools: {''.join(tool_names)}.",
                                      model=completion.model))
@@ -239,7 +239,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                     logger.error("completion content and tool_calls are both missing", completion)
                     completion.choices[0].message.content = "Strange... I don't have a response"
             # Return completed response
-            await ws_sender.return_chat_response(
+            await ws_sender.send_reply(
                 chat_request_received_id,
                 ChatResponse(complete=True,
                              content=completion.choices[0].message.content,
