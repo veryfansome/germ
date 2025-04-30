@@ -1,3 +1,4 @@
+from datetime import datetime
 from sqlalchemy import Table, insert, select
 from sqlalchemy.ext.asyncio import async_sessionmaker as async_pg_session_maker
 import bcrypt
@@ -14,23 +15,27 @@ class AuthHelper:
         self.pg_session_maker = pg_session_maker
         self.chat_user_table = chat_user_table
 
-    async def add_new_user(self, username: str, plain_text_password: str) -> int | None:
+    async def add_new_user(self, username: str, plain_text_password: str) -> (int, datetime):
         async with (self.pg_session_maker() as rdb_session):
             async with rdb_session.begin():
                 try:
                     insert_stmt = insert(self.chat_user_table).values(
                         user_name=username,
                         password_hash=hash_password(plain_text_password),
-                    ).returning(self.chat_user_table.c.user_id)
+                    ).returning(
+                        self.chat_user_table.c.user_id,
+                        self.chat_user_table.c.dt_created
+                    )
                     result = await rdb_session.execute(insert_stmt)
+                    row = result.first()
                     await rdb_session.commit()
-                    user_id = result.scalar()
-                    logger.info(f"New user '{username}' inserted successfully with user_id {user_id}")
-                    return user_id
+                    user_id, dt_created = row
+                    logger.info(f"New user '{username}' inserted successfully with user_id {user_id} at {dt_created}")
+                    return user_id, dt_created
                 except Exception as e:
                     logger.error(f"Failed to insert new user {username}: {e}")
                     await rdb_session.rollback()
-                    return None
+                    raise
 
 
     async def get_single_chat_user_attr_by_username(self, username: str, attr):

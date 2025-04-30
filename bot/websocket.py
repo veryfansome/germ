@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from fastapi import WebSocket
 from prometheus_client import Gauge
 from sqlalchemy import Table, insert
@@ -49,42 +50,33 @@ class WebSocketSender:
 
     async def send_message(self, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
-        sent_message_id = await self.new_chat_message_sent(self.chat_session_id, chat_response)
 
-        _, time_occurred = await self.control_plane.add_chat_response(sent_message_id)
-        await self.control_plane.link_chat_response_to_chat_session(
-            sent_message_id, self.chat_session_id, time_occurred)
-
-        handler_tasks = []
+        async_tasks = []
+        sent_message_id, dt_created = await self.new_chat_message_sent(self.chat_session_id, chat_response)
         for handler in self.send_event_handlers:
-            handler_tasks.append(
-                asyncio.create_task(
-                    handler.on_send(sent_message_id, chat_response, self.chat_session_id)
-                )
-            )
-        await asyncio.gather(*handler_tasks)
+            async_tasks.append(asyncio.create_task(
+                handler.on_send(sent_message_id, chat_response, self.chat_session_id)
+            ))
+        await asyncio.gather(*async_tasks)
 
     async def send_reply(self, received_message_id: int, chat_response: ChatResponse):
         await self.connection.send_text(chat_response.model_dump_json())
-        sent_message_id = await self.new_chat_message_sent(self.chat_session_id, chat_response)
 
-        _, time_occurred = await self.control_plane.add_chat_response(sent_message_id)
-        await self.control_plane.link_chat_response_to_chat_request(
-            received_message_id, sent_message_id, self.chat_session_id, time_occurred)
-        await self.control_plane.link_chat_response_to_chat_session(
-            sent_message_id, self.chat_session_id, time_occurred)
-
-        handler_tasks = []
+        async_tasks = []
+        sent_message_id, dt_created = await self.new_chat_message_sent(self.chat_session_id, chat_response)
+        await self.control_plane.add_chat_message(sent_message_id, dt_created)
+        async_tasks.append(asyncio.create_task(
+            self.control_plane.link_chat_message_sent_to_chat_message_received(
+                received_message_id, sent_message_id, self.chat_session_id)
+        ))
         for handler in self.send_event_handlers:
-            handler_tasks.append(
-                asyncio.create_task(
-                    handler.on_send(sent_message_id, chat_response, self.chat_session_id,
-                                    received_message_id=received_message_id)
-                )
-            )
-        await asyncio.gather(*handler_tasks)
+            async_tasks.append(asyncio.create_task(
+                handler.on_send(sent_message_id, chat_response, self.chat_session_id,
+                                received_message_id=received_message_id)
+            ))
+        await asyncio.gather(*async_tasks)
 
-    async def new_chat_message_sent(self, session_id: int, chat_response: ChatResponse) -> int:
+    async def new_chat_message_sent(self, session_id: int, chat_response: ChatResponse) -> (int, datetime):
         response_json = chat_response.model_dump_json()
         async with (self.pg_session_maker() as rdb_session):
             async with rdb_session.begin():
@@ -93,12 +85,17 @@ class WebSocketSender:
                         json_sig=await persist_message_data(response_json),
                         received=False,
                         session_id=session_id,
-                    ).returning(self.chat_message_table.c.message_id)
+                    ).returning(
+                        self.chat_message_table.c.message_id,
+                        self.chat_message_table.c.dt_created
+                    )
                     result = await rdb_session.execute(insert_stmt)
+                    row = result.first()
                     await rdb_session.commit()
-                    message_id = result.scalar()
-                    logger.info(f"New message '{message_id}' inserted successfully for session {session_id}")
-                    return message_id
+                    message_id, dt_created = row
+                    logger.info(f"New message '{message_id}' inserted successfully "
+                                f"for session {session_id} at {dt_created}")
+                    return message_id, dt_created
                 except Exception as e:
                     logger.error(f"Failed to insert new message with session {session_id}: {e}")
                     await rdb_session.rollback()
@@ -145,19 +142,8 @@ class WebSocketConnectionManager:
     def add_session_monitor(self, handler: WebSocketSessionMonitor):
         self.session_monitors.append(handler)
 
-    async def conduct_chat_session(self, user_id: int, chat_session_id: int):
-        try:
-            while True:
-                await asyncio.wait_for(self.receive(user_id, chat_session_id),
-                                       timeout=WEBSOCKET_IDLE_TIMEOUT)
-        except asyncio.TimeoutError:
-            logger.info(f"chat session {chat_session_id} with user {user_id} timed out")
-            await self.disconnect(chat_session_id)
-        except WebSocketDisconnect:
-            await self.disconnect(chat_session_id)
-
     async def connect(self, user_id: int, ws: WebSocket) -> int:
-        session_id = await self.new_chat_session(user_id)
+        session_id, dt_created = await self.new_chat_session(user_id)
         self.active_connections[session_id] = ws
 
         # Create and store a cancellation event, and start a monitor task
@@ -166,7 +152,7 @@ class WebSocketConnectionManager:
         self.monitor_tasks[session_id] = (monitor_task, cancel_event)
 
         METRIC_CHAT_SESSIONS_IN_PROGRESS.inc()
-        await self.control_plane.add_chat_session(session_id)
+        await self.control_plane.add_chat_session(session_id, dt_created)
         await self.control_plane.link_chat_user_to_chat_session(user_id, session_id)
         return session_id
 
@@ -184,10 +170,10 @@ class WebSocketConnectionManager:
             await ws.close()
 
         METRIC_CHAT_SESSIONS_IN_PROGRESS.dec()
-        handler_tasks = []
+        async_tasks = []
         for handler in self.disconnect_event_handlers:
-            handler_tasks.append(asyncio.create_task(handler.on_disconnect(chat_session_id)))
-        await asyncio.gather(*handler_tasks)
+            async_tasks.append(asyncio.create_task(handler.on_disconnect(chat_session_id)))
+        await asyncio.gather(*async_tasks)
 
     async def disconnect_all(self):
         await asyncio.gather(*[self.disconnect(chat_session_id) for chat_session_id in self.active_connections])
@@ -214,7 +200,7 @@ class WebSocketConnectionManager:
             # Clean-up logic if needed
             pass
 
-    async def new_chat_message_received(self, session_id: int, chat_request: ChatRequest) -> int:
+    async def new_chat_message_received(self, session_id: int, chat_request: ChatRequest) -> (int, datetime):
         request_json = chat_request.model_dump_json()
         async with (self.pg_session_maker() as rdb_session):
             async with rdb_session.begin():
@@ -223,52 +209,71 @@ class WebSocketConnectionManager:
                         json_sig=await persist_message_data(request_json),
                         received=True,
                         session_id=session_id,
-                    ).returning(self.chat_message_table.c.message_id)
+                    ).returning(
+                        self.chat_message_table.c.message_id,
+                        self.chat_message_table.c.dt_created
+                    )
                     result = await rdb_session.execute(insert_stmt)
+                    row = result.first()
                     await rdb_session.commit()
-                    message_id = result.scalar()
-                    logger.info(f"New message '{message_id}' inserted successfully for session {session_id}")
-                    return message_id
+                    message_id, dt_created = row
+                    logger.info(f"New message '{message_id}' inserted successfully "
+                                f"for session {session_id} at {dt_created}")
+                    return message_id, dt_created
                 except Exception as e:
                     logger.error(f"Failed to insert new message with session {session_id}: {e}")
                     await rdb_session.rollback()
                     raise
 
-    async def new_chat_session(self, user_id: int) -> int:
+    async def new_chat_session(self, user_id: int) -> (int, datetime):
         async with (self.pg_session_maker() as rdb_session):
             async with rdb_session.begin():
                 try:
                     insert_stmt = insert(self.chat_session_table).values(
                         user_id=user_id,
-                    ).returning(self.chat_session_table.c.session_id)
+                    ).returning(
+                        self.chat_session_table.c.session_id,
+                        self.chat_session_table.c.dt_created
+                    )
                     result = await rdb_session.execute(insert_stmt)
+                    row = result.first()
                     await rdb_session.commit()
-                    session_id = result.scalar()
-                    logger.info(f"New session '{session_id}' with user {user_id} inserted successfully")
-                    return session_id
+                    session_id, dt_created = row
+                    logger.info(f"New session '{session_id}' with user {user_id} "
+                                f"inserted successfully at {dt_created}")
+                    return session_id, dt_created
                 except Exception as e:
                     logger.error(f"Failed to insert new session with user {user_id}: {e}")
                     await rdb_session.rollback()
                     raise
 
     async def receive(self, user_id: int, session_id: int):
-        connection: WebSocket = self.active_connections[session_id]
-        chat_request = ChatRequest.model_validate(await connection.receive_json())
+        ws: WebSocket = self.active_connections[session_id]
+        chat_request = ChatRequest.model_validate(await ws.receive_json())
 
-        message_id = await self.new_chat_message_received(session_id, chat_request)
-        _, time_occurred = await self.control_plane.add_chat_request(message_id)
-        _ = asyncio.create_task(
-            self.control_plane.link_chat_request_to_chat_session(
-                message_id, session_id, time_occurred))
-
-        ws_sender = WebSocketSender(self.chat_message_table, self.control_plane, session_id, connection,
-                                    self.pg_session_maker,
+        async_tasks = []
+        message_id, dt_created = await self.new_chat_message_received(session_id, chat_request)
+        await self.control_plane.add_chat_message(message_id, dt_created)
+        async_tasks.append(asyncio.create_task(
+            self.control_plane.link_chat_message_received_to_chat_user(message_id, user_id)
+        ))
+        ws_sender = WebSocketSender(self.chat_message_table, self.control_plane, session_id, ws, self.pg_session_maker,
                                     send_event_handlers=self.send_event_handlers)
-        handler_tasks = []
         for handler in self.receive_event_handlers:
-            handler_tasks.append(
-                asyncio.create_task(handler.on_receive(session_id, message_id, chat_request, ws_sender)))
-        await asyncio.gather(*handler_tasks)
+            async_tasks.append(asyncio.create_task(
+                handler.on_receive(session_id, message_id, chat_request, ws_sender)
+            ))
+        await asyncio.gather(*async_tasks)
+
+    async def wait_for_receive(self, user_id: int, chat_session_id: int):
+        try:
+            while True:
+                await asyncio.wait_for(self.receive(user_id, chat_session_id), timeout=WEBSOCKET_IDLE_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.info(f"chat session {chat_session_id} with user {user_id} timed out")
+            await self.disconnect(chat_session_id)
+        except WebSocketDisconnect:
+            await self.disconnect(chat_session_id)
 
 
 async def persist_message_data(json_blob) -> UUID:

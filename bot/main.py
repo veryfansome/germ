@@ -86,6 +86,7 @@ async def lifespan(app: FastAPI):
     :param app:
     :return:
     """
+    logger.info("Starting")
 
     assistant_helper = AssistantHelper()
     await assistant_helper.refresh_assistants()
@@ -116,18 +117,27 @@ async def lifespan(app: FastAPI):
     scheduler.start()
 
     # Started
+    logger.info("Started")
 
     yield
 
     # Stopping
+    logger.info("Stopping")
 
-    websocket_manager_disconnect_task = asyncio.create_task(websocket_manager.disconnect_all())
-    await assistant_helper.no_loose_files()
-    await assistant_helper.no_loose_threads()
-    await neo4j_driver.shutdown()
-    await redis_client.close()
-    await websocket_manager_disconnect_task
     scheduler.shutdown()
+    await asyncio.gather(*[
+        assistant_helper.no_loose_files(),
+        assistant_helper.no_loose_threads(),
+        websocket_manager.disconnect_all(),
+    ])
+    await asyncio.gather(*[
+        neo4j_driver.shutdown(),
+        pg_engine.dispose(),
+        pg_table_helper.shutdown(),
+        redis_client.close(),
+    ])
+
+    logger.info("Stopped")
 
 
 bot = FastAPI(
@@ -255,11 +265,11 @@ async def post_register(request:  Request, username: str = Form(...), password: 
     elif password != verify:
         error_params = urlencode({"error": "'Password' and 'Verify password' did not match."})
     else:
-        user_id = await auth_helper.add_new_user(username, password)
+        user_id, dt_created = await auth_helper.add_new_user(username, password)
         if user_id is None:
             error_params = urlencode({"error": "Failed to create new user."})
         else:
-            await control_plane.add_chat_user(user_id)
+            await control_plane.add_chat_user(user_id, dt_created)
             await load_session_task
             request.session.clear()
             request.session.update({"user_id": user_id, "username": username})
@@ -303,4 +313,4 @@ async def websocket_chat(ws: WebSocket):
     user_id = session["user_id"]
     session_id = await websocket_manager.connect(user_id, ws)
     logger.info(f"starting session {session_id} with user {user_id}")
-    await websocket_manager.conduct_chat_session(user_id, session_id)
+    await websocket_manager.wait_for_receive(user_id, session_id)
