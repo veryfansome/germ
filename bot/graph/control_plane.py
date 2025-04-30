@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 import asyncio
 import logging
 
@@ -11,129 +11,86 @@ class ControlPlane:
     def __init__(self, driver: AsyncNeo4jDriver):
         self.driver = driver
 
-    async def add_chat_request(self, chat_request_received_id: int):
-        time_occurred = round_time_now_down_to_nearst_interval()
+    async def add_chat_message(self, message_id: int, dt_created: datetime):
         results = await self.driver.query("""
-        MERGE (chatRequest:ChatRequest {chat_request_received_id: $chat_request_received_id, time_occurred: $time_occurred})
-        RETURN chatRequest
+        MERGE (message:ChatMessage {message_id: $message_id, dt_created: $dt_created})
+        RETURN message
         """, {
-            "chat_request_received_id": chat_request_received_id, "time_occurred": time_occurred,
+            "message_id": message_id, "dt_created": dt_created,
         })
         if results:
-            logger.info(f"MERGE (req:ChatRequest {{chat_request_received_id: {chat_request_received_id}}})")
-        return results, time_occurred
-
-    async def add_chat_response(self, chat_response_sent_id: int):
-        time_occurred = round_time_now_down_to_nearst_interval()
-        results = await self.driver.query("""
-        MERGE (chatResponse:ChatResponse {chat_response_sent_id: $chat_response_sent_id, time_occurred: $time_occurred})
-        RETURN chatResponse
-        """, {
-            "chat_response_sent_id": chat_response_sent_id, "time_occurred": time_occurred,
-        })
-        if results:
-            logger.info(f"MERGE (resp:ChatResponse {{$chat_response_sent_id: {chat_response_sent_id}}})")
-        return results, time_occurred
-
-    async def add_chat_session(self, chat_session_id: int):
-        results = await self.driver.query("""
-        MERGE (session:ChatSession {chat_session_id: $chat_session_id, time_started: $time_started})
-        RETURN session
-        """, {
-            "chat_session_id": chat_session_id, "time_started": round_time_now_down_to_nearst_interval()
-        })
-        if results:
-            logger.info(f"MERGE (session:ChatSession {{chat_session_id: {chat_session_id}}})")
+            logger.info(f"MERGE (message:ChatMessage {{message_id: {message_id}, dt_created: {dt_created}}})")
         return results
 
-    async def add_chat_user(self, user_id: int):
+    async def add_chat_session(self, session_id: int, dt_created: datetime):
         results = await self.driver.query("""
-        MERGE (user:ChatUser {user_id: $user_id})
-        RETURN user
+        MERGE (session:ChatSession {session_id: $session_id, dt_created: $dt_created})
+        RETURN session
         """, {
-            "user_id": user_id,
+            "session_id": session_id, "dt_created": dt_created
         })
         if results:
-            logger.info(f"MERGE (user:ChatUser {{user_id: {user_id}}})")
+            logger.info(f"MERGE (session:ChatSession {{session_id: {session_id}, dt_created: {dt_created}}})")
+        return results
+
+    async def add_chat_user(self, user_id: int, dt_created: datetime):
+        results = await self.driver.query("""
+        MERGE (user:ChatUser {user_id: $user_id, dt_created: $dt_created})
+        RETURN user
+        """, {
+            "user_id": user_id, "dt_created": dt_created
+        })
+        if results:
+            logger.info(f"MERGE (user:ChatUser {{user_id: {user_id}, dt_created: {dt_created}}})")
         return results
 
     async def close(self):
         await self.driver.shutdown()
 
-    async def link_chat_request_to_chat_session(self, chat_request_received_id: int, chat_session_id: int, time_occurred):
+    async def link_chat_message_received_to_chat_user(self, message_id: int, user_id: int):
         results = await self.driver.query("""
-        MATCH (req:ChatRequest {chat_request_received_id: $chat_request_received_id}), (session:ChatSession {chat_session_id: $chat_session_id})
-        MERGE (session)-[r:RECEIVED {time_occurred: $time_occurred}]->(req)
-        RETURN r
+        MATCH (message:ChatMessage {message_id: $message_id}), (user:ChatUser {user_id: $user_id})
+        MERGE (user)-[rel:SENT]->(message)
+        RETURN rel
         """, {
-            "chat_request_received_id": chat_request_received_id, "chat_session_id": chat_session_id,
-            "time_occurred": time_occurred,
-
+            "message_id": message_id, "user_id": user_id,
         })
         if results:
             logger.info("MERGE "
-                        f"(session:ChatSession {{chat_session_id: {chat_session_id}}})-[r:RECEIVED]->"
-                        f"(req:ChatRequest {{chat_request_received_id: {chat_request_received_id}}})")
+                        f"(user:ChatUser {{user_id: {user_id}}})-[rel:SENT]->"
+                        f"(message:ChatMessage {{message_id: {message_id}}})")
         return results
 
-    async def link_chat_response_to_chat_request(self, chat_request_received_id: int, chat_response_sent_id: int,
-                                                 chat_session_id: int, time_occurred):
+    async def link_chat_message_sent_to_chat_message_received(
+            self, received_message_id: int, sent_message_id: int, session_id: int):
         results = await self.driver.query("""
-        MATCH (req:ChatRequest {chat_request_received_id: $chat_request_received_id}), (resp:ChatResponse {chat_response_sent_id: $chat_response_sent_id})
-        MERGE (resp)-[r:REACTS_TO {chat_session_id: $chat_session_id, time_occurred: $time_occurred}]->(req)
-        RETURN r
+        MATCH (received:ChatMessage {message_id: $received_message_id}), (sent:ChatMessage {message_id: $sent_message_id})
+        MERGE (sent)-[rel:REACTS_TO {session_id: $session_id}]->(received)
+        RETURN rel
         """, {
-            "chat_request_received_id": chat_request_received_id, "chat_response_sent_id": chat_response_sent_id,
-            "chat_session_id": chat_session_id, "time_occurred": time_occurred
+            "received_message_id": received_message_id, "sent_message_id": sent_message_id,
+            "session_id": session_id
         })
         if results:
             logger.info("MERGE "
-                        f"(resp:ChatResponse {{chat_session_id: {chat_session_id}}})-[r:REACTS_TO]->"
-                        f"(req:ChatRequest {{chat_response_sent_id: {chat_response_sent_id}}})")
+                        f"(sent:ChatMessage {{sent_message_id: {sent_message_id}}})-[rel:REACTS_TO]->"
+                        f"(received:ChatMessage {{received_message_id: {received_message_id}}})")
         return results
 
-    async def link_chat_response_to_chat_session(self, chat_response_sent_id: int, chat_session_id: int, time_occurred):
+    async def link_chat_user_to_chat_session(self, user_id: int, session_id: int):
         results = await self.driver.query("""
-        MATCH (resp:ChatResponse {chat_response_sent_id: $chat_response_sent_id}), (session:ChatSession {chat_session_id: $chat_session_id})
-        MERGE (session)-[r:SENT {time_occurred: $time_occurred}]->(resp)
-        RETURN r
+        MATCH (user:ChatUser {user_id: $user_id}), (session:ChatSession {session_id: $session_id})
+        MERGE (session)-[rel:WITH]->(user)
+        RETURN rel
         """, {
-            "chat_response_sent_id": chat_response_sent_id, "chat_session_id": chat_session_id,
-            "time_occurred": time_occurred,
+            "user_id": user_id, "session_id": session_id,
 
         })
         if results:
             logger.info("MERGE "
-                        f"(session:ChatSession {{chat_session_id: {chat_session_id}}})-[r:SENT]->"
-                        f"(resp:ChatResponse {{chat_response_sent_id: {chat_response_sent_id}}})")
-        return results
-
-    async def link_chat_user_to_chat_session(self, user_id: int, chat_session_id: int):
-        results = await self.driver.query("""
-        MATCH (user:ChatUser {user_id: $user_id}), (session:ChatSession {chat_session_id: $chat_session_id})
-        MERGE (session)-[r:WITH]->(user)
-        RETURN r
-        """, {
-            "user_id": user_id, "chat_session_id": chat_session_id,
-
-        })
-        if results:
-            logger.info("MERGE "
-                        f"(session:ChatSession {{chat_session_id: {chat_session_id}}})-[r:WITH]->"
+                        f"(session:ChatSession {{session_id: {session_id}}})-[rel:WITH]->"
                         f"(user:ChatUser {{user_id: {user_id}}})")
         return results
-
-
-def round_time_now_down_to_nearst_interval(interval_minutes: int = 5):
-    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    minutes = now.minute
-    remainder = minutes % interval_minutes  # How many interval_minutes increments have passed
-    rounded_minutes = minutes - remainder  # Subtract to round down
-    return now.replace(minute=rounded_minutes, second=0, microsecond=0)
-
-
-def utc_now():
-    return datetime.now(timezone.utc)
 
 
 if __name__ == "__main__":

@@ -14,3 +14,7 @@ class TableHelper:
         self.chat_user_table = Table('chat_user', MetaData(), autoload_with=engine)
         self.chat_session_table = Table('chat_session', MetaData(), autoload_with=engine)
         self.chat_message_table = Table('chat_message', MetaData(), autoload_with=engine)
+        self.engine = engine
+
+    async def shutdown(self):
+        self.engine.dispose()

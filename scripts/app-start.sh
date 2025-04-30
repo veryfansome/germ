@@ -22,4 +22,4 @@ for STATIC_FILE in ${TEMPLATED_STATIC_FILES[*]}; do
 done
 
 mkdir -p /var/lib/germ/messages
-gunicorn -c gunicorn_config.py "$1" --bind "0.0.0.0:$2"
+exec gunicorn -c gunicorn_config.py "$1" --bind "0.0.0.0:$2"
