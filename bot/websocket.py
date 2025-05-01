@@ -50,9 +50,7 @@ class WebSocketSender:
 
     async def send_message(self, chat_response: ChatResponse):
         chat_response.conversation_id = self.conversation_id
-        logger.info("before send")
         await self.connection.send_text(chat_response.model_dump_json())
-        logger.info("after send")
 
         async_tasks = []
         sent_message_id, dt_created = await self.new_chat_message_sent(self.conversation_id, chat_response)
@@ -172,7 +170,7 @@ class WebSocketConnectionManager:
                     and_(
                         self.conversation_table.c.conversation_id == conversation_id,
                         self.conversation_table.c.user_id == user_id,
-                        )
+                    )
                 )
                 record = (await rdb_session.execute(chat_user_stmt)).one_or_none()
                 return record is None
