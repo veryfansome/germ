@@ -63,7 +63,7 @@ class ChatModelEventHandler(RoutableChatEventHandler):
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self,
-                         chat_session_id: int, chat_request_received_id: int,
+                         conversation_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await self.do_chat_completion(chat_request)
         await ws_sender.send_reply(
@@ -110,7 +110,7 @@ class ImageModelEventHandler(RoutableChatEventHandler):
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self,
-                         chat_session_id: int, chat_request_received_id: int,
+                         conversation_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         markdown_image = await self.generate_markdown_image(chat_request)
         _ = asyncio.create_task(
@@ -165,7 +165,7 @@ class ReasoningChatModelEventHandler(RoutableChatEventHandler):
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self,
-                         chat_session_id: int, chat_request_received_id: int,
+                         conversation_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await self.do_chat_completion(chat_request)
         await ws_sender.send_reply(
@@ -202,12 +202,12 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self,
-                         chat_session_id: int, chat_request_received_id: int,
+                         conversation_id: int, chat_request_received_id: int,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         if chat_request.uploaded_filenames:
             logger.info(f"uploaded file: {chat_request.uploaded_filenames}")
             await self.assistant_helper.handle_in_a_thread(
-                chat_session_id, chat_request_received_id, chat_request, ws_sender)
+                conversation_id, chat_request_received_id, chat_request, ws_sender)
         else:
             completion = await self.do_chat_completion(chat_request)
             if completion is None:
@@ -223,7 +223,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                         tool_response_tasks.append(
                             asyncio.create_task(
                                 self.tools[tool_call.function.name].on_receive(
-                                    chat_session_id, chat_request_received_id, chat_request, ws_sender
+                                    conversation_id, chat_request_received_id, chat_request, ws_sender
                                 )
                             )
                         )
@@ -277,7 +277,7 @@ class UserProfilingHandler(WebSocketReceiveEventHandler):
         self.model = model
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, chat_session_id: int, chat_request_received_id: id,
+    async def on_receive(self, conversation_id: int, chat_request_received_id: id,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         logger.info(f"chat_request: {chat_request_received_id}: {chat_request}")
 

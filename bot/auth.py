@@ -6,7 +6,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SESSION_COOKIE_NAME = "ssid"
+SESSION_COOKIE_NAME = "germ_session"
 MAX_COOKIE_AGE: int = 60 * 60 * 24 * 7   # 7 days
 
 

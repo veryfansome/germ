@@ -53,15 +53,16 @@ tracer = trace.get_tracer(__name__)
 # Databases
 
 neo4j_driver = AsyncNeo4jDriver()
-pg_engine = create_async_pg_engine(f"postgresql+asyncpg://{DATABASE_URL}", echo=False)
+pg_async_engine = create_async_pg_engine(f"postgresql+asyncpg://{DATABASE_URL}", echo=False)
+pg_sync_engine = create_pg_engine(f"postgresql+psycopg2://{DATABASE_URL}", echo=False)
 pg_session_maker = async_pg_session_maker(
-    bind=pg_engine,
+    bind=pg_async_engine,
     class_=AsyncSession,
     expire_on_commit=False
 )
-pg_table_helper = TableHelper(create_pg_engine(f"postgresql+psycopg2://{DATABASE_URL}", echo=False))
+pg_table_helper = TableHelper(pg_sync_engine)
 redis_client = Redis.from_url(
-    f"redis://{germ_settings.REDIS_HOST}:{germ_settings.REDIS_PORT}",
+    f"redis://{germ_settings.REDIS_HOST}:{germ_settings.REDIS_PORT}/0",
     decode_responses=False
 )
 
@@ -71,8 +72,8 @@ redis_client = Redis.from_url(
 auth_helper = AuthHelper(pg_table_helper.chat_user_table, pg_session_maker)
 control_plane = ControlPlane(neo4j_driver)
 websocket_manager = WebSocketConnectionManager(
+    pg_table_helper.conversation_table,
     pg_table_helper.chat_message_table,
-    pg_table_helper.chat_session_table,
     control_plane,
     pg_session_maker,
 )
@@ -97,9 +98,9 @@ async def lifespan(app: FastAPI):
     router = ChatRoutingEventHandler(assistant_helper=assistant_helper)
     chat_controller = ChatController(control_plane, router)
 
+    websocket_manager.add_conversation_monitor(chat_controller)
     websocket_manager.add_receive_event_handler(chat_controller)
     websocket_manager.add_send_event_handler(chat_controller)
-    websocket_manager.add_session_monitor(chat_controller)
 
     #user_intent_profiler = UserProfilingHandler(
     #    control_plane,
@@ -132,10 +133,10 @@ async def lifespan(app: FastAPI):
     ])
     await asyncio.gather(*[
         neo4j_driver.shutdown(),
-        pg_engine.dispose(),
-        pg_table_helper.shutdown(),
+        pg_async_engine.dispose(),
         redis_client.close(),
     ])
+    pg_sync_engine.dispose(),
 
     logger.info("Stopped")
 
@@ -163,7 +164,7 @@ if os.path.exists("bot/static/tests"):
 # Enabled instrumentation
 FastAPIInstrumentor.instrument_app(bot)
 RedisInstrumentor().instrument(client=redis_client)
-SQLAlchemyInstrumentor().instrument(engine=pg_engine.sync_engine)  # Async is a facade backed by a sync engine
+SQLAlchemyInstrumentor().instrument(engine=pg_async_engine.sync_engine)  # Async is a facade backed by a sync engine
 
 
 ##
@@ -213,7 +214,8 @@ async def get_login_form(request:  Request):
 async def get_logout(request: Request):
     await load_session(request)
     request.session.clear()
-    return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    info_params = urlencode({"info": "Logged out."})
+    return RedirectResponse(url=f"/login?{info_params}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @bot.get("/metrics")
@@ -246,13 +248,16 @@ async def post_login_form(request: Request, username: str = Form(...), password:
     password_hash = await auth_helper.get_user_password_hash(username)
     if password_hash is None:
         error_params = urlencode({"error": "No such user."})
+        logger.error(f"No such user: {username}")
     elif not verify_password(password, password_hash):
         error_params = urlencode({"error": "Invalid password."})
+        logger.error(f"Invalid password: {username}")
     else:
         user_id = await auth_helper.get_user_id(username)
         await load_session_task
         request.session.clear()
         request.session.update({"user_id": user_id, "username": username})
+        logger.info(f"{username} logged in")
         return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(f"/login?{error_params}", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -262,17 +267,21 @@ async def post_register(request:  Request, username: str = Form(...), password: 
     load_session_task = asyncio.create_task(load_session(request))
     if (await auth_helper.get_user_password_hash(username)) is not None:
         error_params = urlencode({"error": "Username already exists."})
+        logger.error(f"Username already exists: {username}")
     elif password != verify:
         error_params = urlencode({"error": "'Password' and 'Verify password' did not match."})
+        logger.error(f"Mistyped password: {username}")
     else:
         user_id, dt_created = await auth_helper.add_new_user(username, password)
         if user_id is None:
             error_params = urlencode({"error": "Failed to create new user."})
+            logger.error(f"Failed to create new user: {username}")
         else:
             await control_plane.add_chat_user(user_id, dt_created)
             await load_session_task
             request.session.clear()
             request.session.update({"user_id": user_id, "username": username})
+            logger.info(f"Registered new user {username}")
             return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(f"/register?{error_params}", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -311,6 +320,8 @@ async def websocket_chat(ws: WebSocket):
         return
 
     user_id = session["user_id"]
-    session_id = await websocket_manager.connect(user_id, ws)
-    logger.info(f"starting session {session_id} with user {user_id}")
-    await websocket_manager.wait_for_receive(user_id, session_id)
+    # need some hash on the conversation table so that disconnected conversations can be reconnected rather than split
+    # encrypt/decrypt salt + conversation_id, call it conversation_ident and send it as a cookie
+    conversation_id = await websocket_manager.connect(user_id, ws)
+    logger.info(f"starting conversation {conversation_id} with user {user_id}")
+    await websocket_manager.wait_for_receive(user_id, conversation_id)

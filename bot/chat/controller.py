@@ -17,14 +17,14 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.control_plane = control_plane
         self.remote = remote
 
-    async def on_disconnect(self, chat_session_id: int):
+    async def on_disconnect(self, conversation_id: int):
         pass
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, chat_session_id: int, chat_request_received_id: int, chat_request: ChatRequest,
+    async def on_receive(self, conversation_id: int, chat_request_received_id: int, chat_request: ChatRequest,
                          ws_sender: WebSocketSender):
         remote_response_task = asyncio.create_task(
-            self.remote.on_receive(chat_session_id, chat_request_received_id, chat_request, ws_sender),
+            self.remote.on_receive(conversation_id, chat_request_received_id, chat_request, ws_sender),
         )
         # TODO: Do stuff.
         await remote_response_task
@@ -32,9 +32,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
     async def on_send(self,
                       sent_message_id: int,
                       chat_response: ChatResponse,
-                      chat_session_id: int,
+                      conversation_id: int,
                       received_message_id: int = None):
         pass
 
-    async def on_tick(self, chat_session_id: int, ws_sender: WebSocketSender):
-        logger.info(f"chat session {chat_session_id} is still active")
+    async def on_tick(self, conversation_id: int, ws_sender: WebSocketSender):
+        logger.info(f"conversation {conversation_id} is still active")

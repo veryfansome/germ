@@ -8,6 +8,11 @@ SET search_path TO public;
  *
  **/
 --
+-- Extensions
+--
+CREATE EXTENSION IF NOT EXISTS vector;
+
+--
 -- Function to automate updated of `dt_modified` columns so that the appilcation is not responsible for managing that value.
 --
 CREATE OR REPLACE FUNCTION set_dt_modified_column()
@@ -50,18 +55,18 @@ SELECT update_dt_modified_column('chat_user');
 COMMENT ON TABLE chat_user IS 'This table stores chat user records';
 
 
-DROP TABLE IF EXISTS chat_session CASCADE;
-CREATE TABLE chat_session (
-      session_id                                                SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
+DROP TABLE IF EXISTS conversation CASCADE;
+CREATE TABLE conversation (
+      conversation_id                                           SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
     , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , user_id                                                   SMALLINT                            NOT NULL
-    , PRIMARY KEY (session_id)
-    , CONSTRAINT fk_chat_session_chat_user_user_id              FOREIGN KEY (user_id)               REFERENCES chat_user  (user_id)
+    , PRIMARY KEY (conversation_id)
+    , CONSTRAINT fk_conversation_chat_user_user_id              FOREIGN KEY (user_id)               REFERENCES chat_user  (user_id)
 )
 ;
-SELECT update_dt_modified_column('chat_session');
-COMMENT ON TABLE chat_session IS 'This table stores user session records';
+SELECT update_dt_modified_column('conversation');
+COMMENT ON TABLE conversation IS 'This table stores conversation records';
 
 
 DROP TABLE IF EXISTS chat_message CASCADE;
@@ -71,9 +76,9 @@ CREATE TABLE chat_message (
     , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , json_sig                                                  UUID                                NOT NULL
     , received                                                  BOOLEAN                             NOT NULL
-    , session_id                                                SMALLINT                            NOT NULL
+    , conversation_id                                           SMALLINT                            NOT NULL
     , PRIMARY KEY (message_id)
-    , CONSTRAINT fk_chat_message_chat_session_session_id        FOREIGN KEY (session_id)            REFERENCES chat_session  (session_id)
+    , CONSTRAINT fk_chat_message_conversation_conversation_id   FOREIGN KEY (conversation_id)       REFERENCES conversation  (conversation_id)
 )
 ;
 SELECT update_dt_modified_column('chat_message');
