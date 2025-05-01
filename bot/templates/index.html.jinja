@@ -152,8 +152,10 @@
         }
     });
 
+    let conversationId = null;
     let chatCompletionMessageList = [];
     function handleMessageReceived(data) {
+        conversationId = data['conversation_id'];
         const responseComplete = data['complete'];
         const responseModel = data['model'];
         const responseRole = data['role'];
@@ -181,7 +183,11 @@
     const wsReconnectInterval = 5000; // 5 seconds
     function wsConnect() {
         wsConnectionAttemptInProgress = true
-        ws = new WebSocket(`ws://${host}:${port}/chat`);
+        if (conversationId === null) {
+            ws = new WebSocket(`ws://${host}:${port}/chat`);
+        } else {
+            ws = new WebSocket(`ws://${host}:${port}/chat?conversation_id=${conversationId}`);
+        }
         ws.onopen = () => {
             wsConnectionAttemptInProgress = false
             console.log('WebSocket connected');
@@ -207,6 +213,13 @@
             loadingIndicator.remove(); // Stop showing loading indicator if error
             console.log('Socket connection errored:', event);
             showErrorPopup("Socket connection error.")
+        };
+        ws.onmessage = function(event) {
+            try {
+                handleMessageReceived(JSON.parse(event.data));
+            } catch (error) {
+                handleError(error, 'Failed to handle message:');
+            }
         };
     }
     async function sendMessage() {
@@ -246,13 +259,6 @@
         chatbox.appendChild(loadingIndicator);
         scrollChatBoxToBottom();
 
-        ws.onmessage = function(event) {
-            try {
-                handleMessageReceived(JSON.parse(event.data));
-            } catch (error) {
-                handleError(error, 'Failed to handle message:');
-            }
-        };
         const finalChatCompletionMessageList = [...chatCompletionMessageList];
         const systemChatMessage = document.getElementById('system-chat-message-input').value;
         if (!isBlankOrEmptyStr(systemChatMessage)) {

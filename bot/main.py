@@ -23,6 +23,7 @@ import aiofiles
 import asyncio
 import os
 
+from bot.api.models import ChatResponse
 from bot.auth import MAX_COOKIE_AGE, SESSION_COOKIE_NAME, AuthHelper, verify_password
 from bot.chat.controller import ChatController
 from bot.chat.openai_beta import AssistantHelper
@@ -320,8 +321,18 @@ async def websocket_chat(ws: WebSocket):
         return
 
     user_id = session["user_id"]
-    # need some hash on the conversation table so that disconnected conversations can be reconnected rather than split
-    # encrypt/decrypt salt + conversation_id, call it conversation_ident and send it as a cookie
-    conversation_id = await websocket_manager.connect(user_id, ws)
+    if "conversation_id" in ws.url.query:
+        query_params = dict(map(lambda s: s.split('='), ws.url.query.split('&')))
+        conversation_id = await websocket_manager.connect(
+            user_id, ws, conversation_id=int(query_params["conversation_id"])
+        )
+        await websocket_manager.new_ws_sender(conversation_id, ws).send_message(
+            ChatResponse(complete=True, content="Hi, again!")
+        )
+    else:
+        conversation_id = await websocket_manager.connect(user_id, ws)
+        await websocket_manager.new_ws_sender(conversation_id, ws).send_message(
+            ChatResponse(complete=True, content="Hi!")
+        )
     logger.info(f"starting conversation {conversation_id} with user {user_id}")
     await websocket_manager.wait_for_receive(user_id, conversation_id)
