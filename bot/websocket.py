@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from fastapi import WebSocket
 from prometheus_client import Gauge
-from sqlalchemy import Table, insert
+from sqlalchemy import Table, and_, insert, select
 from sqlalchemy.ext.asyncio import async_sessionmaker as async_pg_session_maker
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 from uuid import UUID, uuid5
@@ -49,7 +49,10 @@ class WebSocketSender:
             send_event_handlers if send_event_handlers is not None else [])
 
     async def send_message(self, chat_response: ChatResponse):
+        chat_response.conversation_id = self.conversation_id
+        logger.info("before send")
         await self.connection.send_text(chat_response.model_dump_json())
+        logger.info("after send")
 
         async_tasks = []
         sent_message_id, dt_created = await self.new_chat_message_sent(self.conversation_id, chat_response)
@@ -60,6 +63,7 @@ class WebSocketSender:
         await asyncio.gather(*async_tasks)
 
     async def send_reply(self, received_message_id: int, chat_response: ChatResponse):
+        chat_response.conversation_id = self.conversation_id
         await self.connection.send_text(chat_response.model_dump_json())
 
         async_tasks = []
@@ -143,19 +147,35 @@ class WebSocketConnectionManager:
     def add_send_event_handler(self, handler: WebSocketSendEventHandler):
         self.send_event_handlers.append(handler)
 
-    async def connect(self, user_id: int, ws: WebSocket) -> int:
-        conversation_id, dt_created = await self.new_conversation(user_id)
+    async def connect(self, user_id: int, ws: WebSocket, conversation_id: int = None) -> int:
+        METRIC_CONVERSATIONS_IN_PROGRESS.inc()
+
+        if (conversation_id is None
+                # Or stale/bad client-side data
+                or await self.conversation_not_found(conversation_id, user_id)
+                or conversation_id in self.active_connections):
+            conversation_id, dt_created = await self.new_conversation(user_id)
+            await self.control_plane.add_conversation(conversation_id, dt_created)
+            await self.control_plane.link_chat_user_to_conversation(user_id, conversation_id)
         self.active_connections[conversation_id] = ws
 
         # Create and store a cancellation event, and start a monitor task
         cancel_event = asyncio.Event()
         monitor_task = asyncio.create_task(self.monitor_conversation(user_id, conversation_id, ws, cancel_event))
         self.monitor_tasks[conversation_id] = (monitor_task, cancel_event)
-
-        METRIC_CONVERSATIONS_IN_PROGRESS.inc()
-        await self.control_plane.add_conversation(conversation_id, dt_created)
-        await self.control_plane.link_chat_user_to_conversation(user_id, conversation_id)
         return conversation_id
+
+    async def conversation_not_found(self, conversation_id: int, user_id: int) -> bool:
+        async with (self.pg_session_maker() as rdb_session):
+            async with rdb_session.begin():
+                chat_user_stmt = select(self.conversation_table.c.dt_modified).where(
+                    and_(
+                        self.conversation_table.c.conversation_id == conversation_id,
+                        self.conversation_table.c.user_id == user_id,
+                        )
+                )
+                record = (await rdb_session.execute(chat_user_stmt)).one_or_none()
+                return record is None
 
     async def disconnect(self, conversation_id: int):
         ws = self.active_connections.pop(conversation_id, None)
@@ -170,11 +190,12 @@ class WebSocketConnectionManager:
         if ws.client_state == WebSocketState.CONNECTED:
             await ws.close()
 
-        METRIC_CONVERSATIONS_IN_PROGRESS.dec()
         async_tasks = []
         for handler in self.disconnect_event_handlers:
             async_tasks.append(asyncio.create_task(handler.on_disconnect(conversation_id)))
         await asyncio.gather(*async_tasks)
+
+        METRIC_CONVERSATIONS_IN_PROGRESS.dec()
 
     async def disconnect_all(self):
         await asyncio.gather(*[self.disconnect(conversation_id) for conversation_id in self.active_connections])
@@ -184,8 +205,7 @@ class WebSocketConnectionManager:
         Runs in the background to do periodic or event-driven checks.
         Closes automatically when cancel_event is set.
         """
-        ws_sender = WebSocketSender(self.chat_message_table, self.control_plane, conversation_id, ws, self.pg_session_maker,
-                                    send_event_handlers=self.send_event_handlers)
+        ws_sender = self.new_ws_sender(conversation_id, ws)
         try:
             while not cancel_event.is_set():
                 # Wait for some seconds or until the cancel_event is set, whichever comes first.
@@ -248,6 +268,10 @@ class WebSocketConnectionManager:
                     await rdb_session.rollback()
                     raise
 
+    def new_ws_sender(self, conversation_id: int, ws: WebSocket):
+        return WebSocketSender(self.chat_message_table, self.control_plane, conversation_id, ws, self.pg_session_maker,
+                               send_event_handlers=self.send_event_handlers)
+
     async def receive(self, user_id: int, conversation_id: int):
         ws: WebSocket = self.active_connections[conversation_id]
         chat_request = ChatRequest.model_validate(await ws.receive_json())
@@ -258,8 +282,7 @@ class WebSocketConnectionManager:
         async_tasks.append(asyncio.create_task(
             self.control_plane.link_chat_message_received_to_chat_user(message_id, user_id)
         ))
-        ws_sender = WebSocketSender(self.chat_message_table, self.control_plane, conversation_id, ws, self.pg_session_maker,
-                                    send_event_handlers=self.send_event_handlers)
+        ws_sender = self.new_ws_sender(conversation_id, ws)
         for handler in self.receive_event_handlers:
             async_tasks.append(asyncio.create_task(
                 handler.on_receive(conversation_id, message_id, chat_request, ws_sender)
