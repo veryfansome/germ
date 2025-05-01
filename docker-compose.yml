@@ -163,7 +163,8 @@ services:
   pg:
     networks: [bots]
     container_name: *pg-host
-    image: postgres:16
+    #image: postgres:16
+    image: ankane/pgvector:latest
     ports:
       - "5432:5432"
     environment:

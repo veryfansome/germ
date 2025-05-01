@@ -107,13 +107,33 @@ Ensure the opacity is low enough to not interfere with the text but still visibl
 #error-popup button {
     background: none;
     border: none;
-    color: white;
+    color: #6a0000;
     font-size: 16px;
     margin-left: 10px;
     cursor: pointer;
 }
 #error-popup-message-text {
     color: darkred;
+}
+#info-popup {
+    top: 20px;
+    right: 20px;
+    left: 20px;
+    background-color: #c9fb94;
+    color: white;
+    padding: 10px 20px;
+    align-items: center;
+}
+#info-popup button {
+    background: none;
+    border: none;
+    color: #034a00;
+    font-size: 16px;
+    margin-left: 10px;
+    cursor: pointer;
+}
+#info-popup-message-text {
+    color: #066e00;
 }
 #input {
     box-sizing: border-box;

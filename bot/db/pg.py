@@ -11,10 +11,7 @@ DATABASE_URL = "{name}:{password}@{host}/germ".format(
 
 class TableHelper:
     def __init__(self, engine: Engine):
-        self.chat_user_table = Table('chat_user', MetaData(), autoload_with=engine)
-        self.chat_session_table = Table('chat_session', MetaData(), autoload_with=engine)
         self.chat_message_table = Table('chat_message', MetaData(), autoload_with=engine)
+        self.chat_user_table = Table('chat_user', MetaData(), autoload_with=engine)
+        self.conversation_table = Table('conversation', MetaData(), autoload_with=engine)
         self.engine = engine
-
-    async def shutdown(self):
-        self.engine.dispose()

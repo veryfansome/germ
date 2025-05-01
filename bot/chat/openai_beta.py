@@ -36,7 +36,7 @@ class AssistantHelper:
         logger.info(f"initialized {asst}")
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def handle_in_a_thread(self, chat_session_id: int, chat_request_received_id: int,
+    async def handle_in_a_thread(self, conversation_id: int, chat_request_received_id: int,
                                  chat_request: ChatRequest, ws_sender: WebSocketSender):
         if chat_request.uploaded_filenames:
             for filename in chat_request.uploaded_filenames:
@@ -68,7 +68,7 @@ class AssistantHelper:
             assistant_id=assistant.id,
             thread_id=thread.id,
             event_handler=ThreadEventHandler(
-                assistant, thread, chat_session_id, chat_request_received_id,
+                assistant, thread, conversation_id, chat_request_received_id,
                 chat_request, ws_sender),
         ) as stream:
             try:
@@ -133,12 +133,12 @@ class AssistantHelper:
 
 
 class ThreadEventHandler(AsyncAssistantEventHandler):
-    def __init__(self, assistant, thread, chat_session_id: int, chat_request_received_id: int,
+    def __init__(self, assistant, thread, conversation_id: int, chat_request_received_id: int,
                  chat_request: ChatRequest, ws_sender: WebSocketSender):
         self.assistant = assistant
         self.chat_request = chat_request
         self.chat_request_received_id = chat_request_received_id
-        self.chat_session_id = chat_session_id
+        self.conversation_id = conversation_id
         self.thread = thread
         self.ws_sender = ws_sender
         super().__init__()

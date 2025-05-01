@@ -25,6 +25,12 @@ function initErrorPopup() {
     });
 }
 
+function initInfoPopup() {
+    document.getElementById('close-info-popup').addEventListener('click', () => {
+        document.getElementById('info-popup').classList.add('hidden');
+    });
+}
+
 function initSendButtonResize() {
     window.addEventListener('load', updateSendButton);
     window.addEventListener('resize', updateSendButton);
@@ -163,6 +169,19 @@ const showErrorPopup = (message) => {
     // Auto-hide after 1 minute
     setTimeout(() => {
         errorPopup.classList.add('hidden');
+    }, 60000);
+};
+
+const showInfoPopup = (message) => {
+    const infoPopup = document.getElementById('info-popup');
+    const infoMessageText = document.getElementById('info-popup-message-text');
+
+    infoPopup.classList.remove('hidden');
+    infoMessageText.innerHTML = message;
+
+    // Auto-hide after 1 minute
+    setTimeout(() => {
+        infoPopup.classList.add('hidden');
     }, 60000);
 };
 

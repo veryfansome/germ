@@ -16,6 +16,10 @@
         </div>
         <div class="nav-links"></div>
     </nav>
+    <div id="info-popup" class="hidden">
+        <button id="close-info-popup"><i class="fa fa-x"></i></button>
+        <span id="info-popup-message-text"></span>
+    </div>
     <div id="error-popup" class="hidden">
         <button id="close-error-popup"><i class="fa fa-x"></i></button>
         <span id="error-popup-message-text"></span>
@@ -37,9 +41,13 @@
         </form>
     </div>
     <script>
+    initInfoPopup();
+
     const queryParams = getQueryParams()
     if ("error" in queryParams) {
         showErrorPopup(queryParams["error"])
+    } else if ("info" in queryParams) {
+        showInfoPopup(queryParams["info"])
     }
     </script>
 </body>
