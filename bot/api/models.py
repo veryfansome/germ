@@ -1,4 +1,3 @@
-from datetime import datetime
 from pydantic import BaseModel
 from typing import Any, Optional
 
@@ -16,7 +15,8 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(ChatMessage):
     complete: Optional[bool] = None
-    conversation_id: Optional[int] = None
+    conversation_ident: Optional[str] = None
+    error: Optional[bool] = False
     model: str = "none"
     role: str = "assistant"
 

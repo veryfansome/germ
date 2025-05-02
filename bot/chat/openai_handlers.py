@@ -231,8 +231,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                     tool_names = [f"`{t.function.name}`" for t in completion.choices[0].message.tool_calls]
                     await ws_sender.send_reply(
                         chat_request_received_id,
-                        ChatResponse(complete=False, content=f"One moment, using tools: {''.join(tool_names)}.",
-                                     model=completion.model))
+                        ChatResponse(complete=False, content=f"One moment, using tools: {''.join(tool_names)}."))
                     await asyncio.gather(*tool_response_tasks)
                     return
                 else:

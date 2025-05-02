@@ -12,9 +12,16 @@ import logging
 
 from bot.api.models import ChatRequest, ChatResponse
 from bot.graph.control_plane import ControlPlane
-from settings.germ_settings import DATA_DIR, UUID5_NS, WEBSOCKET_IDLE_TIMEOUT, WEBSOCKET_MONITOR_INTERVAL_SECONDS
+from security.encryption import decrypt_integer, derive_key_from_passphrase, encrypt_integer
+from settings.germ_settings import (DATA_DIR, ENCRYPTION_PASSWORD, UUID5_NS,
+                                    WEBSOCKET_IDLE_TIMEOUT, WEBSOCKET_MONITOR_INTERVAL_SECONDS)
 
 logger = logging.getLogger(__name__)
+
+##
+# Encryption
+
+ENCRYPTION_KEY = derive_key_from_passphrase(ENCRYPTION_PASSWORD)
 
 ##
 # Metrics
@@ -49,34 +56,36 @@ class WebSocketSender:
             send_event_handlers if send_event_handlers is not None else [])
 
     async def send_message(self, chat_response: ChatResponse):
-        chat_response.conversation_id = self.conversation_id
+        chat_response.conversation_ident = encrypt_integer(self.conversation_id, ENCRYPTION_KEY)
         await self.connection.send_text(chat_response.model_dump_json())
 
-        async_tasks = []
-        sent_message_id, dt_created = await self.new_chat_message_sent(self.conversation_id, chat_response)
-        for handler in self.send_event_handlers:
-            async_tasks.append(asyncio.create_task(
-                handler.on_send(sent_message_id, chat_response, self.conversation_id)
-            ))
-        await asyncio.gather(*async_tasks)
+        if chat_response.model != "none":
+            async_tasks = []
+            sent_message_id, dt_created = await self.new_chat_message_sent(self.conversation_id, chat_response)
+            for handler in self.send_event_handlers:
+                async_tasks.append(asyncio.create_task(
+                    handler.on_send(sent_message_id, chat_response, self.conversation_id)
+                ))
+            await asyncio.gather(*async_tasks)
 
     async def send_reply(self, received_message_id: int, chat_response: ChatResponse):
-        chat_response.conversation_id = self.conversation_id
+        chat_response.conversation_ident = encrypt_integer(self.conversation_id, ENCRYPTION_KEY)
         await self.connection.send_text(chat_response.model_dump_json())
 
-        async_tasks = []
-        sent_message_id, dt_created = await self.new_chat_message_sent(self.conversation_id, chat_response)
-        await self.control_plane.add_chat_message(sent_message_id, dt_created)
-        async_tasks.append(asyncio.create_task(
-            self.control_plane.link_chat_message_sent_to_chat_message_received(
-                received_message_id, sent_message_id, self.conversation_id)
-        ))
-        for handler in self.send_event_handlers:
+        if chat_response.model != "none":
+            async_tasks = []
+            sent_message_id, dt_created = await self.new_chat_message_sent(self.conversation_id, chat_response)
+            await self.control_plane.add_chat_message(sent_message_id, dt_created)
             async_tasks.append(asyncio.create_task(
-                handler.on_send(sent_message_id, chat_response, self.conversation_id,
-                                received_message_id=received_message_id)
+                self.control_plane.link_chat_message_sent_to_chat_message_received(
+                    received_message_id, sent_message_id, self.conversation_id)
             ))
-        await asyncio.gather(*async_tasks)
+            for handler in self.send_event_handlers:
+                async_tasks.append(asyncio.create_task(
+                    handler.on_send(sent_message_id, chat_response, self.conversation_id,
+                                    received_message_id=received_message_id)
+                ))
+            await asyncio.gather(*async_tasks)
 
     async def new_chat_message_sent(self, conversation_id: int, chat_response: ChatResponse) -> (int, datetime):
         # wrap chat_response in metadata related to time so we can repopulate using old conversations
@@ -96,7 +105,7 @@ class WebSocketSender:
                     row = result.first()
                     await rdb_session.commit()
                     message_id, dt_created = row
-                    logger.info(f"New message '{message_id}' inserted successfully "
+                    logger.info(f"New message {message_id} inserted successfully "
                                 f"for conversation {conversation_id} at {dt_created}")
                     return message_id, dt_created
                 except Exception as e:
@@ -145,9 +154,10 @@ class WebSocketConnectionManager:
     def add_send_event_handler(self, handler: WebSocketSendEventHandler):
         self.send_event_handlers.append(handler)
 
-    async def connect(self, user_id: int, ws: WebSocket, conversation_id: int = None) -> int:
+    async def connect(self, user_id: int, ws: WebSocket, conversation_ident: str = None) -> int:
         METRIC_CONVERSATIONS_IN_PROGRESS.inc()
 
+        conversation_id = None if conversation_ident is None else decrypt_integer(conversation_ident, ENCRYPTION_KEY)
         if (conversation_id is None
                 # Or stale/bad client-side data
                 or await self.conversation_not_found(conversation_id, user_id)
@@ -236,7 +246,7 @@ class WebSocketConnectionManager:
                     row = result.first()
                     await rdb_session.commit()
                     message_id, dt_created = row
-                    logger.info(f"New message '{message_id}' inserted successfully "
+                    logger.info(f"New message {message_id} inserted successfully "
                                 f"for conversation {conversation_id} at {dt_created}")
                     return message_id, dt_created
                 except Exception as e:
@@ -258,7 +268,7 @@ class WebSocketConnectionManager:
                     row = result.first()
                     await rdb_session.commit()
                     conversation_id, dt_created = row
-                    logger.info(f"New conversation '{conversation_id}' with user {user_id} "
+                    logger.info(f"New conversation {conversation_id} with user {user_id} "
                                 f"inserted successfully at {dt_created}")
                     return conversation_id, dt_created
                 except Exception as e:

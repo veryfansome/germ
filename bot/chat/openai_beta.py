@@ -149,8 +149,7 @@ class ThreadEventHandler(AsyncAssistantEventHandler):
         await self.ws_sender.send_reply(
             self.chat_request_received_id,
             ChatResponse(complete=True,
-                         content=f"Thread {self.thread.id} ended.",
-                         model=self.assistant.model))
+                         content=f"Thread {self.thread.id} ended."))
         await super().on_end()
 
     @override
@@ -167,6 +166,5 @@ class ThreadEventHandler(AsyncAssistantEventHandler):
         await self.ws_sender.send_reply(
             self.chat_request_received_id,
             ChatResponse(complete=False,
-                         content=f"One moment, using tool: `{tool_call.type}`.",
-                         model=self.assistant.model))
+                         content=f"One moment, using tool: `{tool_call.type}`."))
         await super().on_tool_call_created(tool_call)

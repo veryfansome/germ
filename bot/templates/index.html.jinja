@@ -24,6 +24,10 @@
         <button id="close-error-popup"><i class="fa fa-x"></i></button>
         <span id="error-popup-message-text"></span>
     </div>
+    <div id="info-popup" class="hidden">
+        <button id="close-info-popup"><i class="fa fa-x"></i></button>
+        <span id="info-popup-message-text"></span>
+    </div>
     <div id="chatbox"></div>
     <div id="selected-files-container"></div>
     <div id="input-container">
@@ -70,6 +74,7 @@
 
     const chatbox = document.getElementById('chatbox');
     initErrorPopup();
+    initInfoPopup();
     initSendButtonResize();
 
     // Popup menu
@@ -152,16 +157,24 @@
         }
     });
 
-    let conversationId = null;
+    let conversationIdent = null;
     let chatCompletionMessageList = [];
     function handleMessageReceived(data) {
-        conversationId = data['conversation_id'];
+        conversationIdent = data['conversation_ident'];
         const responseComplete = data['complete'];
+        const responseError = data['error'];
         const responseModel = data['model'];
         const responseRole = data['role'];
         const responseContent = data['content'];
 
-        if (responseComplete) {
+        if (responseModel === "none") {
+            if (responseError) {
+                showErrorPopup(responseContent)
+            } else {
+                showInfoPopup(responseContent)
+            }
+            return
+        } else if (responseComplete) {
             loadingIndicator.remove(); // Stop showing loading indicator
         }
 
@@ -183,10 +196,10 @@
     const wsReconnectInterval = 5000; // 5 seconds
     function wsConnect() {
         wsConnectionAttemptInProgress = true
-        if (conversationId === null) {
+        if (conversationIdent === null) {
             ws = new WebSocket(`ws://${host}:${port}/chat`);
         } else {
-            ws = new WebSocket(`ws://${host}:${port}/chat?conversation_id=${conversationId}`);
+            ws = new WebSocket(`ws://${host}:${port}/chat?conversation_ident=${conversationIdent}`);
         }
         ws.onopen = () => {
             wsConnectionAttemptInProgress = false

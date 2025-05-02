@@ -169,7 +169,7 @@ const showErrorPopup = (message) => {
     // Auto-hide after 1 minute
     setTimeout(() => {
         errorPopup.classList.add('hidden');
-    }, 60000);
+    }, 10000);
 };
 
 const showInfoPopup = (message) => {
@@ -182,7 +182,7 @@ const showInfoPopup = (message) => {
     // Auto-hide after 1 minute
     setTimeout(() => {
         infoPopup.classList.add('hidden');
-    }, 60000);
+    }, 10000);
 };
 
 function sleep(ms) {
