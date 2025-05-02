@@ -1,9 +1,10 @@
-aiohttp
+
 aiofiles
+aiohttp
 apscheduler
 asyncpg
-beautifulsoup4
 bcrypt
+beautifulsoup4
 cryptography
 datasets
 dnspython
@@ -11,7 +12,6 @@ fastapi
 gunicorn
 httpx
 huggingface_hub
-inflect
 itsdangerous
 jinja2
 jinja2-cli
@@ -38,9 +38,10 @@ pytest-xdist
 python-dotenv
 python-multipart
 redis
-starsessions[redis]
+scikit-learn
 sqlalchemy[asyncio]
 starlette
+starsessions[redis]
 torch
 transformers
 uvicorn[standard]
