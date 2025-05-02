@@ -321,18 +321,18 @@ async def websocket_chat(ws: WebSocket):
         return
 
     user_id = session["user_id"]
-    if "conversation_id" in ws.url.query:
+    if "conversation_ident" in ws.url.query:
         query_params = dict(map(lambda s: s.split('='), ws.url.query.split('&')))
         conversation_id = await websocket_manager.connect(
-            user_id, ws, conversation_id=int(query_params["conversation_id"])
+            user_id, ws, conversation_ident=query_params["conversation_ident"]
         )
         await websocket_manager.new_ws_sender(conversation_id, ws).send_message(
-            ChatResponse(complete=True, content="Hi, again!")
+            ChatResponse(complete=True, content="Reconnected!")
         )
     else:
         conversation_id = await websocket_manager.connect(user_id, ws)
         await websocket_manager.new_ws_sender(conversation_id, ws).send_message(
-            ChatResponse(complete=True, content="Hi!")
+            ChatResponse(complete=True, content="Connected!")
         )
     logger.info(f"starting conversation {conversation_id} with user {user_id}")
     await websocket_manager.wait_for_receive(user_id, conversation_id)

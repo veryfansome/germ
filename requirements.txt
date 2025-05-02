@@ -4,6 +4,7 @@ apscheduler
 asyncpg
 beautifulsoup4
 bcrypt
+cryptography
 datasets
 dnspython
 fastapi

@@ -4,6 +4,7 @@ import uuid
 # Service
 
 DATA_DIR = os.getenv("DATA_DIR", "/var/lib/germ")
+ENCRYPTION_PASSWORD = os.getenv("ENCRYPTION_KEY", "0Bfusc8")
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "/tmp")
 UUID5_NS = uuid.UUID("246a5463-afae-4571-a6e0-f319d74147d3")
 WEBSOCKET_IDLE_TIMEOUT = 3600
@@ -23,8 +24,8 @@ NEO4J_PORT = os.getenv("GERM_NEO4J_PORT", "7687")
 # PostgreSQL
 
 DB_HOST = os.getenv("DB_HOST", "germ-pg")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "germ")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "bacteria4life")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "bacteria4life")
+POSTGRES_USER = os.getenv("POSTGRES_USER", "germ")
 
 # Redis
 REDIS_HOST = os.getenv("REDIS_HOST", "germ-redis")
