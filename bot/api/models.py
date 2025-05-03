@@ -21,5 +21,9 @@ class ChatResponse(ChatMessage):
     role: str = "assistant"
 
 
+class TextListPayload(BaseModel):
+    texts: list[str]
+
+
 class TextPayload(BaseModel):
     text: str

@@ -7,7 +7,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 import os
 
-from bot.api.models import TextPayload
+from bot.api.models import TextListPayload, TextPayload
 from models.predict.goemotions_predict import GoEmotionsPredictor
 from models.predict.multi_predict import MultiHeadPredictor
 from observability.logging import logging, setup_logging
@@ -75,8 +75,8 @@ async def get_metrics():
 
 
 @model_service.post("/text/classification/emotions")
-async def post_text_classification_emotions(payload: TextPayload):
-    return await run_in_threadpool(text_emotions_classifier.predict, [payload.text], use_per_label=True)
+async def post_text_classification_emotions(payload: TextListPayload):
+    return await run_in_threadpool(text_emotions_classifier.predict, payload.texts, use_per_label=True)
 
 
 @model_service.post("/text/classification/ud")
