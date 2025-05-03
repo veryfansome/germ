@@ -5,10 +5,12 @@ import asyncio
 import logging
 
 from bot.api.models import ChatRequest, ChatResponse
+from bot.chat import async_openai_client
 from bot.graph.control_plane import ControlPlane
 from bot.lang.parsers import extract_markdown_page_elements
 from bot.lang.patterns import naive_sentence_end_pattern
-from bot.websocket import (WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler, WebSocketSendEventHandler,
+from bot.websocket import (InterceptingWebSocketSender,
+                           WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler, WebSocketSendEventHandler,
                            WebSocketSender, WebSocketSessionMonitor)
 from observability.annotations import measure_exec_seconds
 
@@ -19,10 +21,9 @@ tf_idf_vectorizer = TfidfVectorizer(stop_words='english')
 
 class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                      WebSocketSendEventHandler, WebSocketSessionMonitor):
-
-    def __init__(self, control_plane: ControlPlane, remote: WebSocketReceiveEventHandler):
+    def __init__(self, control_plane: ControlPlane, delegate: WebSocketReceiveEventHandler):
         self.control_plane = control_plane
-        self.remote = remote
+        self.delegate = delegate
 
     async def on_disconnect(self, conversation_id: int):
         pass
@@ -30,10 +31,13 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self, conversation_id: int, chat_request_received_id: int, chat_request: ChatRequest,
                          ws_sender: WebSocketSender):
-        remote_response_task = asyncio.create_task(
+        interceptor = InterceptingWebSocketSender(ws_sender)  # Intercepts and holds LLM response
+        fast_response_task = asyncio.create_task(
             # Send to LLM
-            self.remote.on_receive(conversation_id, chat_request_received_id, chat_request, ws_sender),
+            self.delegate.on_receive(conversation_id, chat_request_received_id, chat_request, interceptor),
         )
+        text_embeddings_task = asyncio.create_task(get_text_embeddings(chat_request.messages[-1].content))
+
         # Analyze most recent message in chat request
         code_blocks, text_chunks = await process_markdown_elements(
             await run_in_threadpool(extract_markdown_page_elements, chat_request.messages[-1].content)
@@ -51,13 +55,19 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                     sentence_chunks.append(text_chunk)
                     text_chunk = ""
 
-        emotion_classification, tf_id_keywords = await asyncio.gather(*[
+        embeddings, emotion_classification, tf_id_keywords = await asyncio.gather(*[
+            text_embeddings_task,
             get_emotions_classifications(sentence_chunks),
             get_tf_idf_keywords(sentence_chunks),
         ])
+        logger.info(f"embeddings (10 of {len(embeddings)}): {embeddings[:10]}")
         logger.info(f"emotions: {emotion_classification}")
         logger.info(f"tf-idf keywords: {tf_id_keywords}")
-        await remote_response_task
+        # TODO:
+        #  - Determine if the intercepted initial fast response is good enough or if a new response should
+        #    be generated.
+        await fast_response_task
+        await interceptor.send_intercepted_responses()
 
     async def on_send(self,
                       sent_message_id: int,
@@ -77,17 +87,29 @@ async def get_emotions_classifications(texts: list[str]):
             return await response.json()
 
 
+async def get_text_embeddings(text: str):
+    response = await async_openai_client.embeddings.create(
+        model="text-embedding-3-large",
+        input=text,
+        encoding_format="float"
+    )
+    return response.data[0].embedding
+
+
 async def get_tf_idf_keywords(texts: list[str], top: int = 3):
+    keywords = []
     documents = texts
     # The IDF part means I more documents with a broader blend of keywords.
-    tfidf_matrix = await run_in_threadpool(tf_idf_vectorizer.fit_transform, documents, y=None)
-    feature_names = tf_idf_vectorizer.get_feature_names_out()
 
-    keywords = []
-    for text_idx, text in enumerate(texts):
-        doc_scores = tfidf_matrix[text_idx].toarray().flatten()
-        top_indices = doc_scores.argsort()[::-1]
-        keywords.append({"text": text, "keywords": [feature_names[i] for i in top_indices[:top]]})
+    try:
+        tfidf_matrix = await run_in_threadpool(tf_idf_vectorizer.fit_transform, documents, y=None)
+        feature_names = tf_idf_vectorizer.get_feature_names_out()
+        for text_idx, text in enumerate(texts):
+            doc_scores = tfidf_matrix[text_idx].toarray().flatten()
+            top_indices = doc_scores.argsort()[::-1]
+            keywords.append({"text": text, "keywords": [feature_names[i] for i in top_indices[:top]]})
+    except Exception as e:
+        logger.error(f"Exception: {e}")
     return keywords
 
 

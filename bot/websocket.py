@@ -43,7 +43,31 @@ class WebSocketSendEventHandler(ABC):
         pass
 
 
-class WebSocketSender:
+class WebSocketSender(ABC):
+    @abstractmethod
+    async def send_message(self, chat_response: ChatResponse):
+        pass
+
+    @abstractmethod
+    async def send_reply(self, received_message_id: int, chat_response: ChatResponse):
+        pass
+
+
+class WebSocketReceiveEventHandler(ABC):
+    @abstractmethod
+    async def on_receive(self,
+                         conversation_id: int, chat_request_received_id: int,
+                         chat_request: ChatRequest, ws_sender: WebSocketSender):
+        pass
+
+
+class WebSocketSessionMonitor(ABC):
+    @abstractmethod
+    async def on_tick(self, conversation_id: int, ws_sender: WebSocketSender):
+        pass
+
+
+class DefaultWebSocketSender(WebSocketSender):
     def __init__(self, chat_message_table: Table, control_plane: ControlPlane, conversation_id: int,
                  connection: WebSocket, pg_session_maker: async_pg_session_maker,
                  send_event_handlers: list[WebSocketSendEventHandler] = None):
@@ -114,18 +138,30 @@ class WebSocketSender:
                     raise
 
 
-class WebSocketReceiveEventHandler(ABC):
-    @abstractmethod
-    async def on_receive(self,
-                         conversation_id: int, chat_request_received_id: int,
-                         chat_request: ChatRequest, ws_sender: WebSocketSender):
-        pass
+class InterceptingWebSocketSender(WebSocketSender):
+    def __init__(self, inner_sender: WebSocketSender):
+        self.inner_sender = inner_sender
+        self.messages: list[ChatResponse] = []
+        self.replies: list[tuple[int, ChatResponse]] = []
 
+    async def send_intercepted_responses(self):
+        message_tasks = [self.inner_sender.send_message(chat_response)
+                         for chat_response in self.messages]
+        reply_tasks = [self.inner_sender.send_reply(received_message_id, chat_response)
+                       for received_message_id, chat_response in self.replies]
+        await asyncio.gather(*(message_tasks + reply_tasks))
 
-class WebSocketSessionMonitor(ABC):
-    @abstractmethod
-    async def on_tick(self, conversation_id: int, ws_sender: WebSocketSender):
-        pass
+    async def send_message(self, chat_response: ChatResponse):
+        if chat_response.model == "none":  # Send status messages right away
+            await self.inner_sender.send_message(chat_response)
+        else:
+            self.messages.append(chat_response)
+
+    async def send_reply(self, received_message_id: int, chat_response: ChatResponse):
+        if chat_response.model == "none":  # Send status messages right away
+            await self.inner_sender.send_message(chat_response)
+        else:
+            self.replies.append((received_message_id, chat_response))
 
 
 class WebSocketConnectionManager:
@@ -277,8 +313,9 @@ class WebSocketConnectionManager:
                     raise
 
     def new_ws_sender(self, conversation_id: int, ws: WebSocket):
-        return WebSocketSender(self.chat_message_table, self.control_plane, conversation_id, ws, self.pg_session_maker,
-                               send_event_handlers=self.send_event_handlers)
+        return DefaultWebSocketSender(
+            self.chat_message_table, self.control_plane, conversation_id, ws, self.pg_session_maker,
+            send_event_handlers=self.send_event_handlers)
 
     async def receive(self, user_id: int, conversation_id: int):
         ws: WebSocket = self.active_connections[conversation_id]
