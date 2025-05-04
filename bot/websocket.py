@@ -5,7 +5,7 @@ from prometheus_client import Gauge
 from sqlalchemy import Table, and_, insert, select
 from sqlalchemy.ext.asyncio import async_sessionmaker as async_pg_session_maker
 from starlette.websockets import WebSocketDisconnect, WebSocketState
-from uuid import UUID, uuid5
+from uuid import uuid5
 import asyncio
 import json
 import logging
@@ -39,7 +39,7 @@ class WebSocketDisconnectEventHandler(ABC):
 
 class WebSocketSendEventHandler(ABC):
     @abstractmethod
-    async def on_send(self, conversation_id: int, dt_created: datetime, text_sig: UUID,
+    async def on_send(self, conversation_id: int, dt_created: datetime, text_sig: str,
                       chat_response: ChatResponse, received_message_dt_created: datetime = None):
         pass
 
@@ -56,7 +56,7 @@ class WebSocketSender(ABC):
 
 class WebSocketReceiveEventHandler(ABC):
     @abstractmethod
-    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: UUID,
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         pass
 
@@ -291,21 +291,26 @@ class WebSocketConnectionManager:
             await self.disconnect(conversation_id)
 
 
-async def new_chat_message_received(user_id: int, conversation_id: int, chat_request: ChatRequest) -> (datetime, UUID):
-    text_sig = uuid5(UUID5_NS, chat_request.messages[-1].content)
+async def new_chat_message_received(user_id: int, conversation_id: int, chat_request: ChatRequest) -> (datetime, str):
+    text_sig = str(uuid5(UUID5_NS, chat_request.messages[-1].content)).replace("-", "")
     dt_created = datetime.now(tz=timezone.utc)
     message_logger.info(
-        f"{dt_created}~^~{user_id}~^~{conversation_id}~^~"
-        f"{text_sig}~^~{json.dumps(chat_request.messages[-1].content)}"
+        json.dumps(
+            [int(dt_created.timestamp()), user_id, conversation_id, text_sig, chat_request.messages[-1].content],
+            separators=(",", ":")
+        )
     )
     return dt_created, text_sig
 
 
-async def new_chat_message_sent(conversation_id: int, chat_response: ChatResponse) -> (datetime, UUID):
-    text_sig = uuid5(UUID5_NS, chat_response.content)
+async def new_chat_message_sent(conversation_id: int, chat_response: ChatResponse) -> (datetime, str):
+    text_sig = str(uuid5(UUID5_NS, chat_response.content)).replace("-", "")
     dt_created = datetime.now(tz=timezone.utc)
     message_logger.info(
         # 0 as "user_id" for bot
-        f"{dt_created}~^~0~^~{conversation_id}~^~{text_sig}~^~{json.dumps(chat_response.content)}"
+        json.dumps(
+            [int(dt_created.timestamp()), 0, conversation_id, text_sig, chat_response.content],
+            separators=(",", ":")
+        )
     )
     return dt_created, text_sig

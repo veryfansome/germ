@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from openai.types.chat.chat_completion import ChatCompletion
 from typing import Optional
-from uuid import UUID
 import asyncio
 import json
 import logging
@@ -63,7 +62,7 @@ class ChatModelEventHandler(RoutableChatEventHandler):
         return self.function_settings
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: UUID,
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await self.do_chat_completion(chat_request)
         await ws_sender.send_reply(
@@ -107,7 +106,7 @@ class ImageModelEventHandler(RoutableChatEventHandler):
         return self.function_settings
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: UUID,
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         markdown_image = await self.generate_markdown_image(chat_request)
         _ = asyncio.create_task(
@@ -164,7 +163,7 @@ class ReasoningChatModelEventHandler(RoutableChatEventHandler):
         return self.function_settings
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: UUID,
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await self.do_chat_completion(chat_request)
         await ws_sender.send_reply(
@@ -202,7 +201,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
             logger.info(f"added {tool.get_function_name()} => {tool}")
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: UUID,
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         if chat_request.uploaded_filenames:
             logger.info(f"uploaded file: {chat_request.uploaded_filenames}")
