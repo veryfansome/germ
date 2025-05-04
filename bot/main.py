@@ -27,7 +27,7 @@ from bot.api.models import ChatResponse
 from bot.auth import MAX_COOKIE_AGE, SESSION_COOKIE_NAME, AuthHelper, verify_password
 from bot.chat.controller import ChatController
 from bot.chat.openai_beta import AssistantHelper
-from bot.chat.openai_handlers import ChatRoutingEventHandler, UserProfilingHandler
+from bot.chat.openai_handlers import ChatRoutingEventHandler
 from bot.db.pg import DATABASE_URL, TableHelper
 from bot.db.neo4j import AsyncNeo4jDriver
 from bot.graph.control_plane import ControlPlane
@@ -74,7 +74,7 @@ auth_helper = AuthHelper(pg_table_helper.chat_user_table, pg_session_maker)
 control_plane = ControlPlane(neo4j_driver)
 websocket_manager = WebSocketConnectionManager(
     pg_table_helper.conversation_table,
-    pg_table_helper.chat_message_table,
+    pg_table_helper.conversation_state_table,
     control_plane,
     pg_session_maker,
 )
@@ -102,18 +102,6 @@ async def lifespan(app: FastAPI):
     websocket_manager.add_conversation_monitor(chat_controller)
     websocket_manager.add_receive_event_handler(chat_controller)
     websocket_manager.add_send_event_handler(chat_controller)
-
-    #user_intent_profiler = UserProfilingHandler(
-    #    control_plane,
-    #    {
-    #        "intent": {
-    #            "type": "string",
-    #            "description": "A statement beginning with \"The User \", describing what the User wants.",
-    #        },
-    #    },
-    #    post_func=lambda intent: intent if intent.startswith("The User") else f"The User {intent}"  # Needed sometimes
-    #)
-    #websocket_manager.add_receive_event_handler(user_intent_profiler)
 
     # Scheduler
     scheduler.start()

@@ -3,58 +3,72 @@ import logging.config
 
 from settings import germ_settings
 
+console_only_logger_config = {
+    "handlers": ["console"],
+    "propagate": False,
+}
 
-def setup_logging(global_level: str = germ_settings.LOG_LEVEL):
-    logging.config.dictConfig(
-        {
-            "version": 1,
-            "disable_existing_loggers": False,
-            "formatters": {
-                "default": {
-                    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-                },
+
+def setup_logging(global_level: str = germ_settings.LOG_LEVEL, log_dir: str = germ_settings.LOG_DIR):
+    logging.config.dictConfig({
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "format": "%(asctime)s - %(levelname)s - %(name)s - %(message)s",
             },
-            "handlers": {
-                "console": {
-                    "class": "logging.StreamHandler",
-                    "formatter": "default",
-                },
+            "message_only": {
+                "format": "%(message)s",
+            }
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "formatter": "default",
             },
-            "loggers": {
-                "": {
-                    "level": global_level,
-                    "handlers": ["console"],
-                },
-                "apscheduler": {
-                    "level": "ERROR",
-                    "handlers": ["console"],
-                    "propagate": False,
-                },
-                "httpx": {
-                    "level": "ERROR",
-                    "handlers": ["console"],
-                    "propagate": False,
-                },
-                "neo4j.notifications": {
-                    "level": "ERROR",
-                    "handlers": ["console"],
-                    "propagate": False,
-                },
-                "sqlalchemy": {
-                    "level": "ERROR",
-                    "handlers": ["console"],
-                    "propagate": False,
-                },
-                "uvicorn.error": {
-                    "level": "ERROR",
-                    "handlers": ["console"],
-                    "propagate": False,
-                },
-                "uvicorn.access": {
-                    "level": "INFO",
-                    "handlers": ["console"],
-                    "propagate": False,
-                },
+            "message": {
+                "filename": f"{log_dir}/message.log",
+                "class": "logging.handlers.TimedRotatingFileHandler",
+                "formatter": "message_only",
+                # Daily rotation with 7 + 1 days of history
+                "when": "D",
+                "interval": 1,
+                "encoding": "utf8",
             },
-        }
+        },
+        "loggers": {
+            "": {
+                "level": global_level,
+                "handlers": ["console"],
+            },
+            "apscheduler": {
+                "level": "ERROR",
+                **console_only_logger_config,
+            },
+            "httpx": {
+                "level": "ERROR",
+                **console_only_logger_config,
+            },
+            "message": {
+                "level": "INFO",
+                "handlers": ["message"],
+                "propagate": False,
+            },
+            "neo4j.notifications": {
+                "level": "ERROR",
+                **console_only_logger_config,
+            },
+            "sqlalchemy": {
+                "level": "ERROR",
+                **console_only_logger_config,
+            },
+            "uvicorn.error": {
+                "level": "ERROR",
+                **console_only_logger_config,
+            },
+            "uvicorn.access": {
+                "level": "INFO",
+                **console_only_logger_config,
+            },
+        }}
     )

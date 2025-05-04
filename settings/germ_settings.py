@@ -3,8 +3,8 @@ import uuid
 
 # Service
 
-DATA_DIR = os.getenv("DATA_DIR", "/var/lib/germ")
 ENCRYPTION_PASSWORD = os.getenv("ENCRYPTION_KEY", "0Bfusc8")
+LOG_DIR = os.getenv("LOG_DIR", "/var/log/germ")
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "/tmp")
 UUID5_NS = uuid.UUID("246a5463-afae-4571-a6e0-f319d74147d3")
 WEBSOCKET_IDLE_TIMEOUT = 3600
