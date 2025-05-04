@@ -1,7 +1,6 @@
 from datetime import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
 from starlette.concurrency import run_in_threadpool
-from uuid import UUID
 import aiohttp
 import asyncio
 import logging
@@ -31,7 +30,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         pass
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: UUID,
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         interceptor = InterceptingWebSocketSender(ws_sender)  # Intercepts and holds LLM response
         fast_response_task = asyncio.create_task(
@@ -73,7 +72,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         await fast_response_task
         await interceptor.send_intercepted_responses()
 
-    async def on_send(self, conversation_id: int, dt_created: datetime, text_sig: UUID,
+    async def on_send(self, conversation_id: int, dt_created: datetime, text_sig: str,
                       chat_response: ChatResponse, received_message_dt_created: datetime = None):
         pass
 
