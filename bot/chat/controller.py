@@ -1,5 +1,7 @@
+from datetime import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
 from starlette.concurrency import run_in_threadpool
+from uuid import UUID
 import aiohttp
 import asyncio
 import logging
@@ -29,12 +31,14 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         pass
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, conversation_id: int, chat_request_received_id: int, chat_request: ChatRequest,
-                         ws_sender: WebSocketSender):
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: UUID,
+                         chat_request: ChatRequest, ws_sender: WebSocketSender):
         interceptor = InterceptingWebSocketSender(ws_sender)  # Intercepts and holds LLM response
         fast_response_task = asyncio.create_task(
             # Send to LLM
-            self.delegate.on_receive(conversation_id, chat_request_received_id, chat_request, interceptor),
+            self.delegate.on_receive(
+                user_id, conversation_id, dt_created, text_sig, chat_request, interceptor
+            ),
         )
         text_embeddings_task = asyncio.create_task(get_text_embeddings(chat_request.messages[-1].content))
 
@@ -69,11 +73,8 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         await fast_response_task
         await interceptor.send_intercepted_responses()
 
-    async def on_send(self,
-                      sent_message_id: int,
-                      chat_response: ChatResponse,
-                      conversation_id: int,
-                      received_message_id: int = None):
+    async def on_send(self, conversation_id: int, dt_created: datetime, text_sig: UUID,
+                      chat_response: ChatResponse, received_message_dt_created: datetime = None):
         pass
 
     async def on_tick(self, conversation_id: int, ws_sender: WebSocketSender):

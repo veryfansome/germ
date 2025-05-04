@@ -40,6 +40,23 @@ LANGUAGE 'plpgsql';
  *
  **/
 
+DROP TABLE IF EXISTS struct_type CASCADE;
+CREATE TABLE struct_type (
+                             struct_type_id                                            SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
+    , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , att_pub_ident                                             TEXT                                NOT NULL   /* exp: 3XL, 0000FF - identifier */
+    , att_value                                                 TEXT                                NOT NULL   /* exp: 3X Large, Blue - display name*/
+    , display_order                                             SMALLINT                            NOT NULL DEFAULT 1000   /* Set if needed */
+    , group_name                                                TEXT                                NOT NULL   /* exp: t-shirt size, color - category name*/
+    , PRIMARY KEY (struct_type_id)
+)
+;
+CREATE UNIQUE INDEX idx_struct_type_att_pub_ident               ON struct_type                      USING btree (group_name, att_pub_ident);
+SELECT update_dt_modified_column('struct_type');
+COMMENT ON TABLE struct_type IS 'This table functions as a single type table to avoid having many smaller type tables';
+
+
 DROP TABLE IF EXISTS chat_user CASCADE;
 CREATE TABLE chat_user (
       user_id                                                   SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
@@ -69,37 +86,20 @@ SELECT update_dt_modified_column('conversation');
 COMMENT ON TABLE conversation IS 'This table stores conversation records';
 
 
-DROP TABLE IF EXISTS chat_message CASCADE;
-CREATE TABLE chat_message (
-      message_id                                                SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
-    , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , json_sig                                                  UUID                                NOT NULL
-    , received                                                  BOOLEAN                             NOT NULL
+DROP TABLE IF EXISTS conversation_state CASCADE;
+CREATE TABLE conversation_state (
+      conversation_state_id                                     INT                                 NOT NULL GENERATED ALWAYS AS IDENTITY
     , conversation_id                                           SMALLINT                            NOT NULL
-    , PRIMARY KEY (message_id)
-    , CONSTRAINT fk_chat_message_conversation_conversation_id   FOREIGN KEY (conversation_id)       REFERENCES conversation  (conversation_id)
-)
-;
-SELECT update_dt_modified_column('chat_message');
-COMMENT ON TABLE chat_message IS 'This table stores chat message records';
-
-
-DROP TABLE IF EXISTS struct_type CASCADE;
-CREATE TABLE struct_type (
-      struct_type_id                                            SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
     , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , att_pub_ident                                             TEXT                                NOT NULL   /* exp: 3XL, 0000FF - identifier */
-    , att_value                                                 TEXT                                NOT NULL   /* exp: 3X Large, Blue - display name*/
-    , display_order                                             SMALLINT                            NOT NULL DEFAULT 1000   /* Set if needed */
-    , group_name                                                TEXT                                NOT NULL   /* exp: t-shirt size, color - category name*/
-    , PRIMARY KEY (struct_type_id)
+    , status                                                    SMALLINT                            NOT NULL
+    , PRIMARY KEY (conversation_state_id)
+    , CONSTRAINT fk_conversation_state_status                   FOREIGN KEY (status)                REFERENCES struct_type   (struct_type_id)
+    , CONSTRAINT fk_conversation_state_conversation_id          FOREIGN KEY (conversation_id)       REFERENCES conversation  (conversation_id)
 )
 ;
-CREATE UNIQUE INDEX idx_struct_type_att_pub_ident               ON struct_type                      USING btree (group_name, att_pub_ident);
-SELECT update_dt_modified_column('struct_type');
-COMMENT ON TABLE struct_type IS 'This table functions as a single type table to avoid having many smaller type tables';
+SELECT update_dt_modified_column('conversation_state');
+COMMENT ON TABLE conversation_state IS 'This table stores conversation_state records';
 
 
 DROP TABLE IF EXISTS top_level_domain CASCADE;

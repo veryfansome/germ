@@ -1,3 +1,4 @@
+from datetime import datetime
 from openai.lib.streaming import AsyncAssistantEventHandler
 from pathlib import Path
 from traceback import format_exc
@@ -36,7 +37,7 @@ class AssistantHelper:
         logger.info(f"initialized {asst}")
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def handle_in_a_thread(self, conversation_id: int, chat_request_received_id: int,
+    async def handle_in_a_thread(self, conversation_id: int, dt_created: datetime,
                                  chat_request: ChatRequest, ws_sender: WebSocketSender):
         if chat_request.uploaded_filenames:
             for filename in chat_request.uploaded_filenames:
@@ -67,9 +68,7 @@ class AssistantHelper:
         async with async_openai_client.beta.threads.runs.stream(
             assistant_id=assistant.id,
             thread_id=thread.id,
-            event_handler=ThreadEventHandler(
-                assistant, thread, conversation_id, chat_request_received_id,
-                chat_request, ws_sender),
+            event_handler=ThreadEventHandler(assistant, thread, conversation_id, dt_created, chat_request, ws_sender),
         ) as stream:
             try:
                 await stream.until_done()
@@ -133,12 +132,12 @@ class AssistantHelper:
 
 
 class ThreadEventHandler(AsyncAssistantEventHandler):
-    def __init__(self, assistant, thread, conversation_id: int, chat_request_received_id: int,
+    def __init__(self, assistant, thread, conversation_id: int, dt_created: datetime,
                  chat_request: ChatRequest, ws_sender: WebSocketSender):
         self.assistant = assistant
         self.chat_request = chat_request
-        self.chat_request_received_id = chat_request_received_id
         self.conversation_id = conversation_id
+        self.dt_created = dt_created
         self.thread = thread
         self.ws_sender = ws_sender
         super().__init__()
@@ -147,24 +146,22 @@ class ThreadEventHandler(AsyncAssistantEventHandler):
     async def on_end(self) -> None:
         logger.info(f"on_end called")
         await self.ws_sender.send_reply(
-            self.chat_request_received_id,
-            ChatResponse(complete=True,
-                         content=f"Thread {self.thread.id} ended."))
+            self.dt_created, ChatResponse(complete=True, content=f"Thread {self.thread.id} ended.")
+        )
         await super().on_end()
 
     @override
     async def on_message_done(self, message) -> None:
         await self.ws_sender.send_reply(
-            self.chat_request_received_id,
-            ChatResponse(complete=False,
-                         content=message.content[0].text.value,
-                         model=self.assistant.model))
+            self.dt_created,
+            ChatResponse(complete=False, content=message.content[0].text.value, model=self.assistant.model)
+        )
         await super().on_message_done(message)
 
     @override
     async def on_tool_call_created(self, tool_call):
         await self.ws_sender.send_reply(
-            self.chat_request_received_id,
-            ChatResponse(complete=False,
-                         content=f"One moment, using tool: `{tool_call.type}`."))
+            self.dt_created,
+            ChatResponse(complete=False, content=f"One moment, using tool: `{tool_call.type}`.")
+        )
         await super().on_tool_call_created(tool_call)

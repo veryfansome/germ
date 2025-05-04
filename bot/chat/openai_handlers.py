@@ -1,13 +1,14 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from openai.types.chat.chat_completion import ChatCompletion
 from typing import Optional
+from uuid import UUID
 import asyncio
 import json
 import logging
 
 from bot.api.models import ChatRequest, ChatResponse
 from bot.chat import async_openai_client, openai_beta
-from bot.graph.control_plane import ControlPlane
 from bot.websocket import WebSocketReceiveEventHandler, WebSocketSender
 from observability.annotations import measure_exec_seconds
 from settings.openai_settings import (CHAT_MODEL, MINI_MODEL, REASONING_MODEL, ROUTING_MODEL,
@@ -62,16 +63,13 @@ class ChatModelEventHandler(RoutableChatEventHandler):
         return self.function_settings
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self,
-                         conversation_id: int, chat_request_received_id: int,
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: UUID,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await self.do_chat_completion(chat_request)
         await ws_sender.send_reply(
-            chat_request_received_id,
-            ChatResponse(
-                complete=True,
-                content=completion.choices[0].message.content,
-                model=completion.model))
+            dt_created,
+            ChatResponse(complete=True, content=completion.choices[0].message.content, model=completion.model)
+        )
 
 
 class ImageModelEventHandler(RoutableChatEventHandler):
@@ -109,13 +107,15 @@ class ImageModelEventHandler(RoutableChatEventHandler):
         return self.function_settings
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self,
-                         conversation_id: int, chat_request_received_id: int,
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: UUID,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         markdown_image = await self.generate_markdown_image(chat_request)
         _ = asyncio.create_task(
             ws_sender.send_reply(
-                chat_request_received_id, ChatResponse(complete=True, content=markdown_image, model=self.model)))
+                dt_created,
+                ChatResponse(complete=True, content=markdown_image, model=self.model)
+            )
+        )
 
 
 class ReasoningChatModelEventHandler(RoutableChatEventHandler):
@@ -164,16 +164,17 @@ class ReasoningChatModelEventHandler(RoutableChatEventHandler):
         return self.function_settings
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self,
-                         conversation_id: int, chat_request_received_id: int,
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: UUID,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await self.do_chat_completion(chat_request)
         await ws_sender.send_reply(
-            chat_request_received_id,
+            dt_created,
             ChatResponse(
                 complete=True,
                 content=completion.choices[0].message.content,
-                model=f"{completion.model}[{'|'.join([f'{k}:{v}' for k, v in chat_request.parameters.items()])}]"))
+                model=f"{completion.model}[{'|'.join([f'{k}:{v}' for k, v in chat_request.parameters.items()])}]"
+            )
+        )
 
 
 class ChatRoutingEventHandler(ChatModelEventHandler):
@@ -201,19 +202,20 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
             logger.info(f"added {tool.get_function_name()} => {tool}")
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self,
-                         conversation_id: int, chat_request_received_id: int,
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: UUID,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         if chat_request.uploaded_filenames:
             logger.info(f"uploaded file: {chat_request.uploaded_filenames}")
             await self.assistant_helper.handle_in_a_thread(
-                conversation_id, chat_request_received_id, chat_request, ws_sender)
+                conversation_id, dt_created, chat_request, ws_sender
+            )
         else:
             completion = await self.do_chat_completion(chat_request)
             if completion is None:
                 await ws_sender.send_reply(
-                    chat_request_received_id,
-                    ChatResponse(complete=True, content="Sorry, I'm unable to access my language model."))
+                    dt_created,
+                    ChatResponse(complete=True, content="Sorry, I'm unable to access my language model.")
+                )
                 return
             elif completion.choices[0].message.content is None:
                 if completion.choices[0].message.tool_calls is not None:
@@ -223,15 +225,16 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                         tool_response_tasks.append(
                             asyncio.create_task(
                                 self.tools[tool_call.function.name].on_receive(
-                                    conversation_id, chat_request_received_id, chat_request, ws_sender
+                                    user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender
                                 )
                             )
                         )
                     # Let user know you're delegating
                     tool_names = [f"`{t.function.name}`" for t in completion.choices[0].message.tool_calls]
                     await ws_sender.send_reply(
-                        chat_request_received_id,
-                        ChatResponse(complete=False, content=f"One moment, using tools: {''.join(tool_names)}."))
+                        dt_created,
+                        ChatResponse(complete=False, content=f"One moment, using tools: {''.join(tool_names)}.")
+                    )
                     await asyncio.gather(*tool_response_tasks)
                     return
                 else:
@@ -239,10 +242,9 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                     completion.choices[0].message.content = "Strange... I don't have a response"
             # Return completed response
             await ws_sender.send_reply(
-                chat_request_received_id,
-                ChatResponse(complete=True,
-                             content=completion.choices[0].message.content,
-                             model=completion.model))
+                dt_created,
+                ChatResponse(complete=True, content=completion.choices[0].message.content, model=completion.model)
+            )
 
     async def do_chat_completion(self, chat_request: ChatRequest) -> Optional[ChatCompletion]:
         tools = [t.get_function_settings() for t in self.tools.values()]
@@ -264,21 +266,6 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
             logger.error(e)
         return None
 
-
-##
-# Internal chat handlers
-
-
-class UserProfilingHandler(WebSocketReceiveEventHandler):
-    def __init__(self, control_plane: ControlPlane,
-                 model: str = CHAT_MODEL):
-        self.control_plane = control_plane
-        self.model = model
-
-    @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, conversation_id: int, chat_request_received_id: id,
-                         chat_request: ChatRequest, ws_sender: WebSocketSender):
-        logger.info(f"chat_request: {chat_request_received_id}: {chat_request}")
 
 ##
 # Functions
