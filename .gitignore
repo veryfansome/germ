@@ -1,6 +1,7 @@
 *.log
 *.pyc
 *.pyo
+*.zip
 .DS_Store
 .coverage
 .env
@@ -8,11 +9,10 @@
 .venv/
 __pycache__/
 
-bot/static/*.html
-bot/static/tests/report.xml
-bot/static/tests/cov/
-data/germ/multi_head_exps/
-venv/
+germ/services/bot/static/*.html
+germ/services/bot/static/tests/*
+data/e5_*
+data/oewn*
 germ_venv/
 
 google_application_credentials.json
