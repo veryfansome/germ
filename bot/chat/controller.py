@@ -4,14 +4,14 @@ from starlette.concurrency import run_in_threadpool
 import aiohttp
 import asyncio
 import logging
+import tiktoken
 
 from bot.api.models import ChatRequest, ChatResponse
 from bot.chat import async_openai_client
 from bot.graph.control_plane import ControlPlane
 from bot.lang.parsers import extract_markdown_page_elements
 from bot.lang.patterns import naive_sentence_end_pattern
-from bot.websocket import (InterceptingWebSocketSender,
-                           WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler, WebSocketSendEventHandler,
+from bot.websocket import (WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler, WebSocketSendEventHandler,
                            WebSocketSender, WebSocketSessionMonitor)
 from observability.annotations import measure_exec_seconds
 
@@ -22,9 +22,18 @@ tf_idf_vectorizer = TfidfVectorizer(stop_words='english')
 
 class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                      WebSocketSendEventHandler, WebSocketSessionMonitor):
-    def __init__(self, control_plane: ControlPlane, delegate: WebSocketReceiveEventHandler):
+    def __init__(
+            self, control_plane: ControlPlane,
+            delegate: WebSocketReceiveEventHandler,
+            token_model: str = "gpt-4",   # For estimation only since multiple models could be used
+            truncation_threshold: int = 8192,  # Based on smaller GPT-4 variant
+    ):
         self.control_plane = control_plane
+        self.conversations: dict[int, dict] = {}
         self.delegate = delegate
+        self.message_cache = {}
+        self.token_encoder = tiktoken.encoding_for_model(token_model)
+        self.truncation_threshold = truncation_threshold
 
     async def on_disconnect(self, conversation_id: int):
         pass
@@ -32,49 +41,66 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
-        interceptor = InterceptingWebSocketSender(ws_sender)  # Intercepts and holds LLM response
-        fast_response_task = asyncio.create_task(
-            # Send to LLM
-            self.delegate.on_receive(
-                user_id, conversation_id, dt_created, text_sig, chat_request, interceptor
-            ),
-        )
-        text_embeddings_task = asyncio.create_task(get_text_embeddings(chat_request.messages[-1].content))
+        if conversation_id not in self.conversations:
+            self.conversations[conversation_id] = {
+                "est_token_size": 0,
+                "messages": {},
+            }
+        self.conversations[conversation_id]["messages"][dt_created] = {"user_id": user_id, "text_sig": text_sig}
 
-        # Analyze most recent message in chat request
-        code_blocks, text_chunks = await process_markdown_elements(
-            await run_in_threadpool(extract_markdown_page_elements, chat_request.messages[-1].content)
-        )
-        sentence_chunks = []
-        for text_chunk in text_chunks:
-            while text_chunk:
-                # Not always perfect but good enough
-                sentence_end_match = await run_in_threadpool(
-                    naive_sentence_end_pattern.search, text_chunk, 0, len(text_chunk))
-                if sentence_end_match:
-                    sentence_chunks.append(text_chunk[:sentence_end_match.end()])
-                    text_chunk = text_chunk[sentence_end_match.end():].strip()
-                else:
-                    sentence_chunks.append(text_chunk)
-                    text_chunk = ""
+        last_message_content = chat_request.messages[-1].content
+        if text_sig not in self.message_cache:
+            est_token_size = len(self.token_encoder.encode(last_message_content))
 
-        embeddings, emotion_classification, tf_id_keywords = await asyncio.gather(*[
-            text_embeddings_task,
-            get_emotions_classifications(sentence_chunks),
-            get_tf_idf_keywords(sentence_chunks),
-        ])
+            text_embeddings_task = asyncio.create_task(get_text_embeddings(last_message_content))
+
+            code_blocks, text_chunks = await process_markdown_elements(
+                await run_in_threadpool(extract_markdown_page_elements, last_message_content)
+            )
+            sentence_chunks = []
+            for text_chunk in text_chunks:
+                while text_chunk:
+                    # Not always perfect but good enough
+                    sentence_end_match = await run_in_threadpool(
+                        naive_sentence_end_pattern.search, text_chunk, 0, len(text_chunk))
+                    if sentence_end_match:
+                        sentence_chunks.append(text_chunk[:sentence_end_match.end()])
+                        text_chunk = text_chunk[sentence_end_match.end():].strip()
+                    else:
+                        sentence_chunks.append(text_chunk)
+                        text_chunk = ""
+
+            embeddings, emotion_classification, tf_id_keywords = await asyncio.gather(*[
+                text_embeddings_task,
+                get_emotions_classifications(sentence_chunks),
+                get_tf_idf_keywords(sentence_chunks),
+            ])
+
+            self.message_cache[text_sig] = (
+                last_message_content, est_token_size, embeddings, emotion_classification, tf_id_keywords
+            )
+        else:
+            _, est_token_size, embeddings, emotion_classification, tf_id_keywords = self.message_cache[text_sig]
+
+        self.conversations[conversation_id]["est_token_size"] += est_token_size
+        logger.info(f"est. conversation tokens {self.conversations[conversation_id]['est_token_size']}")
         logger.info(f"embeddings (10 of {len(embeddings)}): {embeddings[:10]}")
         logger.info(f"emotions: {emotion_classification}")
         logger.info(f"tf-idf keywords: {tf_id_keywords}")
         # TODO:
         #  - Determine if the intercepted initial fast response is good enough or if a new response should
         #    be generated.
-        await fast_response_task
-        await interceptor.send_intercepted_responses()
+        # Send to LLM
+        await self.delegate.on_receive(user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender)
 
     async def on_send(self, conversation_id: int, dt_created: datetime, text_sig: str,
                       chat_response: ChatResponse, received_message_dt_created: datetime = None):
-        pass
+        self.conversations[conversation_id]["messages"][dt_created] = {"user_id": 0, "text_sig": text_sig}
+
+        est_token_size = len(self.token_encoder.encode(chat_response.content))
+
+        self.conversations[conversation_id]["est_token_size"] += est_token_size
+        logger.info(f"est. conversation tokens {self.conversations[conversation_id]['est_token_size']}")
 
     async def on_tick(self, conversation_id: int, ws_sender: WebSocketSender):
         logger.info(f"conversation {conversation_id} is still active")

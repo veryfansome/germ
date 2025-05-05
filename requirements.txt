@@ -42,5 +42,6 @@ sqlalchemy[asyncio]
 starlette
 starsessions[redis]
 torch
+tiktoken
 transformers
 uvicorn[standard]

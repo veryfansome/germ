@@ -5,6 +5,7 @@ from prometheus_client import Gauge
 from sqlalchemy import Table, and_, insert, select
 from sqlalchemy.ext.asyncio import async_sessionmaker as async_pg_session_maker
 from starlette.websockets import WebSocketDisconnect, WebSocketState
+from traceback import format_exc
 from uuid import uuid5
 import asyncio
 import json
@@ -140,15 +141,16 @@ class WebSocketConnectionManager:
     def __init__(self, conversation_table: Table, conversation_state: Table,
                  control_plane: ControlPlane, pg_session_maker: async_pg_session_maker):
         self.active_connections: dict[int, WebSocket] = {}
-        self.control_plane = control_plane
-        self.conversation_state = conversation_state
-        self.conversation_table = conversation_table
+        self.control_plane: ControlPlane = control_plane
+        self.conversation_monitors: list[WebSocketSessionMonitor] = []
+        self.conversation_state: Table = conversation_state
+        self.conversation_table: Table = conversation_table
+        self.conversations: dict[int, dict] = {}
         self.disconnect_event_handlers: list[WebSocketDisconnectEventHandler] = []
         self.monitor_tasks: dict[int, tuple[asyncio.Task, asyncio.Event]] = {}
-        self.pg_session_maker = pg_session_maker
+        self.pg_session_maker: async_pg_session_maker = pg_session_maker
         self.receive_event_handlers: list[WebSocketReceiveEventHandler] = []
         self.send_event_handlers: list[WebSocketSendEventHandler] = []
-        self.conversation_monitors: list[WebSocketSessionMonitor] = []
 
     def add_conversation_monitor(self, handler: WebSocketSessionMonitor):
         self.conversation_monitors.append(handler)
@@ -229,6 +231,7 @@ class WebSocketConnectionManager:
                     await asyncio.wait_for(asyncio.shield(cancel_event.wait()),
                                            timeout=WEBSOCKET_MONITOR_INTERVAL_SECONDS)
                 except asyncio.TimeoutError:
+                    # TODO: Update conversation_state
                     for monitor in self.conversation_monitors:
                         _ = asyncio.create_task(monitor.on_tick(conversation_id, ws_sender))
         except asyncio.CancelledError:
@@ -288,7 +291,10 @@ class WebSocketConnectionManager:
             logger.info(f"Conversation {conversation_id} with user {user_id} timed out")
             await self.disconnect(conversation_id)
         except WebSocketDisconnect:
+            logger.info(f"Conversation {conversation_id} with user {user_id} disconnected")
             await self.disconnect(conversation_id)
+        except Exception:
+            logger.error(f"Uncaught exception in conversation with user {user_id}: {format_exc()}")
 
 
 async def new_chat_message_received(user_id: int, conversation_id: int, chat_request: ChatRequest) -> (datetime, str):
