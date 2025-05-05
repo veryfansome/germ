@@ -26,8 +26,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
     def __init__(
             self, control_plane: ControlPlane,
             delegate: WebSocketReceiveEventHandler,
-            token_model: str = "gpt-4",   # For estimation only since multiple models could be used
-            truncation_threshold: int = 8192,  # Based on smaller GPT-4 variant
+            # Based on input limit for embeddings model
+            token_model: str = "text-embedding-3-large",
+            truncation_threshold: int = 8191,
     ):
         self.control_plane = control_plane
         self.conversations: dict[int, dict] = {}
