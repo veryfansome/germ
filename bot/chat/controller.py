@@ -3,7 +3,9 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from starlette.concurrency import run_in_threadpool
 import aiohttp
 import asyncio
+import faiss
 import logging
+import numpy as np
 import tiktoken
 
 from bot.api.models import ChatRequest, ChatResponse
@@ -26,17 +28,30 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
     def __init__(
             self, control_plane: ControlPlane,
             delegate: WebSocketReceiveEventHandler,
-            # Based on input limit for embeddings model
+            # Based on embeddings model
+            embedding_dimensions: int = 3072,  # text-embedding-3-large can be shortened to 256
             token_model: str = "text-embedding-3-large",
             truncation_threshold: int = 8191,
     ):
         self.control_plane = control_plane
         self.conversations: dict[int, dict] = {}
         self.delegate = delegate
-        self.chunk_cache = {}
+        self.embedding_dimensions: int = embedding_dimensions
+        self.faiss_index_id_map = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_dimensions))
         self.message_cache = {}
         self.token_encoder = tiktoken.encoding_for_model(token_model)
         self.truncation_threshold = truncation_threshold
+
+    async def get_text_embedding_vector(self, text: str):
+        response = await async_openai_client.embeddings.create(
+            dimensions=self.embedding_dimensions,
+            model="text-embedding-3-large",
+            input=text,
+            encoding_format="float"
+        )
+        vector = np.array([response.data[0].embedding], dtype=np.float32)
+        faiss.normalize_L2(vector)  # Important for cosine search
+        return vector
 
     async def on_disconnect(self, conversation_id: int):
         pass
@@ -56,27 +71,31 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         last_message_content = chat_request.messages[-1].content
         if text_sig not in self.message_cache:
             est_token_size = len(self.token_encoder.encode(last_message_content))
-            text_embeddings_task = asyncio.create_task(get_text_embeddings(last_message_content))
+            embedding_vector_task = asyncio.create_task(self.get_text_embedding_vector(last_message_content))
 
             code_blocks, text_chunks, sentence_chunks = await process_markdown_elements(
                 await run_in_threadpool(extract_markdown_page_elements, last_message_content)
             )
-            text_embeddings, emotion_classification, tf_id_keywords = await asyncio.gather(*[
-                text_embeddings_task,
+            embedding_vector, emotion_classification, tf_id_keywords = await asyncio.gather(*[
+                embedding_vector_task,
                 get_emotions_classifications(sentence_chunks),
                 get_tf_idf_keywords(sentence_chunks),
             ])
             self.message_cache[text_sig] = (
-                last_message_content, est_token_size, text_embeddings, emotion_classification, tf_id_keywords
+                last_message_content, est_token_size, embedding_vector, emotion_classification, tf_id_keywords
             )
         else:
-            _, est_token_size, text_embeddings, emotion_classification, tf_id_keywords = self.message_cache[text_sig]
+            _, est_token_size, embedding_vector, emotion_classification, tf_id_keywords = self.message_cache[text_sig]
 
         self.conversations[conversation_id]["est_token_size"] += est_token_size
         logger.info(f"est. conversation tokens {self.conversations[conversation_id]['est_token_size']}")
-        logger.info(f"text embeddings (10 of {len(text_embeddings)}): {text_embeddings[:10]}")
+        logger.info(f"embedding vectors (10 of {len(embedding_vector)}): {embedding_vector[:10]}")
         logger.info(f"emotions: {emotion_classification}")
         logger.info(f"tf-idf keywords: {tf_id_keywords}")
+
+        similarity_scores, neighbors = await run_in_threadpool(self.faiss_index_id_map.search, embedding_vector, 2)
+        for rank, (result_id, score) in enumerate(zip(neighbors[0], similarity_scores[0]), 1):
+            logger.info(f"{rank:>2}. id={result_id}  sim={score:.4f}")
 
         # Send to LLM
         await self.delegate.on_receive(user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender)
@@ -89,25 +108,30 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         if text_sig not in self.message_cache:
             est_token_size = len(self.token_encoder.encode(chat_response.content))
-            text_embeddings_task = asyncio.create_task(get_text_embeddings(chat_response.content))
+            embedding_vector_task = asyncio.create_task(self.get_text_embedding_vector(chat_response.content))
 
             code_blocks, text_chunks, sentence_chunks = await process_markdown_elements(
                 await run_in_threadpool(extract_markdown_page_elements, chat_response.content)
             )
-            text_embeddings, tf_id_keywords = await asyncio.gather(*[
-                text_embeddings_task,
+            embedding_vector, tf_id_keywords = await asyncio.gather(*[
+                embedding_vector_task,
                 get_tf_idf_keywords(sentence_chunks),
             ])
             self.message_cache[text_sig] = (
-                chat_response.content, est_token_size, text_embeddings, None, tf_id_keywords
+                chat_response.content, est_token_size, embedding_vector, None, tf_id_keywords
             )
         else:
-            _, est_token_size, text_embeddings, _, tf_id_keywords = self.message_cache[text_sig]
+            _, est_token_size, embedding_vector, _, tf_id_keywords = self.message_cache[text_sig]
 
         self.conversations[conversation_id]["est_token_size"] += est_token_size
         logger.info(f"est. conversation tokens {self.conversations[conversation_id]['est_token_size']}")
-        logger.info(f"text embeddings (10 of {len(text_embeddings)}): {text_embeddings[:10]}")
+        logger.info(f"embedding vectors (10 of {len(embedding_vector)}): {embedding_vector[:10]}")
         logger.info(f"tf-idf keywords: {tf_id_keywords}")
+
+        await run_in_threadpool(
+            self.faiss_index_id_map.add_with_ids,
+            embedding_vector, np.array([conversation_id], dtype=np.int64)
+        )
 
     async def on_tick(self, conversation_id: int, ws_sender: WebSocketSender):
         logger.info(f"conversation {conversation_id} is still active")
@@ -118,15 +142,6 @@ async def get_emotions_classifications(texts: list[str]):
         async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/classification/emotions",
                                 json={"texts": texts}) as response:
             return await response.json()
-
-
-async def get_text_embeddings(text: str):
-    response = await async_openai_client.embeddings.create(
-        model="text-embedding-3-large",
-        input=text,
-        encoding_format="float"
-    )
-    return response.data[0].embedding
 
 
 async def get_tf_idf_keywords(texts: list[str], top: int = 3):

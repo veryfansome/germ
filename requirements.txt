@@ -8,6 +8,7 @@ cryptography
 datasets
 dnspython
 fastapi
+faiss-cpu
 gunicorn
 httpx
 huggingface_hub
