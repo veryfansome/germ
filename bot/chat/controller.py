@@ -23,6 +23,21 @@ logger = logging.getLogger(__name__)
 tf_idf_vectorizer = TfidfVectorizer(stop_words='english')
 
 
+class ChatMessageMeta:
+    def __init__(self, user_id: int, conversation_id: int, dt_created: datetime,
+                 content: str, token_size: int, vector_id: int, vector, emotions, keywords):
+        self.content = content
+        self.conversation_id = conversation_id
+        self.dt_created = dt_created
+        self.emotions = emotions
+        self.keywords = keywords
+        self.neighbors: list[int] = []
+        self.token_size = token_size
+        self.user_id = user_id
+        self.vector = vector
+        self.vector_id = vector_id
+
+
 class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                      WebSocketSendEventHandler, WebSocketSessionMonitor):
     def __init__(
@@ -33,12 +48,13 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             token_model: str = "text-embedding-3-large",
             truncation_threshold: int = 8191,
     ):
+        self.chat_messages: dict[str, ChatMessageMeta] = {}
         self.control_plane = control_plane
         self.conversations: dict[int, dict] = {}
         self.delegate = delegate
         self.embedding_dimensions: int = embedding_dimensions
-        self.faiss_index_id_map = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_dimensions))
-        self.message_cache = {}
+        self.faiss_assistant_message = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_dimensions))
+        self.faiss_user_message = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_dimensions))
         self.token_encoder = tiktoken.encoding_for_model(token_model)
         self.truncation_threshold = truncation_threshold
 
@@ -70,41 +86,48 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         }
 
         last_message_content = chat_request.messages[-1].content
-        if text_sig not in self.message_cache:
+        if text_sig not in self.chat_messages:
+            embedding_vector_task = asyncio.create_task(
+                self.get_text_embedding_vector(last_message_content)
+            )
+
             est_token_size = len(self.token_encoder.encode(last_message_content))
             vector_id = convert_conversation_id_and_ts_to_vector_id(conversation_id, dt_created_ts)
-
-            query_doc = get_query_doc(last_message_content)
-            logger.info(f"query doc: {query_doc}")
-            embedding_vector_task = asyncio.create_task(self.get_text_embedding_vector(last_message_content))
-
             code_blocks, text_chunks, sentence_chunks = await process_markdown_elements(
                 await run_in_threadpool(extract_markdown_page_elements, last_message_content)
             )
+
             embedding_vector, emotion_classification, tf_id_keywords = await asyncio.gather(*[
                 embedding_vector_task,
                 get_emotions_classifications(sentence_chunks),
                 get_tf_idf_keywords(sentence_chunks),
             ])
-            self.message_cache[text_sig] = (
-                last_message_content, est_token_size, vector_id, embedding_vector, emotion_classification, tf_id_keywords
+            self.chat_messages[text_sig] = meta = ChatMessageMeta(
+                user_id=user_id, conversation_id=conversation_id, dt_created=dt_created,
+                content=last_message_content, token_size=est_token_size,
+                vector_id=vector_id, vector=embedding_vector,
+                emotions=emotion_classification, keywords=tf_id_keywords
             )
         else:
-            _, est_token_size, vector_id, embedding_vector, emotion_classification, tf_id_keywords = self.message_cache[text_sig]
+            meta = self.chat_messages[text_sig]
 
-        self.conversations[conversation_id]["est_token_size"] += est_token_size
+        self.conversations[conversation_id]["est_token_size"] += meta.token_size
         logger.info(f"est. conversation tokens {self.conversations[conversation_id]['est_token_size']}")
-        logger.info(f"embedding vector dims: {len(embedding_vector[0])}")
-        logger.info(f"emotions: {emotion_classification}")
-        logger.info(f"tf-idf keywords: {tf_id_keywords}")
+        logger.info(f"embedding vector dims: {len(meta.vector[0])}")
+        logger.info(f"emotions: {meta.emotions}")
+        logger.info(f"tf-idf keywords: {meta.keywords}")
 
         # Search for 4 items based loosely on human working memory capacity
-        similarity_scores, neighbors = await run_in_threadpool(self.faiss_index_id_map.search, embedding_vector, 4)
+        similarity_scores, neighbors = await run_in_threadpool(
+            self.faiss_assistant_message.search, meta.vector, 4
+        )
         for rank, (result_id, score) in enumerate(zip(neighbors[0], similarity_scores[0]), 1):
             if result_id != -1 and score > 0.35:  # -1 means no match
                 result_conversation_id, result_message_ts = convert_vector_id_to_conversation_id_and_ts(result_id)
-                result_text = self.message_cache[self.conversations[result_conversation_id]["messages"][result_message_ts]["text_sig"]][0]
-                logger.info(f"{rank:>2}. vector_id={result_id}  sim={score:.4f} text={result_text}")
+                if conversation_id != result_conversation_id:
+                    result_sig = self.conversations[result_conversation_id]["messages"][result_message_ts]["text_sig"]
+                    result_meta = self.chat_messages[result_sig]
+                    logger.info(f"{rank:>2}. vector_id={result_id}  sim={score:.4f} text={result_meta.content}")
 
         # Send to LLM
         await self.delegate.on_receive(user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender)
@@ -112,48 +135,55 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
     async def on_send(self, conversation_id: int, dt_created: datetime, text_sig: str,
                       chat_response: ChatResponse, received_message_dt_created: datetime = None):
         dt_created_ts = int(dt_created.timestamp())
-        received_message_dt_created_ts = int(received_message_dt_created.timestamp())
+        received_message_ts = int(received_message_dt_created.timestamp())
+        received_message_sig = self.conversations[conversation_id]["messages"][received_message_ts]["text_sig"]
+        received_message_meta = self.chat_messages[received_message_sig]
         self.conversations[conversation_id]["messages"][dt_created_ts] = {
             "user_id": 0, "text_sig": text_sig
         }
 
-        if text_sig not in self.message_cache:
+        if text_sig not in self.chat_messages:
+            embedding_vector_task = asyncio.create_task(
+                # TODO: Possibly replace code blocks
+                self.get_text_embedding_vector(chat_response.content)
+            )
+
             est_token_size = len(self.token_encoder.encode(chat_response.content))
             vector_id = convert_conversation_id_and_ts_to_vector_id(conversation_id, dt_created_ts)
-
-            indexed_doc = get_indexed_doc(
-                self.message_cache[self.conversations[conversation_id]["messages"][received_message_dt_created_ts]["text_sig"]][0],
-                chat_response.content
-            )
-            logger.info(f"indexed doc: {indexed_doc}")
-            embedding_vector_task = asyncio.create_task(
-                self.get_text_embedding_vector(
-                    indexed_doc,
-                )
-            )
-
             code_blocks, text_chunks, sentence_chunks = await process_markdown_elements(
                 await run_in_threadpool(extract_markdown_page_elements, chat_response.content)
             )
+
             embedding_vector, tf_id_keywords = await asyncio.gather(*[
                 embedding_vector_task,
                 get_tf_idf_keywords(sentence_chunks),
             ])
-            self.message_cache[text_sig] = (
-                chat_response.content, est_token_size, vector_id, embedding_vector, None, tf_id_keywords
+            self.chat_messages[text_sig] = meta = ChatMessageMeta(
+                user_id=0, conversation_id=conversation_id, dt_created=dt_created,
+                content=chat_response.content, token_size=est_token_size,
+                vector_id=vector_id, vector=embedding_vector,
+                emotions=None, keywords=tf_id_keywords
             )
         else:
-            _, est_token_size, vector_id, embedding_vector, _, tf_id_keywords = self.message_cache[text_sig]
+            meta = self.chat_messages[text_sig]
 
-        self.conversations[conversation_id]["est_token_size"] += est_token_size
+        self.conversations[conversation_id]["est_token_size"] += meta.token_size
         logger.info(f"est. conversation tokens {self.conversations[conversation_id]['est_token_size']}")
-        logger.info(f"embedding vector dims: {len(embedding_vector[0])}")
-        logger.info(f"tf-idf keywords: {tf_id_keywords}")
+        logger.info(f"embedding vector dims: {len(meta.vector[0])}")
+        logger.info(f"tf-idf keywords: {meta.keywords}")
 
-        await run_in_threadpool(
-            self.faiss_index_id_map.add_with_ids,
-            embedding_vector, np.array([vector_id], dtype=np.int64)
-        )
+        await asyncio.gather(*[
+            run_in_threadpool(
+                self.faiss_user_message.add_with_ids,
+                received_message_meta.vector,
+                np.array([received_message_meta.vector_id], dtype=np.int64)
+            ),
+            run_in_threadpool(
+                self.faiss_assistant_message.add_with_ids,
+                embedding_vector,
+                np.array([vector_id], dtype=np.int64)
+            )
+        ])
 
     async def on_tick(self, conversation_id: int, ws_sender: WebSocketSender):
         logger.info(f"conversation {conversation_id} is still active")
@@ -175,23 +205,6 @@ async def get_emotions_classifications(texts: list[str]):
         async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/classification/emotions",
                                 json={"texts": texts}) as response:
             return await response.json()
-
-
-def get_indexed_doc(message: str, response: str) -> str:
-    return f"""
-# Message:
-{message}
-
-# Response:
-{response}
-""".strip()
-
-
-def get_query_doc(message: str):
-    return f"""
-# Message:
-{message}
-""".strip()
 
 
 async def get_tf_idf_keywords(texts: list[str], top: int = 3):
