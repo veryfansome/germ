@@ -115,6 +115,15 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         logger.info(f"emotions: {meta.emotions}")
         logger.info(f"tf-idf keywords: {meta.keywords}")
 
+        # NOTES:
+        # - Similar questions often recall better than responses and questions
+        # - "tell me a joke" and "give me a side-slapper" mean the same thing, but they don't recall each other
+        # - Even though ^ doesn't recall on the question, the responses are the same, and maybe we can link the
+        #   questions based on close similarity of the responses
+        # - Messages with a lot of links might be more valuable just like messages that gets recalled often. Maybe we
+        #   can generate per sentence embeddings for these high value messages in cases there are higher value chunks
+        #   in them.
+
         # Search for up to 4 items
         user_message_similarity_scores, user_message_neighbors = await run_in_threadpool(
             self.faiss_user_message.search, meta.vector, 4
@@ -126,6 +135,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                     result_sig = self.conversations[result_conversation_id]["messages"][result_message_ts]["text_sig"]
                     result_meta = self.chat_messages[result_sig]
                     logger.info(f"{rank:>2}. vector_id={result_id}  sim={score:.4f} text={result_meta.content}")
+
         assistant_message_similarity_scores, assistant_message_neighbors = await run_in_threadpool(
             self.faiss_assistant_message.search, meta.vector, 4
         )
