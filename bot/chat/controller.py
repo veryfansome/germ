@@ -1,5 +1,4 @@
 from datetime import datetime
-from sklearn.feature_extraction.text import TfidfVectorizer
 from starlette.concurrency import run_in_threadpool
 import aiohttp
 import asyncio
@@ -13,14 +12,13 @@ from bot.chat import async_openai_client
 from bot.graph.control_plane import ControlPlane
 from bot.lang.parsers import extract_markdown_page_elements, get_html_soup, strip_html_elements
 from bot.lang.patterns import naive_sentence_end_pattern
+from bot.lang.tf_idf import get_tf_idf_keywords
 from bot.websocket import (WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler, WebSocketSendEventHandler,
                            WebSocketSender, WebSocketSessionMonitor)
 from observability.annotations import measure_exec_seconds
 from settings import germ_settings
 
 logger = logging.getLogger(__name__)
-
-tf_idf_vectorizer = TfidfVectorizer(stop_words='english')
 
 
 class ChatMessageMeta:
@@ -100,7 +98,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             embedding_vector, emotion_classification, tf_id_keywords = await asyncio.gather(*[
                 embedding_vector_task,
                 get_emotions_classifications(sentence_chunks),
-                get_tf_idf_keywords(sentence_chunks),
+                run_in_threadpool(get_tf_idf_keywords, sentence_chunks, top=5),
             ])
             self.chat_messages[text_sig] = meta = ChatMessageMeta(
                 user_id=user_id, conversation_id=conversation_id, dt_created=dt_created,
@@ -117,11 +115,21 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         logger.info(f"emotions: {meta.emotions}")
         logger.info(f"tf-idf keywords: {meta.keywords}")
 
-        # Search for 4 items based loosely on human working memory capacity
-        similarity_scores, neighbors = await run_in_threadpool(
+        # Search for up to 4 items
+        user_message_similarity_scores, user_message_neighbors = await run_in_threadpool(
+            self.faiss_user_message.search, meta.vector, 4
+        )
+        for rank, (result_id, score) in enumerate(zip(user_message_neighbors[0], user_message_similarity_scores[0]), 1):
+            if result_id != -1 and score > 0.7:  # -1 means no match
+                result_conversation_id, result_message_ts = convert_vector_id_to_conversation_id_and_ts(result_id)
+                if conversation_id != result_conversation_id:
+                    result_sig = self.conversations[result_conversation_id]["messages"][result_message_ts]["text_sig"]
+                    result_meta = self.chat_messages[result_sig]
+                    logger.info(f"{rank:>2}. vector_id={result_id}  sim={score:.4f} text={result_meta.content}")
+        assistant_message_similarity_scores, assistant_message_neighbors = await run_in_threadpool(
             self.faiss_assistant_message.search, meta.vector, 4
         )
-        for rank, (result_id, score) in enumerate(zip(neighbors[0], similarity_scores[0]), 1):
+        for rank, (result_id, score) in enumerate(zip(assistant_message_neighbors[0], assistant_message_similarity_scores[0]), 1):
             if result_id != -1 and score > 0.35:  # -1 means no match
                 result_conversation_id, result_message_ts = convert_vector_id_to_conversation_id_and_ts(result_id)
                 if conversation_id != result_conversation_id:
@@ -156,7 +164,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
             embedding_vector, tf_id_keywords = await asyncio.gather(*[
                 embedding_vector_task,
-                get_tf_idf_keywords(sentence_chunks),
+                run_in_threadpool(get_tf_idf_keywords, ["\n".join(text_chunks)], top=15),
             ])
             self.chat_messages[text_sig] = meta = ChatMessageMeta(
                 user_id=0, conversation_id=conversation_id, dt_created=dt_created,
@@ -205,23 +213,6 @@ async def get_emotions_classifications(texts: list[str]):
         async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/classification/emotions",
                                 json={"texts": texts}) as response:
             return await response.json()
-
-
-async def get_tf_idf_keywords(texts: list[str], top: int = 3):
-    keywords = []
-    documents = texts
-    # The IDF part means I more documents with a broader blend of keywords.
-
-    try:
-        tfidf_matrix = await run_in_threadpool(tf_idf_vectorizer.fit_transform, documents, y=None)
-        feature_names = tf_idf_vectorizer.get_feature_names_out()
-        for text_idx, text in enumerate(texts):
-            doc_scores = tfidf_matrix[text_idx].toarray().flatten()
-            top_indices = doc_scores.argsort()[::-1]
-            keywords.append({"text": text, "keywords": [feature_names[i] for i in top_indices[:top]]})
-    except Exception as e:
-        logger.error(f"Exception: {e}")
-    return keywords
 
 
 async def process_markdown_elements(markdown_elements):

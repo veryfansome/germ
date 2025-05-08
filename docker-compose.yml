@@ -2,8 +2,8 @@ networks:
   bots: {}
 
 volumes:
-  bot-data: {}
   grafana-storage: {}
+  nltk-data: { }
 
 services:
   bot:
@@ -21,7 +21,7 @@ services:
     image: "germ:latest"
     volumes:
       - ./:/src:rw
-      - bot-data:/var/lib/germ
+      - nltk-data:/root/nltk_data
     environment: &local-dev
       HF_HOME: &hf-home ${HF_HOME:-/src/data/huggingface}
       NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
