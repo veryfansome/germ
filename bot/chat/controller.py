@@ -123,6 +123,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         # - Messages with a lot of links might be more valuable just like messages that gets recalled often. Maybe we
         #   can generate per sentence embeddings for these high value messages in cases there are higher value chunks
         #   in them.
+        # - If we generate per sentence embeddings and link all sentences together in order, recalling any chunk would
+        #   allow us to piece together an episode. This seems more like human episodic memory where an episode is not
+        #   recalled in whole but in chunks.
 
         # Search for up to 4 items
         user_message_similarity_scores, user_message_neighbors = await run_in_threadpool(
