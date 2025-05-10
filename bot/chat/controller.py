@@ -44,10 +44,28 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.control_plane = control_plane
         self.delegate = delegate
         self.embedding_dimensions: int = embedding_dimensions
-        self.faiss_assistant_message = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_dimensions))
-        self.faiss_user_message = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_dimensions))
         self.token_encoder = tiktoken.encoding_for_model(token_model)
         self.truncation_threshold = truncation_threshold
+
+        # TODO:
+        #   - The current indexes work more like long term memory where vectors from all conversations are stored
+        #     together.
+        #   - Maybe what's called for is per conversation vector spaces that are thrown away once the conversation
+        #     ends. For example, while a conversation is happening, and it is within the truncation window, we let it
+        #     stay within the context window of the LLM. Once we exceed the truncation window, we overflow messages
+        #     into a faiss, which allows us to recall extended relevant contexts from longer conversations. Once the
+        #     conversation ends, we roll all messages into the faiss and do additional tagging, clustering, etc. and
+        #     decides what should go into long-term memory. Once this is done, we throw the faiss away.
+        #   - Store vector anchors that correlate to various classification labels. When processing new vectors from
+        #     conversation indexes, we can compare new entries to these persistent anchors. Overtime, we should be able
+        #     to learn new anchors. This allows us to perform classification tasks without relying on static models but
+        #     on accumulated memory, thereby learning a larger variety of tasks over time.
+        #   - Train a small model to predict the next vector when encountering text. If the next vector is close to our
+        #     prediction, then it is not unexpected. If the prediction is unexpected, then we may want to spend energy
+        #     processing it. This models human implicit memory, which learns patterns and draws our attention to the
+        #     unexpected, which tends to be more interesting.
+        self.faiss_assistant_message = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_dimensions))
+        self.faiss_user_message = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_dimensions))
 
         self.conversations: dict[int, dict] = {}
         self.sig_to_conversation_id: dict[str, {}] = {}
