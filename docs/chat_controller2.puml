@@ -1,0 +1,11 @@
+@startuml
+User -> ChatController: User message
+
+ChatController -> ConversationHistory:\
+Index user message by time created
+
+ChatController -> LLM:\
+Get future chat completion
+
+
+@enduml
