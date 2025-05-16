@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register</title>
+    <link rel="stylesheet" href="/static/css/all.min.css?v=7793238" />
+
+    <link rel="stylesheet" href="/static/css/ui.css?v=7793238">
+    <script src="/static/js/ui.js?v=7793238"></script>
+</head>
+<body>
+    <nav>
+        <div class="logo">
+            <a href="/"><i class="fa-solid fa-virus" style="padding-right:4px"></i>GermBot</a>
+        </div>
+        <div class="nav-links"></div>
+    </nav>
+    <div id="error-popup" class="hidden">
+        <button id="close-error-popup"><i class="fa fa-x"></i></button>
+        <span id="error-popup-message-text"></span>
+    </div>
+    <div class="login-wrapper">
+        <form class="login-form" action="/register" method="post">
+            <h3 style="margin-top:0;text-align:center">Choose a username and password</h3>
+            <label>
+                <span style="margin-bottom:5px;">Username</span>
+                <input name="username" />
+            </label>
+            <label>
+                <span style="margin-bottom:5px;">Password</span>
+                <input name="password" type="password" />
+            </label>
+            <label>
+                <span style="margin-bottom:5px;">Verify password</span>
+                <input name="verify" type="password" />
+            </label>
+            <button type="submit">Create</button>
+            <hr style="width: 100%">
+            <a href="/login">Log in</a>
+        </form>
+    </div>
+    <script>
+        const queryParams = getQueryParams()
+        if ("error" in queryParams) {
+            showErrorPopup(queryParams["error"])
+        }
+    </script>
+</body>
+</html>

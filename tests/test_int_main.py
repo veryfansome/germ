@@ -1,7 +1,8 @@
 from fastapi.testclient import TestClient
-from bot.main import bot
 
-client = TestClient(bot)
+from germ.bot.main import bot_service
+
+client = TestClient(bot_service)
 
 
 def test_healthz():

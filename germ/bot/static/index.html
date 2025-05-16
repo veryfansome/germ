@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat</title>
+    <link rel="stylesheet" href="/static/css/all.min.css?v=7793238">
+    <link rel="stylesheet" href="/static/css/atom-one-dark.min.css?v=7793238">
+    <script src="/static/js/marked.min.js?v=7793238"></script>
+    <script src="/static/js/highlight.min.js?v=7793238"></script>
+
+    <link rel="stylesheet" href="/static/css/ui.css?v=7793238">
+    <script src="/static/js/ui.js?v=7793238"></script>
+</head>
+<body>
+    <nav>
+        <div class="logo"><a href="/"><i class="fa-solid fa-virus" style="padding-right: 4px"></i>GermBot</a></div>
+        <div class="nav-links">
+            <i class="fa-solid fa-user" style="padding-right: 4px"></i>
+            <span id="username">user</span> [<a href="/logout">logout</a>]
+        </div>
+    </nav>
+    <div id="error-popup" class="hidden">
+        <button id="close-error-popup"><i class="fa fa-x"></i></button>
+        <span id="error-popup-message-text"></span>
+    </div>
+    <div id="info-popup" class="hidden">
+        <button id="close-info-popup"><i class="fa fa-x"></i></button>
+        <span id="info-popup-message-text"></span>
+    </div>
+    <div id="chatbox"></div>
+    <div id="selected-files-container"></div>
+    <div id="input-container">
+        <div class="attachment-button-container">
+            <button type="button" id="attachment-button">
+                <i class="fas fa-paperclip"></i>
+            </button>
+            <input type="file" id="file-input" style="display: none;" multiple>
+        </div>
+        <div id="settings-popup-menu" class="settings-popup-menu">
+            <div class="settings-popup-menu-section-title">System Message</div>
+            <label for="system-chat-message-input"></label>
+            <textarea id="system-chat-message-input"></textarea>
+        </div>
+        <form action="javascript:sendMessage().catch(error => console.log(error))">
+            <label for="input"></label>
+            <textarea id="input" placeholder="Type a message..."></textarea>
+            <div class="button-container">
+                <button type="button" id="settings-popup-button"><i class="fas fa-gear"></i></button>
+                <button type="submit" id="send-button">Send</button>
+            </div>
+        </form>
+    </div>
+    <script>
+    // Initialize highlight.js
+    hljs.highlightAll();
+
+    const host = window.location.hostname;
+    const port = window.location.port;
+
+    const usernamePromise = fetch("/user/info")
+        .then(r => {
+            if (!r.ok) throw new Error("unauth");
+            return r.json();
+        })
+        .then(({ username }) => {
+            document.getElementById("username").textContent = username;
+            return username;
+        })
+        .catch(() => {
+            // if the cookie expired mid-session, bounce to login
+            window.location = "/login";
+        });
+
+    const chatbox = document.getElementById('chatbox');
+    initErrorPopup();
+    initInfoPopup();
+    initSendButtonResize();
+
+    // Popup menu
+
+    const systemChatMessageInput = document.getElementById('system-chat-message-input');
+    const refreshSettingsPopup = () => {
+        systemChatMessageInput.placeholder = `Type a system message...`;
+    };
+    initPopup(refreshSettingsPopup, "settings");
+
+    const loadingIndicator = getLoadingIndicator();
+    chatbox.appendChild(loadingIndicator);
+
+    // Text input area
+    let submittedText = [];
+    initTextArea(submittedText, sendMessage);
+
+    // File attachments
+    const attachmentButton = document.getElementById('attachment-button');
+    const fileInput = document.getElementById('file-input');
+    const selectedFilesContainer = document.getElementById('selected-files-container');
+
+    // We'll store the user-selected files in this array
+    let attachedFiles = [];
+    // A function to render the “attached files” area
+    function renderAttachedFiles() {
+        // Clear out any existing file “chips”
+        selectedFilesContainer.innerHTML = '';
+
+        // For each file in the array, create a small element with a remove button
+        attachedFiles.forEach((file, index) => {
+            const fileItem = document.createElement('div');
+            fileItem.classList.add('selected-file-item');
+            fileItem.textContent = file.name;
+
+            // Create the “X” button to remove this file
+            const removeBtn = document.createElement('button');
+            removeBtn.classList.add('remove-file-button');
+            removeBtn.textContent = 'X';
+            removeBtn.addEventListener('click', () => {
+                // Remove this file from the array
+                attachedFiles.splice(index, 1);
+                // Re-render after removal
+                renderAttachedFiles();
+            });
+
+            fileItem.appendChild(removeBtn);
+            selectedFilesContainer.appendChild(fileItem);
+        });
+    }
+    // When the user clicks the paperclip button, programmatically click the hidden file input
+    attachmentButton.addEventListener('click', () => {
+        fileInput.click();
+    });
+    // When file input changes (i.e., user selects new files), show them above the text box
+    fileInput.addEventListener('change', () => {
+        for (const file of fileInput.files) {
+            attachedFiles.push(file);
+        }
+        // Reset the file input so selecting the same file again triggers `change`
+        fileInput.value = '';
+
+        // Re-render the attachments list
+        renderAttachedFiles();
+    });
+    // Drag and drop
+    document.body.addEventListener('dragenter', (event) => {
+        event.preventDefault();
+    });
+    document.body.addEventListener('dragover', (event) => {
+        event.preventDefault();
+    });
+    document.body.addEventListener('drop', (event) => {
+        event.preventDefault();
+        const files = event.dataTransfer.files;
+        if (files.length > 0) {
+            fileInput.files = files;
+            // Trigger any event handlers you have for file selection
+            fileInput.dispatchEvent(new Event('change'));
+        }
+    });
+
+    let conversationIdent = null;
+    let chatCompletionMessageList = [];
+    function handleMessageReceived(data) {
+        conversationIdent = data['conversation_ident'];
+        const responseComplete = data['complete'];
+        const responseError = data['error'];
+        const responseModel = data['model'];
+        const responseRole = data['role'];
+        const responseContent = data['content'];
+
+        if (responseModel === "none") {
+            if (responseError) {
+                showErrorPopup(responseContent)
+            } else {
+                showInfoPopup(responseContent)
+            }
+            return
+        } else if (responseComplete) {
+            loadingIndicator.remove(); // Stop showing loading indicator
+        }
+
+        chatCompletionMessageList.push({ role: responseRole, content: responseContent });
+
+        // Setup assistant message box
+        const assistantMessageBox = getAssistantMessageBox(`${responseRole}(${responseModel})`, responseContent);
+        const copyLink = getCopyTextLink(responseContent);
+        assistantMessageBox.appendChild(copyLink);
+
+        // Render response
+        chatbox.appendChild(assistantMessageBox);
+        hljs.highlightAll();
+        scrollChatBoxToBottom();
+    }
+
+    let ws;
+    let wsConnectionAttemptInProgress = false;
+    const wsReconnectInterval = 5000; // 5 seconds
+    function wsConnect() {
+        wsConnectionAttemptInProgress = true
+        if (conversationIdent === null) {
+            ws = new WebSocket(`ws://${host}:${port}/chat`);
+        } else {
+            ws = new WebSocket(`ws://${host}:${port}/chat?conversation_ident=${conversationIdent}`);
+        }
+        ws.onopen = () => {
+            wsConnectionAttemptInProgress = false
+            console.log('WebSocket connected');
+            // Stop showing loading indicator
+            loadingIndicator.remove();
+        };
+        ws.onclose = (event) => {
+            wsConnectionAttemptInProgress = false
+            loadingIndicator.remove(); // Stop showing loading indicator if error
+            switch (event.code) {
+                case 1008:
+                    console.log("Session not found: code=1008");
+                    showErrorPopup(`Session not found, try <a href="/login" target="_blank" rel="noopener noreferrer">Logging in</a> from another tab.`)
+                    break;
+                default:
+                    console.log(`Socket connection lost: code=${event.code}, reason=${event.reason}`);
+                    showErrorPopup("Socket connection lost.")
+                    break;
+            }
+        };
+        ws.onerror = (event) => {
+            wsConnectionAttemptInProgress = false
+            loadingIndicator.remove(); // Stop showing loading indicator if error
+            console.log('Socket connection errored:', event);
+            showErrorPopup("Socket connection error.")
+        };
+        ws.onmessage = function(event) {
+            try {
+                handleMessageReceived(JSON.parse(event.data));
+            } catch (error) {
+                handleError(error, 'Failed to handle message:');
+            }
+        };
+    }
+    async function sendMessage() {
+        // Upload any attached files
+        if (attachedFiles.length > 0) {
+            const formData = new FormData();
+            attachedFiles.forEach((f) => {
+                formData.append('files', f);
+            });
+            try {
+                const uploadResponse = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (!uploadResponse.ok) {
+                    console.error('File upload failed:', uploadResponse.statusText);
+                }
+            } catch (error) {
+                console.error('Error uploading files:', error);
+            }
+        }
+
+        // Upload any attached files
+        const message = document.getElementById('input').value;
+        submittedText.push(message);
+        document.getElementById('input').value = '';
+
+        const username = await usernamePromise;
+        const userMessageBox = getUserMessageBox(username, message);
+        userMessageBox.appendChild(getCopyTextLink(message));
+        chatbox.appendChild(userMessageBox);
+        hljs.highlightAll();
+        scrollChatBoxToBottom();
+        chatCompletionMessageList.push({ role: "user", content: message });
+
+        // Show loading indicator
+        chatbox.appendChild(loadingIndicator);
+        scrollChatBoxToBottom();
+
+        const finalChatCompletionMessageList = [...chatCompletionMessageList];
+        const systemChatMessage = document.getElementById('system-chat-message-input').value;
+        if (!isBlankOrEmptyStr(systemChatMessage)) {
+            finalChatCompletionMessageList.push({ role: "system", content: systemChatMessage});
+        }
+        while (ws.readyState !== WebSocket.OPEN) {
+            console.log("Waiting to send, connection not ready...");
+            await sleep(1000)  // ms
+        }
+        ws.send(JSON.stringify({
+            messages: finalChatCompletionMessageList,
+            uploaded_filenames: attachedFiles.map(file => file.name),
+        }));
+        // On success, possibly clear the attachments
+        attachedFiles = [];
+        renderAttachedFiles();
+    }
+    wsConnect();
+    function reconnectIfDisconnected() {
+        switch (ws.readyState) {
+            case WebSocket.CONNECTING:
+                console.log('WebSocket is connecting...');
+                break;
+            case WebSocket.OPEN:
+                console.log('WebSocket is open.');
+                break;
+            case WebSocket.CLOSING:
+                console.log('WebSocket is closing...');
+                break;
+            case WebSocket.CLOSED:
+                console.log('WebSocket is closed.');
+                if (!wsConnectionAttemptInProgress) {
+                    console.log('Reconnecting...');
+                    wsConnect();
+                }
+                break;
+            default:
+                console.log('Unknown WebSocket state.');
+                break;
+        }
+    }
+    setInterval(reconnectIfDisconnected, wsReconnectInterval);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            reconnectIfDisconnected()
+        }
+    });
+    </script>
+</body>
+</html>

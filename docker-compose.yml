@@ -35,7 +35,7 @@ services:
       POSTGRES_PASSWORD: &pg-password ${POSTGRES_PASSWORD:-bacteria4life}
       POSTGRES_USER: &pg-user ${POSTGRES_USER:-germ}
     working_dir: /src
-    command: [ "scripts/app-start.sh", "bot.main:bot", "8000" ]
+    command: [ "scripts/app-start.sh", "germ.bot.main:bot_service", "8000" ]
     ports:
       - "8001:8000"
     healthcheck:
@@ -78,7 +78,7 @@ services:
         condition: service_completed_successfully
     image: grafana/grafana:latest
     volumes:
-      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+      - ./data/grafana/provisioning:/etc/grafana/provisioning
       - "grafana-storage:/var/lib/grafana"
     environment:
       - GF_LOG_LEVEL=warn
@@ -125,7 +125,7 @@ services:
     environment:
       HF_HOME: *hf-home
     working_dir: /src
-    command: [ "scripts/app-start.sh", "models.main:model_service", "9000" ]
+    command: [ "scripts/app-start.sh", "germ.services.models.main:model_service", "9000" ]
     ports:
       - "9001:9000"
     healthcheck:
@@ -191,7 +191,7 @@ services:
     container_name: &prometheus-host germ-prometheus
     image: prom/prometheus:v2.52.0
     volumes:
-      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./data/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - '9090:9090'
     command:
