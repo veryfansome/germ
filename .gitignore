@@ -8,9 +8,9 @@
 .venv/
 __pycache__/
 
-bot/static/*.html
-bot/static/tests/report.xml
-bot/static/tests/cov/
+germ/bot/static/*.html
+germ/bot/static/tests/report.xml
+germ/bot/static/tests/cov/
 data/germ/multi_head_exps/
 venv/
 germ_venv/

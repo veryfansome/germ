@@ -127,6 +127,10 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 logger.info(f"{len(extracted_sentences)} sentences extracted from conversation {conversation_id}, "
                             f"message {dt_created_ts}, paragraph {p_block_id}")
                 logger.info(f"extracted sentences {extracted_sentences}")
+                for sentence in extracted_sentences:
+                    pos_labels = await get_pos_labels(sentence)
+                    log_pos_labels(pos_labels)
+
                 p_block_sentences.append(extracted_sentences)
 
             # TODO:
@@ -174,7 +178,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         #])
 
         # Send to LLM
-        await self.delegate.on_receive(user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender)
+        #await self.delegate.on_receive(user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender)
 
     async def on_send(self, conversation_id: int, dt_created: datetime, text_sig: str,
                       chat_response: ChatResponse, received_message_dt_created: datetime = None):
@@ -251,6 +255,47 @@ async def get_emotions_classifications(texts: list[str]):
         async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/classification/emotions",
                                 json={"texts": texts}) as response:
             return await response.json()
+
+
+async def get_pos_labels(text: str):
+    async with aiohttp.ClientSession() as session:
+        async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/classification/ud",
+                                json={"text": text}) as response:
+            return await response.json()
+
+
+def log_pos_labels(pos_labels: dict[str, list[str]]):
+    token_cnt = len(pos_labels["tokens"])
+    token_idx_positions = range(token_cnt)
+    longest_token_lengths = [0 for _ in token_idx_positions]
+    for idx in token_idx_positions:
+        # Get longest token lengths per position
+        for head in pos_labels.keys():
+            if head == "text":
+                continue
+            else:
+                label_len = len(pos_labels[head][idx])
+                if label_len > longest_token_lengths[idx]:
+                    longest_token_lengths[idx] = label_len
+    log_blobs = []
+    for head, labels in pos_labels.items():
+        # Legible formatting for examples
+        if head == "text":
+            log_blobs.append(f"{head}{' ' * (12 - len(head))}{labels}")
+            positions_blob = ''.join([
+                f"{l},{' ' * (longest_token_lengths[i] - len(str(l)) + 3)}" if i != token_cnt - 1 else str(
+                    l)
+                for i, l in enumerate(token_idx_positions)])
+            log_blobs.append(f"idx{' ' * 9} {positions_blob}")
+        else:
+            label_blobs = []
+            for idx, label in enumerate(labels):
+                label_blobs.append(
+                    f"\"{label}\",{' ' * (longest_token_lengths[idx] - len(label) + 1)}" if idx != token_cnt - 1 else f"\"{label}\"")
+                if head == "tokens":
+                    continue
+            log_blobs.append(f"{head}{' ' * (12 - len(head))}[{''.join(label_blobs)}]")
+    logger.info(f"pos labels:\n" + ("\n".join(log_blobs)))
 
 
 async def process_markdown_elements(markdown_elements):
