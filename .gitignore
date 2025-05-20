@@ -9,10 +9,8 @@
 __pycache__/
 
 germ/bot/static/*.html
-germ/bot/static/tests/report.xml
-germ/bot/static/tests/cov/
-data/germ/multi_head_exps/
-venv/
+germ/bot/static/tests/*
+data/e5_*
 germ_venv/
 
 google_application_credentials.json

@@ -178,7 +178,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         #])
 
         # Send to LLM
-        #await self.delegate.on_receive(user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender)
+        await self.delegate.on_receive(user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender)
 
     async def on_send(self, conversation_id: int, dt_created: datetime, text_sig: str,
                       chat_response: ChatResponse, received_message_dt_created: datetime = None):
