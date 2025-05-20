@@ -1,5 +1,6 @@
 import collections
 import json
+import math
 import numpy as np
 import random
 import re
@@ -32,7 +33,8 @@ class TokenEmbeddingModel(nn.Module):
     """
 
     def __init__(self,
-                 base_model_name: str = "intfloat/e5-base-v2",
+                 #base_model_name: str = "intfloat/e5-base-v2",
+                 base_model_name: str = "intfloat/e5-large-v2",
                  embed_dim: int = 768,
                  proj_hidden: int = 512,
                  freeze_base: bool = True,
@@ -176,7 +178,10 @@ def fine_tune_token_head(
     #temperature = 0.07
 
     #temperature = 0.07
-    temperature = 0.1
+    #temperature = 0.1
+    #base_tau, final_tau = 0.2, 0.05
+    base_tau, final_tau = 0.15, 0.04
+    total_iter = epochs * len(dl)
 
     accum_steps = 4  # ← batch_size 256×4 = 1024 token pairs per “virtual batch”
 
@@ -185,10 +190,35 @@ def fine_tune_token_head(
     for ep in range(epochs):
         running_loss = 0.0
         for step, batch_tokens in enumerate(dl):
+            it = ep * len(dl) + step
+            tau = final_tau + 0.5 * (base_tau - final_tau) * (1 + math.cos(math.pi * it / total_iter))
+
             embeds = model(batch_tokens)  # (B,d)
-            logits = embeds @ embeds.T / temperature  # contrastive
-            labels = torch.arange(len(batch_tokens), device=device_t)
+            with torch.no_grad():
+                sim = embeds @ embeds.T  # cosine similarities
+                sim.fill_diagonal_(-1.0)  # ignore self-sim
+                hard_idx = sim.argmax(dim=-1)  # index of hardest negative for each anchor
+            hard_neg = embeds[hard_idx]  # (B,d)
+
+            B = embeds.size(0)
+            z_anchor = embeds  # (B,d)
+            z_pos = embeds  # positive = self
+            z_neg = hard_neg  # hard negatives
+
+            # build the (B  ×  (B+1)) similarity matrix:   [ pos | negs ]
+            candidates = torch.cat([z_pos.unsqueeze(1), z_neg.unsqueeze(1)], dim=1)  # (B,2,d)
+            candidates = candidates.view(-1, embeds.size(-1))  # (2B,d)
+
+            logits = (z_anchor @ candidates.T) / tau  # (B, 2B)
+            labels = torch.arange(B, device=device_t)  # each row’s positive is at column i*2
+            labels = labels * 2
             loss = F.cross_entropy(logits, labels) / accum_steps   # scale!
+
+            # + orthogonality reg
+            W = model.proj[-1].weight
+            offd = (W @ W.T) - torch.diag(torch.diag(W @ W.T))
+            loss += 1e-4 * offd.pow(2).mean() / accum_steps
+
             loss.backward()
             running_loss += loss.item() * accum_steps  # un-scale for logging
 
