@@ -97,30 +97,57 @@ class WordDataset(Dataset):
         return self.tokens[idx]
 
 
-def build_vocab(min_freq: int = 100, max_vocab: int = 50000, seed: int = 42) -> List[str]:
+def build_vocab(min_freq: int = 100, max_vocab: int = 50000, seed: int = 42) -> (List[str], List[str]):
     """Extract a vocabulary from *WikiText‑103‑raw‑v1* via datasets."""
     from datasets import load_dataset
     print(f"Loading dataset")
     ds = load_dataset("wikitext", "wikitext-103-raw-v1", split="train")
-    counter = collections.Counter()
-    #pattern = re.compile(r"[A-Za-z]+")
-    pattern = re.compile(r"\b(?:a|I|[a-zA-Z][a-z]+|[A-Z]{2,})\b")
     print(f"Selecting training vocabulary from {len(ds)} documents")
+    consecutive_upper_words_counter = collections.Counter()
+    single_word_counter = collections.Counter()
+
+    all_caps_pattern = re.compile(r'\b[A-Z]+\b')
+    consecutive_upper_words_pattern = re.compile(r"(?:^|\b)(?!As\b|By\b|In\b|On\b|The\b)[A-Z][a-z]+(?:\s+of)?(?:\s+[A-Z][a-z]+)+\b")
+    single_word_pattern = re.compile(r"\b(?:a|I|[a-zA-Z]{2,})\b")
+    upper_pattern = re.compile(r'[A-Z]')
     for row in ds:
-        #tokens = pattern.findall(row["text"].lower())
-        tokens = pattern.findall(row["text"])
-        # TODO: call POS tagger on tokens[0]
-        counter.update(tokens)
-    vocab = [w for w, c in counter.items() if c >= min_freq]
-    vocab = sorted(vocab, key=counter.get, reverse=True)[:max_vocab]
+        consecutive_upper_words = consecutive_upper_words_pattern.findall(row["text"])
+        consecutive_upper_words_counter.update(consecutive_upper_words)
+        single_words = single_word_pattern.findall(row["text"])
+        single_word_counter.update(single_words)
+    # Populate word_count dict with only lowercase words
+    word_count = {w: c for w, c in single_word_counter.items() if not bool(upper_pattern.search(w))}
+    for w, c in single_word_counter.items():
+        if bool(all_caps_pattern.search(w)):
+            # Give benefit of doubt and assume acronym
+            word_count[w] = c
+        elif bool(upper_pattern.search(w)):
+            # For words with uppercase characters
+            lowered_form = w.lower()
+            if lowered_form in word_count:
+                # If a lowercase form exists, credit the lowercase form. This handles cases where common words comes
+                # at the beginning of a sentence or where a common word is used in a name. We don't need to be too
+                # strict since we're just trying to get a sense of frequency for train our projection head.
+                word_count[lowered_form] += c
+            else:
+                # but if no lowercase versions were found, keep the uppercase word
+                word_count[w] = c
+    # Filter out anything that doesn't pass min_freq threshold
+    named_entities = [w for w, c in consecutive_upper_words_counter.items() if c > min_freq]
+    named_entities = sorted(named_entities, key=consecutive_upper_words_counter.get, reverse=True)[:max_vocab]
+    random.shuffle(named_entities)
+    vocab = [w for w, c in word_count.items() if c >= min_freq]
+    vocab = sorted(vocab, key=word_count.get, reverse=True)[:max_vocab]
     random.shuffle(vocab)
-    print(f"Vocab size = {len(vocab)}")
-    return vocab
+    print(f"Vocab: {len(vocab)}")
+    print(f"Named entities: {len(named_entities)}")
+    return vocab, named_entities
 
 
 def fine_tune_token_head(
         device: str | None = None,
-        epochs: int = 5,
+        #epochs: int = 5,
+        epochs: int = 8,
         #epochs: int = 16,
         #epochs: int = 24,
         #epochs: int = 32,
@@ -128,7 +155,8 @@ def fine_tune_token_head(
         #batch_size: int = 256,
         batch_size: int = 512,
         #lr: float = 1e-4,
-        lr: float = 5e-5,
+        #lr: float = 5e-5,
+        lr: float = 1e-5,
         out_dir: str = "data/e5_token_embedding_model",
         seed: int = 42,
 ):
@@ -151,10 +179,12 @@ def fine_tune_token_head(
     #     Find the most "confusing" other word in the batch — i.e., a word whose embedding is most similar (even though
     #     it’s not supposed to be the same). This confusing word becomes the “negative” example. The model is then
     #     penalized if it mixes up these representations.
-    vocab = build_vocab(seed=seed)
+    vocab, named_entities = build_vocab(seed=seed)
     with (Path(out_dir)/"vocab.json").open("w", encoding="utf-8") as json_f:
         json.dump(vocab, json_f, ensure_ascii=False, indent=0)
-    dataset = WordDataset(vocab)
+    with (Path(out_dir)/"named_entities.json").open("w", encoding="utf-8") as json_f:
+        json.dump(named_entities, json_f, ensure_ascii=False, indent=0)
+    dataset = WordDataset(vocab + named_entities)
     g = torch.Generator().manual_seed(seed)
     dl = DataLoader(dataset, batch_size=batch_size, generator=g, shuffle=True, num_workers=0)
 
