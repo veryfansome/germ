@@ -49,10 +49,6 @@ class TokenEmbeddingModel(nn.Module):
             for p in self.encoder.parameters():
                 p.requires_grad = False
 
-        # Single linear head
-        #self.proj = nn.Linear(self.encoder.config.hidden_size, embed_dim, bias=False).to(self.device)
-        #nn.init.normal_(self.proj.weight, std=0.02)
-
         # 2‑layer MLP head
         self.proj = nn.Sequential(
             nn.Linear(self.encoder.config.hidden_size, proj_hidden),
@@ -107,10 +103,13 @@ def build_vocab(min_freq: int = 100, max_vocab: int = 50000, seed: int = 42) -> 
     print(f"Loading dataset")
     ds = load_dataset("wikitext", "wikitext-103-raw-v1", split="train")
     counter = collections.Counter()
-    pattern = re.compile(r"[A-Za-z]+")
+    #pattern = re.compile(r"[A-Za-z]+")
+    pattern = re.compile(r"\b(?:a|I|[a-zA-Z][a-z]+|[A-Z]{2,})\b")
     print(f"Selecting training vocabulary from {len(ds)} documents")
     for row in ds:
-        tokens = pattern.findall(row["text"].lower())
+        #tokens = pattern.findall(row["text"].lower())
+        tokens = pattern.findall(row["text"])
+        # TODO: call POS tagger on tokens[0]
         counter.update(tokens)
     vocab = [w for w, c in counter.items() if c >= min_freq]
     vocab = sorted(vocab, key=counter.get, reverse=True)[:max_vocab]
@@ -121,23 +120,13 @@ def build_vocab(min_freq: int = 100, max_vocab: int = 50000, seed: int = 42) -> 
 
 def fine_tune_token_head(
         device: str | None = None,
-
-        # Best for single linear head
-        #epochs: int = 3,
-        #batch_size: int = 256,
-        #lr: float = 1e-4,
-
-        #epochs: int = 3,
-        #epochs: int = 4,
-        #epochs: int = 5,
-        #epochs: int = 6,
+        epochs: int = 5,
         #epochs: int = 16,
         #epochs: int = 24,
         #epochs: int = 32,
-        epochs: int = 40,
-        #batch_size: int = 128,
-        batch_size: int = 256,
-        #batch_size: int = 512,
+        #epochs: int = 40,
+        #batch_size: int = 256,
+        batch_size: int = 512,
         #lr: float = 1e-4,
         lr: float = 5e-5,
         out_dir: str = "data/e5_token_embedding_model",
@@ -154,6 +143,14 @@ def fine_tune_token_head(
     device_t = torch.device(device)
     model = TokenEmbeddingModel(freeze_base=True, device=device_t).to(device_t)
 
+    # Each training loop iteration processes a batch of tokens. The training objectives are:
+    # - Match each word with itself:
+    #     Each word's embedding is compared to itself, ensuring that the representation of a
+    #     word remains the same. This “positive” pair (word with itself) is ideally the most similar.
+    # - Differentiate each word from other words:
+    #     Find the most "confusing" other word in the batch — i.e., a word whose embedding is most similar (even though
+    #     it’s not supposed to be the same). This confusing word becomes the “negative” example. The model is then
+    #     penalized if it mixes up these representations.
     vocab = build_vocab(seed=seed)
     with (Path(out_dir)/"vocab.json").open("w", encoding="utf-8") as json_f:
         json.dump(vocab, json_f, ensure_ascii=False, indent=0)
@@ -162,28 +159,20 @@ def fine_tune_token_head(
     dl = DataLoader(dataset, batch_size=batch_size, generator=g, shuffle=True, num_workers=0)
 
     optimiser = torch.optim.AdamW(model.proj.parameters(), lr=lr, weight_decay=1e-2)
-    scheduler = get_cosine_schedule_with_warmup(
-        optimiser,
-
-        # Best for single linear head
-        #200,
-
-        #1000,
-        1500,
-
-        epochs * len(dl)
-    )
-
-    # Best for single linear hear
-    #temperature = 0.07
-
-    #temperature = 0.07
-    #temperature = 0.1
-    #base_tau, final_tau = 0.2, 0.05
-    base_tau, final_tau = 0.15, 0.04
-    total_iter = epochs * len(dl)
 
     accum_steps = 4  # ← batch_size 256×4 = 1024 token pairs per “virtual batch”
+
+    # A temperature parameter (tau) is used to adjust the sensitivity of similarity comparisons. It starts higher and
+    # is annealed to a lower value during training. This helps fine-tune how sharply the model distinguishes between
+    # the correct word and its hardest negative counterpart.
+    base_tau, final_tau = 0.075, 0.02
+
+    total_iter = epochs * len(dl)
+    scheduler = get_cosine_schedule_with_warmup(
+        optimiser,
+        0.05 * total_iter,  # warmup steps
+        total_iter
+    )
 
     model.train()
     optimiser.zero_grad(set_to_none=True)
@@ -193,7 +182,14 @@ def fine_tune_token_head(
             it = ep * len(dl) + step
             tau = final_tau + 0.5 * (base_tau - final_tau) * (1 + math.cos(math.pi * it / total_iter))
 
+            # The model's `encode` method generates embeddings for all tokens in the batch. These embeddings are
+            # L2-normalized since we use cosine similarity.
             embeds = model(batch_tokens)  # (B,d)
+
+            # For each anchor embedding, cosine similarities with all embeddings in the batch are computed.
+            # The similarity with itself is ignored by filling it with a large negative value (-1.0). The hardest
+            # negative embedding is selected for each anchor by identifying the index of the maximum similarity value
+            # that is not from its own embedding.
             with torch.no_grad():
                 sim = embeds @ embeds.T  # cosine similarities
                 sim.fill_diagonal_(-1.0)  # ignore self-sim
@@ -205,20 +201,29 @@ def fine_tune_token_head(
             z_pos = embeds  # positive = self
             z_neg = hard_neg  # hard negatives
 
-            # build the (B  ×  (B+1)) similarity matrix:   [ pos | negs ]
+            # build the (B×(B+1)) similarity matrix:   [ pos | negs ]
             candidates = torch.cat([z_pos.unsqueeze(1), z_neg.unsqueeze(1)], dim=1)  # (B,2,d)
             candidates = candidates.view(-1, embeds.size(-1))  # (2B,d)
 
             logits = (z_anchor @ candidates.T) / tau  # (B, 2B)
             labels = torch.arange(B, device=device_t)  # each row’s positive is at column i*2
             labels = labels * 2
-            loss = F.cross_entropy(logits, labels) / accum_steps   # scale!
 
-            # + orthogonality reg
-            W = model.proj[-1].weight
-            offd = (W @ W.T) - torch.diag(torch.diag(W @ W.T))
-            loss += 1e-4 * offd.pow(2).mean() / accum_steps
+            # Contrastive loss is computed using a cross-entropy style setup. For each element in the batch, positive
+            # examples are the embeddings themselves, while the hardest negatives are pooled. Loss is scaled down by
+            # `accum_steps` # to support gradient accumulation.
+            loss = F.cross_entropy(logits, labels) / accum_steps
 
+            # To encourage diversity, a regularization term is added to the loss. It penalizes the overlap
+            # (non-orthogonality) between the learned projections in the MLP head's final layer, to keep the different
+            # dimensions as independent as possible. This means the model is nudged to learn representations where
+            # features don’t overlap too much, making them more robust and less redundant.
+            W = F.normalize(model.proj[-1].weight, dim=1)
+            loss += 1e-4 * (W @ W.T).pow(2).triu(1).mean() / accum_steps
+
+            # Gradients are computed for parameter updates. A gradient accumulation strategy is employed every
+            # `accum_steps` micro-steps to form a "virtual batch". Gradients are clipped to prevent exploding gradients,
+            # the optimizer updates the model's parameters, and the learning rate schedule steps forward.
             loss.backward()
             running_loss += loss.item() * accum_steps  # un-scale for logging
 
