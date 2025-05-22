@@ -7,6 +7,7 @@ import re
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from nltk.util import ngrams as nltk_ngrams
 from pathlib import Path
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModel, AutoTokenizer, get_cosine_schedule_with_warmup
@@ -102,7 +103,9 @@ class WordDataset(Dataset):
 
 
 def build_vocab(
-        min_freq: int = 100,
+        min_bigram_freq: int = 300,
+        min_entity_freq: int = 100,
+        min_vocab_freq: int = 100,
         max_vocab: int = 50000,
         ngram_min: int = 2,
         ngram_max: int = 5,
@@ -111,40 +114,103 @@ def build_vocab(
     from datasets import load_dataset
     print(f"Loading dataset")
     ds = load_dataset("wikitext", "wikitext-103-raw-v1", split="train")
-    print(f"Selecting training vocabulary from {len(ds)} documents")
+    ds_size = len(ds)
+    print(f"Selecting training vocabulary from {ds_size} documents")
 
-    all_caps_pattern = re.compile(r'\b[A-Z]+\b')
     consecutive_capitalized_words_pattern = re.compile(
-        r"(?:^|\b)(?!As\b|By\b|In\b|On\b|The\b)[A-Z][a-z]+(?:\s+(?:and|at|by|for|in|of))?(?:\s+[A-Z][a-z]+)+\b"
+        r"(?:^|\b)(?!As\b|By\b|In\b|On\b|The\b)[A-Z][a-z]+(?:\s+(?:and|at|by|for|in|of))?(?:\s+[A-Z][a-zA-Z]+)+\b"
     )
-    single_capitalized_token_pattern = re.compile(r"\b(?:I|[A-Z][a-z]+)\b")
-    single_lowercase_token_pattern = re.compile(r"\b[a-z]+\b")
-    upper_pattern = re.compile(r'[A-Z]')
+    single_lowercase_token_pattern = re.compile(r"^[a-z]+$")
+    starts_with_uppercase_pattern = re.compile(r'^[A-Z]')
 
+    bigram_counter = collections.Counter()
     consecutive_capitalized_words_counter = collections.Counter()
-    single_lowercase_token_counter = collections.Counter()
-    ngram_counters = []
-    for _ in range(ngram_min, ngram_max + 1):
-        ngram_counters.append(collections.Counter())
+    single_token_counter = collections.Counter()
 
-    first_pass_remainder = []
-    for row_idx, row in enumerate(ds):
-        lowercase = []
-        remainder = []
-        for token in row["text"].split():
+    _bracket_tokens = {"(", ")", "[", "]", "{", "}"}
+    _contraction_tokens = {"'d", "'ll", "'m", "'re", "'s", "'t", "'ve"}
+    _numeric_suffix_tokens = {"%", "°"}
+    _special_at_tokens = {"@,@", "@.@", "@-@"}
+    is_bracket_tokens = 1
+    is_contraction_token = 2
+    is_special_at_token = 3
+    is_starts_with_upper = 4
+    token_dicts = []
+    token_lists = []
+    for row_id, row in enumerate(ds):
+        anomalous_tokens = {}
+        uniformly_lowercase_tokens = []
+        tokens = row["text"].split()
+
+        #consecutive_capitalized_words = consecutive_capitalized_words_pattern.findall(row["text"])
+        #consecutive_capitalized_words_counter.update(consecutive_capitalized_words)
+
+        token_len = len(tokens)
+        for token_idx, token in enumerate(tokens):
             if bool(single_lowercase_token_pattern.search(token)):
-                lowercase.append(token)
-            else:
-                remainder.append(token)
-        single_lowercase_token_counter.update(lowercase)
-        first_pass_remainder.append(remainder)
+                if token_idx + 1 < token_len and tokens[token_idx + 1] in _contraction_tokens:
+                    next_token = tokens[token_idx + 1]
+                    if token[-1] == "n" and next_token == "'t":
+                        uniformly_lowercase_tokens.append(token[:-1])
+                        uniformly_lowercase_tokens.append(f"n{next_token}")
+                    else:
+                        uniformly_lowercase_tokens.append(token)
+                        uniformly_lowercase_tokens.append(next_token)
+                else:
+                    # If uniformly lowercase and alpha, just append
+                    uniformly_lowercase_tokens.append(token)
+            elif token in _bracket_tokens:
+                anomalous_tokens[token_idx] = is_bracket_tokens
+            elif token in _contraction_tokens:
+                anomalous_tokens[token_idx] = is_contraction_token
+            elif token in _special_at_tokens:
+                anomalous_tokens[token_idx] = is_special_at_token
+            elif bool(starts_with_uppercase_pattern.search(token)):
+                anomalous_tokens[token_idx] = is_starts_with_upper
+        single_token_counter.update(uniformly_lowercase_tokens)
 
-    for row in ds:
-        consecutive_capitalized_words = consecutive_capitalized_words_pattern.findall(row["text"])
-        consecutive_capitalized_words_counter.update(consecutive_capitalized_words)
-        #single_lowercase_tokens = single_lowercase_token_pattern.findall(row["text"])
-        single_lowercase_tokens = row["text"].split()
-        single_lowercase_token_counter.update(single_lowercase_tokens)
+        token_dicts.append(anomalous_tokens)
+        token_lists.append(tokens)
+        if row_id % 100000 == 0:
+            print(f"1st pass {row_id}/{ds_size} rows")
+
+    entities = [w for w, c in consecutive_capitalized_words_counter.items() if c > min_entity_freq]
+    entities = sorted(entities, key=consecutive_capitalized_words_counter.get, reverse=True)[:max_vocab]
+    random.shuffle(entities)
+    del consecutive_capitalized_words_counter
+    vocab = [w for w, c in single_token_counter.items() if c >= min_vocab_freq]
+    vocab = sorted(vocab, key=single_token_counter.get, reverse=True)[:max_vocab]
+    random.shuffle(vocab)
+    del single_token_counter
+    print(f"entities: {len(entities)}")
+    print(f"vocab: {len(vocab)}")
+
+    bigram_stop_tokens = {
+        *_bracket_tokens,
+        *_contraction_tokens,
+        *_numeric_suffix_tokens,
+        *_special_at_tokens,
+        *{
+            ",", "...", ".", "?", "!", ":", ";",
+            "’", "'", '"',
+            "=", "±", "+", "-", "–", "—", "×",
+            "⁄", "/", "\\", "$", "£", "&",
+            "he", "his", "she", "her"
+            "a.m.", "p.m.",
+        }
+    }
+    for row_id, tokens in enumerate(token_lists):
+        bigram_chunks = []
+
+        for tuple_id, bigram_tokens in enumerate(nltk_ngrams(tokens, 2)):
+            # Skip first tuple
+            if tuple_id > 0:
+                if (len([t for t in bigram_tokens if not bool(starts_with_uppercase_pattern.search(t))]) == 2
+                        and not set(bigram_tokens).intersection(bigram_stop_tokens)):
+                    bigram_chunks.append(" ".join(bigram_tokens))
+        bigram_counter.update(bigram_chunks)
+        if row_id % 100000 == 0:
+            print(f"2nd pass {row_id}/{ds_size} rows")
 
     # Populate token_count dict with only lowercase words
     #token_count = {w: c for w, c in single_lower_token_counter.items() if not bool(capitalized_pattern.search(w))}
@@ -164,15 +230,11 @@ def build_vocab(
     #            # but if no lowercase versions were found, keep the uppercase word
     #            token_count[w] = c
     # Filter out anything that doesn't pass min_freq threshold
-    named_entities = [w for w, c in consecutive_capitalized_words_counter.items() if c > min_freq]
-    named_entities = sorted(named_entities, key=consecutive_capitalized_words_counter.get, reverse=True)[:max_vocab]
-    random.shuffle(named_entities)
-    vocab = [w for w, c in single_lowercase_token_counter.items() if c >= min_freq]
-    vocab = sorted(vocab, key=single_lowercase_token_counter.get, reverse=True)[:max_vocab]
-    random.shuffle(vocab)
-    print(f"Vocab: {len(vocab)}")
-    print(f"Named entities: {len(named_entities)}")
-    return vocab, named_entities
+    bigrams = [w for w, c in bigram_counter.items() if c > min_bigram_freq]
+    bigrams = sorted(bigrams, key=bigram_counter.get, reverse=True)[:max_vocab]
+    random.shuffle(bigrams)
+    print(f"bigrams: {len(bigrams)}")
+    return entities, bigrams, vocab
 
 
 def fine_tune_token_head(
@@ -210,12 +272,14 @@ def fine_tune_token_head(
     #     Find the most "confusing" other word in the batch — i.e., a word whose embedding is most similar (even though
     #     it’s not supposed to be the same). This confusing word becomes the “negative” example. The model is then
     #     penalized if it mixes up these representations.
-    vocab, named_entities = build_vocab()
+    entities, bigrams, vocab = build_vocab()
+    with (Path(out_dir)/"entities.json").open("w", encoding="utf-8") as json_f:
+        json.dump(entities, json_f, ensure_ascii=False, indent=0)
+    with (Path(out_dir)/"bigrams.json").open("w", encoding="utf-8") as json_f:
+        json.dump(bigrams, json_f, ensure_ascii=False, indent=0)
     with (Path(out_dir)/"vocab.json").open("w", encoding="utf-8") as json_f:
         json.dump(vocab, json_f, ensure_ascii=False, indent=0)
-    with (Path(out_dir)/"named_entities.json").open("w", encoding="utf-8") as json_f:
-        json.dump(named_entities, json_f, ensure_ascii=False, indent=0)
-    dataset = WordDataset(vocab + named_entities)
+    dataset = WordDataset(entities + bigrams + vocab)
     g = torch.Generator().manual_seed(seed)
     dl = DataLoader(dataset, batch_size=batch_size, generator=g, shuffle=True, num_workers=0)
 
