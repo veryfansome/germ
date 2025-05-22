@@ -17,7 +17,15 @@ from nltk.corpus import wordnet as wn
 # --- config ----------------------------------------------------------
 ckpt = Path("data/e5_token_embedding_model/token_head.pt")
 device = "mps"
-probes = ["I", "a", "bank", "book", "cat", "run", "democracy", "neural", "quantum"]
+probes = [
+    "1492", "1776",
+    "49er",
+    "FBI", "FDIC",
+    "I", "a",
+    "AAPL", "Apple", "apple",
+    "Nancy",
+    "bank", "book", "cat", "democracy", "neural", "quantum", "run"
+]
 
 # --- load model ------------------------------------------------------
 embedder = TokenEmbeddingModel(device=device)
