@@ -103,12 +103,12 @@ class WordDataset(Dataset):
 
 
 def build_vocab(
-        min_bigram_freq: int = 300,
-        min_entity_freq: int = 100,
-        min_vocab_freq: int = 100,
         max_vocab: int = 50000,
+        min_entity_freq: int = 100,
+        min_ngram_freq: int = 300,
+        min_vocab_freq: int = 100,
+        ngram_max: int = 7,
         ngram_min: int = 2,
-        ngram_max: int = 5,
 ) -> (List[str], List[str]):
     """Extract a vocabulary from *WikiText‑103‑raw‑v1* via datasets."""
     from datasets import load_dataset
@@ -117,13 +117,10 @@ def build_vocab(
     ds_size = len(ds)
     print(f"Selecting training vocabulary from {ds_size} documents")
 
-    consecutive_capitalized_words_pattern = re.compile(
-        r"(?:^|\b)(?!As\b|By\b|In\b|On\b|The\b)[A-Z][a-z]+(?:\s+(?:and|at|by|for|in|of))?(?:\s+[A-Z][a-zA-Z]+)+\b"
-    )
     single_lowercase_token_pattern = re.compile(r"^[a-z]+$")
     starts_with_uppercase_pattern = re.compile(r'^[A-Z]')
 
-    bigram_counter = collections.Counter()
+    ngram_counter = collections.Counter()
     consecutive_capitalized_words_counter = collections.Counter()
     single_token_counter = collections.Counter()
 
@@ -131,61 +128,8 @@ def build_vocab(
     _contraction_tokens = {"'d", "'ll", "'m", "'re", "'s", "'t", "'ve"}
     _numeric_suffix_tokens = {"%", "°"}
     _special_at_tokens = {"@,@", "@.@", "@-@"}
-    is_bracket_tokens = 1
-    is_contraction_token = 2
-    is_special_at_token = 3
-    is_starts_with_upper = 4
-    token_dicts = []
-    token_lists = []
-    for row_id, row in enumerate(ds):
-        anomalous_tokens = {}
-        uniformly_lowercase_tokens = []
-        tokens = row["text"].split()
 
-        #consecutive_capitalized_words = consecutive_capitalized_words_pattern.findall(row["text"])
-        #consecutive_capitalized_words_counter.update(consecutive_capitalized_words)
-
-        token_len = len(tokens)
-        for token_idx, token in enumerate(tokens):
-            if bool(single_lowercase_token_pattern.search(token)):
-                if token_idx + 1 < token_len and tokens[token_idx + 1] in _contraction_tokens:
-                    next_token = tokens[token_idx + 1]
-                    if token[-1] == "n" and next_token == "'t":
-                        uniformly_lowercase_tokens.append(token[:-1])
-                        uniformly_lowercase_tokens.append(f"n{next_token}")
-                    else:
-                        uniformly_lowercase_tokens.append(token)
-                        uniformly_lowercase_tokens.append(next_token)
-                else:
-                    # If uniformly lowercase and alpha, just append
-                    uniformly_lowercase_tokens.append(token)
-            elif token in _bracket_tokens:
-                anomalous_tokens[token_idx] = is_bracket_tokens
-            elif token in _contraction_tokens:
-                anomalous_tokens[token_idx] = is_contraction_token
-            elif token in _special_at_tokens:
-                anomalous_tokens[token_idx] = is_special_at_token
-            elif bool(starts_with_uppercase_pattern.search(token)):
-                anomalous_tokens[token_idx] = is_starts_with_upper
-        single_token_counter.update(uniformly_lowercase_tokens)
-
-        token_dicts.append(anomalous_tokens)
-        token_lists.append(tokens)
-        if row_id % 100000 == 0:
-            print(f"1st pass {row_id}/{ds_size} rows")
-
-    entities = [w for w, c in consecutive_capitalized_words_counter.items() if c > min_entity_freq]
-    entities = sorted(entities, key=consecutive_capitalized_words_counter.get, reverse=True)[:max_vocab]
-    random.shuffle(entities)
-    del consecutive_capitalized_words_counter
-    vocab = [w for w, c in single_token_counter.items() if c >= min_vocab_freq]
-    vocab = sorted(vocab, key=single_token_counter.get, reverse=True)[:max_vocab]
-    random.shuffle(vocab)
-    del single_token_counter
-    print(f"entities: {len(entities)}")
-    print(f"vocab: {len(vocab)}")
-
-    bigram_stop_tokens = {
+    ngram_stop_tokens = {
         *_bracket_tokens,
         *_contraction_tokens,
         *_numeric_suffix_tokens,
@@ -195,46 +139,99 @@ def build_vocab(
             "’", "'", '"',
             "=", "±", "+", "-", "–", "—", "×",
             "⁄", "/", "\\", "$", "£", "&",
-            "he", "his", "she", "her"
+            "he", "his", "she", "her",
             "a.m.", "p.m.",
         }
     }
-    for row_id, tokens in enumerate(token_lists):
-        bigram_chunks = []
 
-        for tuple_id, bigram_tokens in enumerate(nltk_ngrams(tokens, 2)):
-            # Skip first tuple
-            if tuple_id > 0:
-                if (len([t for t in bigram_tokens if not bool(starts_with_uppercase_pattern.search(t))]) == 2
-                        and not set(bigram_tokens).intersection(bigram_stop_tokens)):
-                    bigram_chunks.append(" ".join(bigram_tokens))
-        bigram_counter.update(bigram_chunks)
+    is_bracket_tokens = 1
+    is_contraction_token = 2
+    is_special_at_token = 3
+    is_starts_with_upper = 4
+    for row_id, row in enumerate(ds):
+        anomalous_tokens = {}
+        uniformly_lowercase_tokens = {}
+
+        tokens = row["text"].split()
+        token_len = len(tokens)
+        last_token_idx = token_len - 1
+
+        #consecutive_capitalized_words = consecutive_capitalized_words_pattern.findall(row["text"])
+        #consecutive_capitalized_words_counter.update(consecutive_capitalized_words)
+
+        idx_offset = 0
+        skip_to_idx = None
+        for token_idx, token in enumerate(tokens):
+            if skip_to_idx is not None and token_idx < skip_to_idx:
+                continue
+            skip_to_idx = None
+            token_idx -= idx_offset
+            if bool(single_lowercase_token_pattern.search(token)):
+                next_token_idx = token_idx + 1
+                if next_token_idx < token_len and (tokens[next_token_idx] in _contraction_tokens
+                                                   or tokens[next_token_idx] == "@-@"):
+                    if tokens[next_token_idx] in _contraction_tokens:
+                        if tokens[next_token_idx] != "'s":
+                            uniformly_lowercase_tokens[token_idx] = token + tokens[next_token_idx]
+                            idx_offset = 2
+                            skip_to_idx = next_token_idx + 1
+                        else:
+                            uniformly_lowercase_tokens[token_idx] = token
+                            uniformly_lowercase_tokens[next_token_idx] = tokens[next_token_idx]
+                    elif tokens[next_token_idx] == "@-@":
+                        joined_token = token
+                        cursor_idx = next_token_idx + 1
+                        while cursor_idx is not None and tokens[cursor_idx - 1] == "@-@":
+                            joined_token += f"-{tokens[cursor_idx]}"
+                            next_cursor_idx = cursor_idx + 2
+                            if next_cursor_idx < last_token_idx:
+                                cursor_idx = next_cursor_idx
+                            else:
+                                idx_offset = cursor_idx - token_idx
+                                skip_to_idx = cursor_idx
+                                cursor_idx = None
+                        uniformly_lowercase_tokens[token_idx] = joined_token
+                else:
+                    # If uniformly lowercase and alpha, just append
+                    uniformly_lowercase_tokens[token_idx] = token
+            elif token in _bracket_tokens:
+                anomalous_tokens[token_idx] = is_bracket_tokens
+            elif token in _contraction_tokens:
+                anomalous_tokens[token_idx] = is_contraction_token
+            elif token in _special_at_tokens:
+                anomalous_tokens[token_idx] = is_special_at_token
+            elif bool(starts_with_uppercase_pattern.search(token)):
+                anomalous_tokens[token_idx] = is_starts_with_upper
+        single_token_counter.update(uniformly_lowercase_tokens.values())
+
+        if uniformly_lowercase_tokens:
+            uniformly_lowercase_ngrams = []
+            for token_group in group_by_consecutive_keys(uniformly_lowercase_tokens):
+                group_len = len(token_group)
+                for n in range(ngram_min, ngram_max + 1):
+                    if group_len == n:
+                        uniformly_lowercase_ngrams.append(" ".join(token_group))
+                    elif ngram_min < group_len < n:
+                        for ngram_group in nltk_ngrams(token_group, group_len):
+                            uniformly_lowercase_ngrams.append(" ".join(ngram_group))
+            ngram_counter.update(uniformly_lowercase_ngrams)
+
         if row_id % 100000 == 0:
-            print(f"2nd pass {row_id}/{ds_size} rows")
+            print(f"1st pass {row_id}/{ds_size} rows")
 
-    # Populate token_count dict with only lowercase words
-    #token_count = {w: c for w, c in single_lower_token_counter.items() if not bool(capitalized_pattern.search(w))}
-    #for w, c in single_lower_token_counter.items():
-    #    if bool(all_caps_pattern.search(w)):
-    #        # Give benefit of doubt and assume acronym
-    #        token_count[w] = c
-    #    elif bool(capitalized_pattern.search(w)):
-    #        # For words with uppercase characters
-    #        lowered_form = w.lower()
-    #        if lowered_form in token_count:
-    #            # If a lowercase form exists, credit the lowercase form. This handles cases where common words comes
-    #            # at the beginning of a sentence or where a common word is used in a name. We don't need to be too
-    #            # strict since we're just trying to get a sense of frequency for train our projection head.
-    #            token_count[lowered_form] += c
-    #        else:
-    #            # but if no lowercase versions were found, keep the uppercase word
-    #            token_count[w] = c
-    # Filter out anything that doesn't pass min_freq threshold
-    bigrams = [w for w, c in bigram_counter.items() if c > min_bigram_freq]
-    bigrams = sorted(bigrams, key=bigram_counter.get, reverse=True)[:max_vocab]
-    random.shuffle(bigrams)
-    print(f"bigrams: {len(bigrams)}")
-    return entities, bigrams, vocab
+    entities = [w for w, c in consecutive_capitalized_words_counter.items() if c > min_entity_freq]
+    entities = sorted(entities, key=consecutive_capitalized_words_counter.get, reverse=True)[:max_vocab]
+    random.shuffle(entities)
+    print(f"entities: {len(entities)}")
+    vocab = [w for w, c in single_token_counter.items() if c >= min_vocab_freq]
+    vocab = sorted(vocab, key=single_token_counter.get, reverse=True)[:max_vocab]
+    random.shuffle(vocab)
+    print(f"vocab: {len(vocab)}")
+    ngrams = [w for w, c in ngram_counter.items() if c > min_ngram_freq]
+    ngrams = sorted(ngrams, key=ngram_counter.get, reverse=True)[:max_vocab]
+    random.shuffle(ngrams)
+    print(f"ngrams: {len(ngrams)}")
+    return entities, ngrams, vocab
 
 
 def fine_tune_token_head(
@@ -272,14 +269,14 @@ def fine_tune_token_head(
     #     Find the most "confusing" other word in the batch — i.e., a word whose embedding is most similar (even though
     #     it’s not supposed to be the same). This confusing word becomes the “negative” example. The model is then
     #     penalized if it mixes up these representations.
-    entities, bigrams, vocab = build_vocab()
+    entities, ngrams, vocab = build_vocab()
     with (Path(out_dir)/"entities.json").open("w", encoding="utf-8") as json_f:
         json.dump(entities, json_f, ensure_ascii=False, indent=0)
-    with (Path(out_dir)/"bigrams.json").open("w", encoding="utf-8") as json_f:
-        json.dump(bigrams, json_f, ensure_ascii=False, indent=0)
+    with (Path(out_dir)/"ngrams.json").open("w", encoding="utf-8") as json_f:
+        json.dump(ngrams, json_f, ensure_ascii=False, indent=0)
     with (Path(out_dir)/"vocab.json").open("w", encoding="utf-8") as json_f:
         json.dump(vocab, json_f, ensure_ascii=False, indent=0)
-    dataset = WordDataset(entities + bigrams + vocab)
+    dataset = WordDataset(entities + ngrams + vocab)
     g = torch.Generator().manual_seed(seed)
     dl = DataLoader(dataset, batch_size=batch_size, generator=g, shuffle=True, num_workers=0)
 
@@ -365,6 +362,31 @@ def fine_tune_token_head(
 
     torch.save(model.state_dict(), Path(out_dir)/"token_head.pt")
     print(f"Saved fine‑tuned TokenEmbeddingModel to {out_dir}/token_head.pt")
+
+
+def group_by_consecutive_keys(data):
+    # Sort the dictionary keys
+    sorted_keys = sorted(data.keys())
+
+    grouped_values = []
+    current_group = [data[sorted_keys[0]]]
+
+    # Track previous key to detect consecutive runs
+    previous_key = sorted_keys[0]
+    for key in sorted_keys[1:]:
+        # If the current key is consecutive to the previous key,
+        # append the corresponding value to the current group
+        if key == previous_key + 1:
+            current_group.append(data[key])
+        else:
+            # If not consecutive, start a new group
+            grouped_values.append(current_group)
+            current_group = [data[key]]
+        previous_key = key
+
+    # Don't forget to add the last group
+    grouped_values.append(current_group)
+    return grouped_values
 
 
 def set_global_seed(seed: int = 42):

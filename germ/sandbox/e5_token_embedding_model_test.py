@@ -33,8 +33,11 @@ embedder.load_state_dict(torch.load(ckpt, map_location=device))
 embedder.eval()
 
 # --- build hold-out sample ------------------------------------------
+# NOTE: don't have to load and index everything the model's seen
+ngrams = json.load(open("data/e5_token_embedding_model/ngrams.json"))          # save the list returned by build_vocab()
 vocab = json.load(open("data/e5_token_embedding_model/vocab.json"))          # save the list returned by build_vocab()
-holdout = [w for w in vocab if w not in probes]
+holdout = [w for w in ngrams if w not in probes]
+holdout.extend([w for w in vocab if w not in probes])
 random.shuffle(holdout)
 #holdout = holdout[:3000]
 
