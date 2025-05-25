@@ -103,10 +103,6 @@ class WordDataset(Dataset):
 
 
 def build_vocab(
-        max_vocab: int = 50000,
-        min_entity_freq: int = 100,
-        min_ngram_freq: int = 300,
-        min_vocab_freq: int = 100,
         ngram_max: int = 7,
         ngram_min: int = 2,
 ) -> (List[str], List[str]):
@@ -117,121 +113,124 @@ def build_vocab(
     ds_size = len(ds)
     print(f"Selecting training vocabulary from {ds_size} documents")
 
-    single_lowercase_token_pattern = re.compile(r"^[a-z]+$")
-    starts_with_uppercase_pattern = re.compile(r'^[A-Z]')
+    all_lowercase_token_pattern = re.compile(r"^[a-zàáçćèéïōšüū-]+$")
+    all_uppercase_token_pattern = re.compile(r'^(?:[A-Z]\.?)+$')
+    can_shan_won_pattern = re.compile(r"^[Cc]an|[Ss]han|[Ww]on$")
+    number_pattern = re.compile(r"^([0-9]+\.?[0-9]*|[1-9][0-9]{,2}(?:,[0-9]{3})*(\.[0-9]*)?)$")
+    numeric_pattern = re.compile(r"^(?:[a-z]+-)?"
+                                 r"(?:[0-9]+\.?[0-9]*|[1-9][0-9]{,2}(?:,[0-9]{3})*(\.[0-9]*)?)"
+                                 r"(?:[a-zA-Z]+)?(?:-[a-zA-Z]+)*?$")
+    starts_with_uppercase_pattern = re.compile(r"^(?:[a-zàáçćèéïōšüū]+[-'])?[A-ZÁÅÆÉĐÍÓŠ]")
 
+    all_lowercase_token_counter = collections.Counter()
+    anomalous_token_counter = collections.Counter()
+    named_entity_counter = collections.Counter()
     ngram_counter = collections.Counter()
-    consecutive_capitalized_words_counter = collections.Counter()
-    single_token_counter = collections.Counter()
+    number_counter = collections.Counter()
+    numeric_counter = collections.Counter()
 
-    _bracket_tokens = {"(", ")", "[", "]", "{", "}"}
-    _contraction_tokens = {"'d", "'ll", "'m", "'re", "'s", "'t", "'ve"}
-    _numeric_suffix_tokens = {"%", "°"}
-    _special_at_tokens = {"@,@", "@.@", "@-@"}
-
-    ngram_stop_tokens = {
-        *_bracket_tokens,
-        *_contraction_tokens,
-        *_numeric_suffix_tokens,
-        *_special_at_tokens,
-        *{
-            ",", "...", ".", "?", "!", ":", ";",
-            "’", "'", '"',
-            "=", "±", "+", "-", "–", "—", "×",
-            "⁄", "/", "\\", "$", "£", "&",
-            "he", "his", "she", "her",
-            "a.m.", "p.m.",
-        }
-    }
-
-    is_bracket_tokens = 1
-    is_contraction_token = 2
-    is_special_at_token = 3
-    is_starts_with_upper = 4
     for row_id, row in enumerate(ds):
-        anomalous_tokens = {}
-        uniformly_lowercase_tokens = {}
-
         tokens = row["text"].split()
-        token_len = len(tokens)
-        last_token_idx = token_len - 1
 
-        #consecutive_capitalized_words = consecutive_capitalized_words_pattern.findall(row["text"])
-        #consecutive_capitalized_words_counter.update(consecutive_capitalized_words)
-
-        idx_offset = 0
-        skip_to_idx = None
-        for token_idx, token in enumerate(tokens):
-            if skip_to_idx is not None and token_idx < skip_to_idx:
-                continue
-            skip_to_idx = None
-            token_idx -= idx_offset
-            if bool(single_lowercase_token_pattern.search(token)):
-                next_token_idx = token_idx + 1
-                if next_token_idx < token_len and (tokens[next_token_idx] in _contraction_tokens
-                                                   or tokens[next_token_idx] == "@-@"):
-                    if tokens[next_token_idx] in _contraction_tokens:
-                        if tokens[next_token_idx] != "'s":
-                            uniformly_lowercase_tokens[token_idx] = token + tokens[next_token_idx]
-                            idx_offset = 2
-                            skip_to_idx = next_token_idx + 1
-                        else:
-                            uniformly_lowercase_tokens[token_idx] = token
-                            uniformly_lowercase_tokens[next_token_idx] = tokens[next_token_idx]
-                    elif tokens[next_token_idx] == "@-@":
-                        joined_token = token
-                        cursor_idx = next_token_idx + 1
-                        while cursor_idx is not None and tokens[cursor_idx - 1] == "@-@":
-                            joined_token += f"-{tokens[cursor_idx]}"
-                            next_cursor_idx = cursor_idx + 2
-                            if next_cursor_idx < last_token_idx:
-                                cursor_idx = next_cursor_idx
-                            else:
-                                idx_offset = cursor_idx - token_idx
-                                skip_to_idx = cursor_idx
-                                cursor_idx = None
-                        uniformly_lowercase_tokens[token_idx] = joined_token
+        preprocessed_tokens = []
+        concat_into_previous = False
+        for token in tokens:
+            if concat_into_previous:
+                preprocessed_tokens[-1] += token
+                concat_into_previous = False
+            elif token.startswith("'"):
+                if not preprocessed_tokens:
+                    preprocessed_tokens.append(token)
+                elif preprocessed_tokens[-1].endswith("n") and token == "'t":
+                    if bool(can_shan_won_pattern.search(preprocessed_tokens[-1])):
+                        preprocessed_tokens.append("'t")
+                    else:
+                        preprocessed_tokens[-1] = preprocessed_tokens[-1][:-1]
+                        preprocessed_tokens.append("n't")
+                elif token not in {"'", "'d", "'ll", "'m", "'re", "'s", "'ve"}:
+                    preprocessed_tokens[-1] += token
                 else:
-                    # If uniformly lowercase and alpha, just append
-                    uniformly_lowercase_tokens[token_idx] = token
-            elif token in _bracket_tokens:
-                anomalous_tokens[token_idx] = is_bracket_tokens
-            elif token in _contraction_tokens:
-                anomalous_tokens[token_idx] = is_contraction_token
-            elif token in _special_at_tokens:
-                anomalous_tokens[token_idx] = is_special_at_token
-            elif bool(starts_with_uppercase_pattern.search(token)):
-                anomalous_tokens[token_idx] = is_starts_with_upper
-        single_token_counter.update(uniformly_lowercase_tokens.values())
+                    preprocessed_tokens.append(token)
+            elif token in {"@,@", "@.@", "@-@"}:
+                preprocessed_tokens[-1] += token.strip("@")
+                concat_into_previous = True
+            else:
+                preprocessed_tokens.append(token)
 
-        if uniformly_lowercase_tokens:
-            uniformly_lowercase_ngrams = []
-            for token_group in group_by_consecutive_keys(uniformly_lowercase_tokens):
+        all_lowercase_tokens = {}
+        anomalous_tokens = {}
+        capitalized_tokens = {}
+        number_tokens = {}
+        numeric_tokens = {}
+
+        for token_idx, token in enumerate(preprocessed_tokens):
+            if bool(all_lowercase_token_pattern.search(token)):
+                all_lowercase_tokens[token_idx] = token
+            elif bool(all_uppercase_token_pattern.search(token)):
+                capitalized_tokens[token_idx] = token
+            elif bool(starts_with_uppercase_pattern.search(token)):
+                # TODO:
+                #   - tokens with '
+                #   - connected ngrams
+                capitalized_tokens[token_idx] = token
+            elif bool(number_pattern.search(token)):
+                number_tokens[token_idx] = token
+            elif bool(numeric_pattern.search(token)):
+                numeric_tokens[token_idx] = token
+            else:
+                anomalous_tokens[token_idx] = token
+
+        if all_lowercase_tokens:
+            all_lowercase_token_counter.update(all_lowercase_tokens.values())
+            all_lowercase_ngrams = []
+            for token_group in group_by_consecutive_keys(all_lowercase_tokens):
                 group_len = len(token_group)
                 for n in range(ngram_min, ngram_max + 1):
                     if group_len == n:
-                        uniformly_lowercase_ngrams.append(" ".join(token_group))
+                        all_lowercase_ngrams.append(" ".join(token_group))
                     elif ngram_min < group_len < n:
                         for ngram_group in nltk_ngrams(token_group, group_len):
-                            uniformly_lowercase_ngrams.append(" ".join(ngram_group))
-            ngram_counter.update(uniformly_lowercase_ngrams)
+                            all_lowercase_ngrams.append(" ".join(ngram_group))
+            ngram_counter.update(all_lowercase_ngrams)
 
-        if row_id % 100000 == 0:
-            print(f"1st pass {row_id}/{ds_size} rows")
+        if anomalous_tokens:
+            anomalous_token_counter.update(anomalous_tokens.values())
 
-    entities = [w for w, c in consecutive_capitalized_words_counter.items() if c > min_entity_freq]
-    entities = sorted(entities, key=consecutive_capitalized_words_counter.get, reverse=True)[:max_vocab]
-    random.shuffle(entities)
-    print(f"entities: {len(entities)}")
-    vocab = [w for w, c in single_token_counter.items() if c >= min_vocab_freq]
-    vocab = sorted(vocab, key=single_token_counter.get, reverse=True)[:max_vocab]
-    random.shuffle(vocab)
-    print(f"vocab: {len(vocab)}")
-    ngrams = [w for w, c in ngram_counter.items() if c > min_ngram_freq]
-    ngrams = sorted(ngrams, key=ngram_counter.get, reverse=True)[:max_vocab]
-    random.shuffle(ngrams)
-    print(f"ngrams: {len(ngrams)}")
-    return entities, ngrams, vocab
+        if capitalized_tokens:
+            capitalized_ngrams = []
+            for token_group in group_by_consecutive_keys(capitalized_tokens):
+                group_len = len(token_group)
+                for n in range(ngram_min, ngram_max + 1):
+                    if group_len == n:
+                        capitalized_ngrams.append(" ".join(token_group))
+                    elif ngram_min < group_len < n:
+                        for ngram_group in nltk_ngrams(token_group, group_len):
+                            capitalized_ngrams.append(" ".join(ngram_group))
+            named_entity_counter.update(capitalized_ngrams)
+
+        if number_tokens:
+            number_counter.update(number_tokens.values())
+
+        if numeric_tokens:
+            numeric_counter.update(numeric_tokens.values())
+
+        if row_id > 0 and row_id % 100000 == 0:
+            print(f"Processed {row_id} rows")
+
+    corpus = {}
+    for k, v in {
+        "all_lowercase_token": (all_lowercase_token_counter, 100),
+        "anomalous_token": (anomalous_token_counter, 100),
+        "named_entity": (named_entity_counter, 100),
+        "ngram": (ngram_counter, 100),
+        "number": (number_counter, 100),
+        "numeric": (numeric_counter, 100),
+    }.items():
+        corpus[k] = [item for item, c in v[0].items() if c >= v[1]]
+        corpus[k] = sorted(corpus[k], key=v[0].get, reverse=True)[:50000]
+        random.shuffle(corpus[k])
+        print(f"{k}: {len(corpus[k])}")
+    return corpus
 
 
 def fine_tune_token_head(
@@ -269,14 +268,11 @@ def fine_tune_token_head(
     #     Find the most "confusing" other word in the batch — i.e., a word whose embedding is most similar (even though
     #     it’s not supposed to be the same). This confusing word becomes the “negative” example. The model is then
     #     penalized if it mixes up these representations.
-    entities, ngrams, vocab = build_vocab()
-    with (Path(out_dir)/"entities.json").open("w", encoding="utf-8") as json_f:
-        json.dump(entities, json_f, ensure_ascii=False, indent=0)
-    with (Path(out_dir)/"ngrams.json").open("w", encoding="utf-8") as json_f:
-        json.dump(ngrams, json_f, ensure_ascii=False, indent=0)
-    with (Path(out_dir)/"vocab.json").open("w", encoding="utf-8") as json_f:
-        json.dump(vocab, json_f, ensure_ascii=False, indent=0)
-    dataset = WordDataset(entities + ngrams + vocab)
+    corpus = build_vocab()
+    for k, v in corpus.items():
+        with (Path(out_dir)/f"{k}.json").open("w", encoding="utf-8") as json_f:
+            json.dump(v, json_f, ensure_ascii=False, indent=0)
+    dataset = WordDataset([item for sublist in corpus.values() for item in sublist])
     g = torch.Generator().manual_seed(seed)
     dl = DataLoader(dataset, batch_size=batch_size, generator=g, shuffle=True, num_workers=0)
 

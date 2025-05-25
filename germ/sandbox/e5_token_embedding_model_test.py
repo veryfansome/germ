@@ -22,7 +22,7 @@ probes = [
     "49er",
     "FBI", "FDIC",
     "I", "a",
-    "AAPL", "Apple", "apple",
+    "AAPL", "Apple Inc", "apple",
     "Nancy",
     "bank", "book", "cat", "democracy", "neural", "quantum", "run"
 ]
@@ -34,9 +34,11 @@ embedder.eval()
 
 # --- build hold-out sample ------------------------------------------
 # NOTE: don't have to load and index everything the model's seen
-ngrams = json.load(open("data/e5_token_embedding_model/ngrams.json"))          # save the list returned by build_vocab()
-vocab = json.load(open("data/e5_token_embedding_model/vocab.json"))          # save the list returned by build_vocab()
-holdout = [w for w in ngrams if w not in probes]
+named_entities = json.load(open("data/e5_token_embedding_model/named_entity.json"))
+ngrams = json.load(open("data/e5_token_embedding_model/ngram.json"))
+vocab = json.load(open("data/e5_token_embedding_model/all_lowercase_token.json"))
+holdout = [w for w in named_entities if w not in probes]
+holdout.extend([w for w in ngrams if w not in probes])
 holdout.extend([w for w in vocab if w not in probes])
 random.shuffle(holdout)
 #holdout = holdout[:3000]
