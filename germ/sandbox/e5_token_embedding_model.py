@@ -15,8 +15,9 @@ from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModel, AutoTokenizer, get_cosine_schedule_with_warmup
 from typing import Iterable, List
 
+nltk.download('stopwords')
 nltk.download('wordnet')
-from nltk.corpus import wordnet as wn
+from nltk.corpus import stopwords as nltk_stop, wordnet as wn
 
 """
 * Components -------------------------------------------------------------
@@ -66,6 +67,26 @@ def build_antonym_map(vocab_tokens: list[str]) -> dict[str, list[str]]:
     return {k: sorted(v) for k, v in antonym_dict.items()}
 
 
+def build_stop_words():
+    stop_words = set()
+    stop_words_to_prune = set()
+    for w in nltk_stop.words("english"):
+        if "'" in w:
+            pair = w.split("'")
+            pair[-1] = "'" + pair[-1]
+            if pair[-1] == "'t" and pair[0].endswith("n") and pair[0] not in {"ain", "can", "shan", "won"}:
+                stop_words_to_prune.add(pair[0])
+                pair[0] = pair[0][:-1]
+                pair[-1] = "n" + pair[-1]
+            stop_words.update(pair)
+        elif len(w) == 1 and w not in {"a", "i", "o", "y"}:
+            stop_words.add("'" + w)
+        else:
+            stop_words.add(w)
+    stop_words.difference_update(stop_words_to_prune)
+    return stop_words
+
+
 def build_synonym_map(vocab_tokens: list[str]) -> dict[str, list[str]]:
     """
     { token : [ synonym₁, synonym₂, … ] }  limited to the vocab.
@@ -96,6 +117,7 @@ def build_synonym_map(vocab_tokens: list[str]) -> dict[str, list[str]]:
 
 def extract_ngrams(
         tokens: List[str],
+        stop_words: set[str],
         ngram_min: int = 2,
         ngram_max: int = 7
 ) -> Iterable[str]:
@@ -107,6 +129,8 @@ def extract_ngrams(
     max_n = min(len(tokens), ngram_max)
     for n in range(ngram_min, max_n + 1):
         for gram in nltk_ngrams(tokens, n):
+            if gram[0].lower() in stop_words or gram[-1].lower() in stop_words:
+                continue
             yield " ".join(gram)
 
 
@@ -254,12 +278,13 @@ def build_vocab(
 
     all_lowercase_token_pattern = re.compile(r"^(?:[a-z]+')?[a-zàáçćèéïōšüū-]+$")
     all_uppercase_token_pattern = re.compile(r'^(?:[A-Z]\.?)+$')
-    can_shan_won_pattern = re.compile(r"^(?:[Cc]an|[Ss]han|[Ww]on)$")
+    ain_can_shan_won_pattern = re.compile(r"^(?:[Aa]in|[Cc]an|[Ss]han|[Ww]on)$")
     number_pattern = re.compile(r"^([0-9]+\.?[0-9]*|[1-9][0-9]{,2}(?:,[0-9]{3})*(\.[0-9]*)?)$")
     numeric_pattern = re.compile(r"^(?:[a-z]+-)?"
                                  r"(?:[0-9]+\.?[0-9]*|[1-9][0-9]{,2}(?:,[0-9]{3})*(\.[0-9]*)?)"
                                  r"(?:[a-zA-Z]+)?(?:-[a-zA-Z]+)*?$")
     starts_with_uppercase_pattern = re.compile(r"^(?:[a-zàáçćèéïōšüū]+[-']?)?[A-ZÁÅÆÉĐÍÎÓŠ]")
+    stop_words = build_stop_words()
 
     all_lowercase_token_counter = collections.Counter()
     anomalous_token_counter = collections.Counter()
@@ -281,7 +306,7 @@ def build_vocab(
                 if not preprocessed_tokens:
                     preprocessed_tokens.append(token)
                 elif preprocessed_tokens[-1].endswith("n") and token == "'t":
-                    if bool(can_shan_won_pattern.search(preprocessed_tokens[-1])):
+                    if bool(ain_can_shan_won_pattern.search(preprocessed_tokens[-1])):
                         preprocessed_tokens.append("'t")
                     else:
                         preprocessed_tokens[-1] = preprocessed_tokens[-1][:-1]
@@ -323,7 +348,7 @@ def build_vocab(
             all_lowercase_ngrams = []
             for token_group in group_by_consecutive_keys(all_lowercase_tokens):
                 all_lowercase_ngrams.extend(
-                    extract_ngrams(token_group, ngram_min, ngram_max)
+                    extract_ngrams(token_group, stop_words, ngram_min=ngram_min, ngram_max=ngram_max)
                 )
             ngram_counter.update(all_lowercase_ngrams)
 
@@ -336,7 +361,7 @@ def build_vocab(
             capitalized_ngrams = []
             for token_group in group_by_consecutive_keys(capitalized_tokens):
                 capitalized_ngrams.extend(
-                    extract_ngrams(token_group, ngram_min, ngram_max)
+                    extract_ngrams(token_group, stop_words, ngram_min=ngram_min, ngram_max=ngram_max)
                 )
             named_entity_counter.update(capitalized_ngrams)
 
@@ -366,13 +391,16 @@ def build_vocab(
 
 
 def fine_tune_token_head(
+        accum_steps: int = 4,  # ← batch_size × accum_steps = “virtual batch”
+        #accum_steps: int = 8,
         device: str | None = None,
         #epochs: int = 8,
         epochs: int = 16,
         #epochs: int = 24,
         #epochs: int = 32,
         #epochs: int = 40,
-        batch_size: int = 512,
+        batch_size: int = 256,
+        #batch_size: int = 512,
         lr: float = 1e-5,
         out_dir: str = "data/e5_token_embedding_model",
         recon_max_weight: float = 1.0,  # weight AFTER warm-up
@@ -401,7 +429,7 @@ def fine_tune_token_head(
     #     it’s not supposed to be the same). This confusing word becomes the “negative” example. The model is then
     #     penalized if it mixes up these representations.
     antonym_file = Path(out_dir) / "antonyms.json"
-    corpus_file = Path(out_dir)/f"corpus.json"
+    corpus_file = Path(out_dir)/"corpus.json"
     synonym_file = Path(out_dir) / "synonyms.json"
     if antonym_file.exists() and corpus_file.exists() and synonym_file.exists():
         with antonym_file.open() as f:
@@ -433,7 +461,6 @@ def fine_tune_token_head(
 
     # scheduler
 
-    accum_steps = 8  # ← batch_size 512×8 = 4096 token pairs per “virtual batch”
     # A temperature parameter (tau) is used to adjust the sensitivity of similarity comparisons. It starts higher and
     # is annealed to a lower value during training. This helps fine-tune how sharply the model distinguishes between
     # the correct word and its hardest negative counterpart.

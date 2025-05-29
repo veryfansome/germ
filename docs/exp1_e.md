@@ -315,3 +315,97 @@ Automate logging (json/CSV) so we can plot *loss component vs epoch* and *intrin
 ---
 
 Hope the brutally candid read-out helps. Let me know which levers you tweak first, and I’ll run the numbers with you.
+
+---
+
+---
+
+
+Short answer
+
+Yes — shovelling every high-frequency contiguous n-gram (“of the”, “and it”, “is the”) into the same embedding vocabulary as meaning-bearing chunks (“machine learning”, “New York”) dilutes capacity, slows training, and raises the floor noise for retrieval.  A leaner, semantics-aware phrase list almost always helps.
+
+⸻
+
+1  Why naïve n-gram harvesting hurts
+
+effect	mechanism inside your pipeline
+Vocabulary bloat	350 k+ extra “the X”, “a Y” items → FAISS index grows ×N, RAM & build-time become dominated by junk tokens.
+Hard-negative mining becomes easier (bad)	When half the batch are stop-word snippets, the “hardest negative” for any real token is often still a throw-away fragment, so the contrastive loss gives a weak gradient.
+Semantic anchor distortion	You force the projection head to map “of the” :left_right_arrow: its CLS hidden vector. CLS already treats function-word strings as noise, so the model wastes parameters on matching noise.
+Invertibility failure	Later, when the decoder pulls nearest neighbours to reassemble a sentence, the search space is cluttered with unhelpful shards; you get outputs like “of the” instead of a content phrase.
+Evaluation masking	AUROC on WordNet pairs looks great partly because meaningless grams rarely collide with them — the noise is hidden, not solved.
+
+
+⸻
+
+2  A better phrase-mining recipe (quick wins first)
+
+step	what to do	tech note
+Frequency floor and information floor	Keep n-grams only if freq ≥ 100 and PMI ≥ 4 (or log-likelihood > 20). PMI instantly drops “of the”, keeps “machine learning”.	Pointwise mutual information for 2-grams:  PMI(x,y)=log₂ P(x,y) / (P(x)P(y)).For n>2 use average pair PMI to stay cheap.
+Stop-word front/back filter	Reject grams that start or end with a stop-word (unless the whole phrase is in a known idiom list).	Cheap heuristic that nukes most syntactic glue.
+POS-pattern gate	Keep only [Adj∗ Noun+], [Verb Noun], [Proper Noun+ …] etc.	spaCy noun_chunks or a tiny tagger suffices; works well for English.
+External MWE seeds	– Wiktionary idioms (≈18 k) – Wikipedia page titles – WordNet “lemma names” with spaces	Merge with your mined list, then run step 1 again to prune singletons.
+Dynamic phrase sampling	Instead of a fixed list, draw 10 % of every minibatch from freshly mined high-PMI grams each epoch.	Forces model to generalise rather than memorise a static table.
+
+(Implement 1–2 first; they remove > 90 % of garbage for almost no code.)
+
+⸻
+
+3  Empirical check-list to know it really helps
+
+test	success criterion
+Contrastive loss slope in first 2 epochs	Should drop faster after pruning because negatives are harder.
+Neighbour purity	For 1 k random tokens, ≥ 90 % of top-10 neighbours share a stem or are WordNet synonyms (was ~70 % in your current probe).
+Retrieval BLEU for sentence inversion	Replace baseline vocab with pruned list; expect +1–2 BLEU on held-out WikiText.
+FAISS index size / query time	Dimensionality unchanged, but vector count ↓ 30-50 %; latency should fall sub-linear.
+
+
+⸻
+
+4  Counter-arguments & when not to prune hard
+•	You actually need syntactic glue if the downstream decoder assembles text purely by vector lookup.  Killing all function-grams may force the decoder to stitch together single tokens more often, hurting fluency.
+Compromise: keep the top 300 most frequent stop-word grams (“of the”, “in the”, …) and treat them as special tokens outside the semantic contrastive game.
+•	PMI is domain-sensitive.  If your deployment corpus is stack-overflow posts, the mined “meaningful” phrases from WikiText may be irrelevant.  You’d need to re-mine on in-domain text.
+•	Training-time compute vs benefit. Phrase pruning gives logarithmic gains once you drop the obvious junk.  Going from 100 k → 20 k phrases is worth it; 20 k → 12 k usually isn’t.
+
+⸻
+
+5  Implementation sketch (few lines)
+
+from collections import Counter
+import math, itertools
+
+def mine_phrases(docs, n_max=4, min_freq=100, pmi_floor=4.0):
+unigram = Counter()
+ngram = Counter()
+for doc in docs:
+toks = doc.split()
+unigram.update(toks)
+for n in range(2, n_max+1):
+ngram.update(zip(*(toks[i:] for i in range(n))))
+total = sum(unigram.values())
+keep = []
+for gram, f_xy in ngram.items():
+if f_xy < min_freq:
+continue
+p_xy = f_xy / total
+pmi = math.log2(p_xy /
+(unigram[gram[0]]/total * unigram[gram[1]]/total))
+if pmi >= pmi_floor and not (gram[0] in STOP or gram[-1] in STOP):
+keep.append(" ".join(gram))
+return keep
+
+Swap in your existing extract_ngrams call; write the keep-list to JSON; rebuild corpus.
+
+⸻
+
+6  My uncertainty & bias
+•	I assume English; morphologically richer languages need different gates (morph-seg + C-value).
+•	I’m biased toward information-theory heuristics (PMI) because they’re cheap; neural phrase mining (e.g. SegPhrase++) may eke out a few more points but at higher complexity.
+
+⸻
+
+TL;DR
+
+Your current “all contiguous n-grams ≥ 100 hits” rule drags in a boat-load of syntactic filler that does blunt training.  A two-hour refactor to add a PMI gate and a stop-word filter will give you a leaner, more semantically coherent phrase vocabulary with faster convergence and cleaner retrieval.  Past that, only refine further if phrase quality bottlenecks a downstream metric.
