@@ -1,3 +1,7 @@
+I want to train an encoder using a vocabulary of characters and use MLM (masking characters), CLM (predicting next character), and denoising (removing all white spaces and having the model add them back). I also want to add a reconstruction loss where the model is required to reconstruct the original input exactly from the embeddings.
+
+Here is my code so far:
+```
 import random
 import torch
 import torch.nn as nn
@@ -386,7 +390,7 @@ def choose_memory(memory_selector: MemorySelector,
     """
     if len(bank) == 0 or k == 0:
         dummy = torch.zeros(1, 0, query_embedding.size(0), device=device)
-        return dummy, torch.tensor(0., device=device, requires_grad=True)
+        return dummy, torch.tensor(0., device=device)
 
     cand_embs = torch.stack(bank, dim=0).to(device)              # (M, E)
     logits = memory_selector(query_embedding.to(device), cand_embs)   # (M,)
@@ -551,9 +555,6 @@ def train_stream(main_model,
         # reward = −supervised loss   (smaller loss == better)
         reward = -loss.detach()
         selector_loss = -log_probs_sum * reward
-        #baseline = 0.95 * baseline + 0.05 * loss.item()
-        #advantage = -loss.detach() - baseline
-        #selector_loss = -log_probs_sum * advantage
 
         selector_optimizer.zero_grad()
         selector_loss.backward()
@@ -566,16 +567,9 @@ def train_stream(main_model,
             memory_bank.pop(0)
 
         if step % 10 == 0 or step == len(chunks):
-            print(
-                "  "
-                f"Step {step:03d}/{len(chunks)}, "
-                f"SL {selector_loss.item():6.4f}, Reward {reward.item():6.4f}, "
-                f"Loss {loss.item():6.4f} "
-                f"MLM: {mlm_loss.item():.4f}, "
-                f"CLM: {clm_loss.item():.4f}, "
-                f"Denoise: {den_loss.item():.4f}, "
-                f"Recon: {rec_loss.item():.4f}"
-            )
+            print(f"step {step:03d}/{len(chunks)}  "
+                  f"sup-loss {loss.item():6.4f}  sel-loss {selector_loss.item():6.4f}  "
+                  f"reward {reward.item():6.4f}")
 
     return memory_bank
 
@@ -603,7 +597,6 @@ if __name__ == "__main__":
     # 1. Build vocab
     _char2idx, _idx2char = build_vocab(_short_texts + _long_texts)
     _vocab_size = len(_idx2char)
-    print(f"Vocab size: {_vocab_size}, vocab: {_char2idx.keys()}")
 
     # 2. Create dataset and dataloader
     _short_text_dataset = MultiTaskTextDataset(_short_texts, _char2idx, _idx2char,
@@ -633,13 +626,12 @@ if __name__ == "__main__":
         print(
             "  "
             f"Epoch {epoch+1}/{epochs}, "
-            f"Loss: {losses_dict['total_loss']:.4f}, "
+            f"Total: {losses_dict['total_loss']:.4f}, "
             f"MLM: {losses_dict['mlm_loss']:.4f}, "
             f"CLM: {losses_dict['clm_loss']:.4f}, "
             f"Denoise: {losses_dict['denoise_loss']:.4f}, "
             f"Recon: {losses_dict['recon_loss']:.4f}"
         )
-    print("Long Texts:")
     for _text in _long_texts:
         memory_bank = train_stream(
             _multi_task_model, _selector_model,
@@ -649,31 +641,22 @@ if __name__ == "__main__":
         )
 
     print("Training complete!")
+```
 
-    # TODO:
-    #   - Baseline before RL – measure loss with the selector disabled (K=0) to confirm the policy is learning
-    #     something non-trivial.
-    #   - Critic / baseline – add a tiny value-network to predict expected reward, subtract it from the raw reward to
-    #     cut variance.
-    #   - Better memory routing – feed the selected embeddings through a small FiLM or cross-attention block instead of
-    #     blunt concatenation.
-    #   - Curriculum – start training without memory, then enable selector after N epochs; avoids policy thrashing
-    #     while the encoder is still random.
-    #   - Denoising head - ignore_index=2, but labels are only 0/1.
-    #   - Recon head – I ignore [PAD] (0) so any [UNK] characters are counted as errors.
-    #   - Byte-level vocab? Character-level MLM/CLM gives you ~128 tokens out-of-the-box if you switch to raw bytes
-    #     (or UTF-8 code-units) and saves you the whole custom-vocab hassle. The flip side is that recon loss becomes
-    #     much easier (byte-by-byte copying is trivial), so you may need to scale the reconstruction coefficient back
-    #     down.
-    #   - Memory selector variance – Four slots out of 256 candidates is a huge action space. You’ll probably converge
-    #     faster if you:
-    #       - use top-k arg-sampling during warm-up,
-    #       - add an entropy bonus to keep exploration alive,
-    #       - pre-train the selector with a cheap heuristic (e.g. dot-product similarity).
-    #   - Gradient flow through mem_proj – Right now the memory encoder never gets a direct reconstruction loss. If you
-    #     want end-to-end differentiability you can try:
-    #       - summing the recon loss over both input and memory tokens
-    #       - or adding an auxiliary contrastive loss between mem_proj(memory_emb) and the fresh‐chunk embedding.
-    #   - Gradient flow through mem_proj – Right now the memory encoder never gets a direct reconstruction loss. If you
-    #   - Replay buffer – At >10 k chunks you’ll spend more time on selector forward than on the main model. Consider
-    #     K-means or product quantisation to keep the buffer compact.
+I have a relatively small max_len at 40 characters so inevitably, I'm going to need a way to deal with longer texts. I want to have some in-memory store for all previous 40 character chunk embeddings from a document or conversation. I want to modify my DualStreamMultiTaskModel  to use 4 of these chunks at any time when dealing with a new 40 character text chunk. I train a second model to predict which 4-7 chunks from all previously stored chunks to populate these 4-7 slots maybe through RL where the reward is how much the character model benefited from the choices.
+
+I have things mostly wired up.
+```
+$ date; python -m germ.sandbox.char_encoder; date
+Thu May 29 00:27:00 PDT 2025
+Short Text Dataset:
+  Epoch 1/5, Loss: 11.7554, MLM: 3.7486, CLM: 3.7847, Denoise: 0.7325, Recon: 3.4896
+  Epoch 2/5, Loss: 11.7138, MLM: 3.5797, CLM: 3.8708, Denoise: 0.7433, Recon: 3.5199
+  Epoch 3/5, Loss: 11.2101, MLM: 3.2616, CLM: 3.7766, Denoise: 0.7173, Recon: 3.4547
+  Epoch 4/5, Loss: 11.4370, MLM: 3.7078, CLM: 3.6864, Denoise: 0.6742, Recon: 3.3687
+  Epoch 5/5, Loss: 11.7801, MLM: 4.0144, CLM: 3.7376, Denoise: 0.6572, Recon: 3.3710
+Long Texts:
+  Step 010/10, SL -118.8077, Reward -14.8173, Loss 14.8173 MLM: 3.8783, CLM: 4.0191, Denoise: 0.4416, Recon: 3.2391
+Training complete!
+Thu May 29 00:27:03 PDT 2025
+```
