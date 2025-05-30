@@ -25,14 +25,15 @@ short_text_dataloader = DataLoader(
 device = torch.device("mps" if torch.mps.is_available() else "cpu")
 multi_task_model = DualStreamMultiTaskModel(
     vocab_size=vocab_size,
-    embed_dim=64,
-    num_heads=2,
-    feedforward_dim=128,
+    embed_dim=256,
+    num_heads=8,
+    feedforward_dim=1024,
+    max_seq_len=256,
     max_mem_slots=4
 ).to(device)
 selector_model = MemorySelector(
-    embed_dim=64,
-    hidden_dim=128
+    embed_dim=256,
+    hidden_dim=1024
 ).to(device)
 
 multi_task_optimizer = optim.Adam(multi_task_model.parameters(), lr=2e-4)

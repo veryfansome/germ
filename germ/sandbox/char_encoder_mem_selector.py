@@ -55,16 +55,15 @@ def choose_memory(memory_selector: MemorySelector,
         log_probs_sum – scalar   (sum of log probs of the k picks)
     """
     if len(bank) == 0 or k == 0:
-        dummy = torch.zeros(1, 0, query_embedding.size(0), device=device)
-        return dummy, torch.tensor(0., device=device, requires_grad=True)
+        # No candidate memories → model receives None, selector gets no update
+        return None, torch.tensor(0.0, device=device, requires_grad=True)
 
     cand_embs = torch.stack(bank, dim=0).to(device)              # (M, E)
     logits = memory_selector(query_embedding.to(device), cand_embs)   # (M,)
     probs = torch.softmax(logits, dim=0)
 
     # Multinomial w/out replacement – sample iteratively
-    chosen_idx = []
-    log_prob_terms = []
+    chosen_idx, log_prob_terms = [], []
     tmp_probs = probs.clone()
     for _ in range(min(k, len(bank))):
         idx = torch.multinomial(tmp_probs, 1).item()
@@ -86,6 +85,7 @@ def train_stream(main_model,
                  idx2char: list,
                  max_len: int = 40,
                  k_mem: int = 4,
+                 ema_beta: float = 0.95,
                  device: torch.device = torch.device("cpu")):
     """
     Splits `text` into 40-char chunks, feeds them sequentially.
@@ -103,6 +103,7 @@ def train_stream(main_model,
     rec_loss_fn = nn.CrossEntropyLoss(ignore_index=0)
 
     # --------------------------------------------------------------------
+    baseline = None  # first few steps fall back to raw reward
     chunks = [text[i:i+max_len] for i in range(0, len(text), max_len)]
     for step, chunk in enumerate(chunks, 1):
 
@@ -127,8 +128,7 @@ def train_stream(main_model,
         main_model.train()
         main_optimizer.zero_grad()
 
-        out = main_model(batch["input_ids"],
-                         mem_embs)  # (1, T, …)
+        out = main_model(batch["input_ids"], mem_embs)  # (1, T, …)
 
         mlm_loss = mlm_loss_fn(out["mlm_logits"].view(-1, main_model.vocab_size),
                                batch["mlm_labels"].view(-1))
@@ -142,16 +142,28 @@ def train_stream(main_model,
         main_optimizer.step()
 
         # ===== RL update for selector ====================================
-        # reward = −supervised loss   (smaller loss == better)
-        reward = -loss.detach()
-        selector_loss = -log_probs_sum * reward
-        #baseline = 0.95 * baseline + 0.05 * loss.item()
-        #advantage = -loss.detach() - baseline
-        #selector_loss = -log_probs_sum * advantage
+        if mem_embs is not None:  # only update when something was chosen
+            reward = -loss.detach()  # smaller loss == better
+            if baseline is None:
+                baseline = reward  # first hit initialises EMA
+            else:
+                baseline = ema_beta * baseline + (1 - ema_beta) * reward
+            advantage = reward - baseline  # centre the reward
+            selector_loss = -log_probs_sum * advantage
 
-        selector_optimizer.zero_grad()
-        selector_loss.backward()
-        selector_optimizer.step()
+            selector_optimizer.zero_grad()
+            selector_loss.backward()
+            selector_optimizer.step()
+
+            if step % 10 == 0 or step == len(chunks):
+                print(
+                    "  "
+                    f"Step {step: 3d}/{len(chunks)}, "
+                    f"SLoss {selector_loss.item():6.4f}, "
+                    f"Reward {reward.item():6.4f}, "
+                    f"Baseline {baseline.item():6.4f}, "
+                    f"Advantage {advantage.item():6.4f}"
+                )
 
         # ===== book-keeping =============================================
         memory_bank.append(out["chunk_emb"].detach().squeeze(0).cpu())
@@ -162,9 +174,8 @@ def train_stream(main_model,
         if step % 10 == 0 or step == len(chunks):
             print(
                 "  "
-                f"Step {step:03d}/{len(chunks)}, "
-                f"SL {selector_loss.item():6.4f}, Reward {reward.item():6.4f}, "
-                f"Loss {loss.item():6.4f} "
+                f"Step {step: 3d}/{len(chunks)}, "
+                f"MLoss {loss.item():6.4f} "
                 f"MLM: {mlm_loss.item():.4f}, "
                 f"CLM: {clm_loss.item():.4f}, "
                 f"Recon: {rec_loss.item():.4f}"

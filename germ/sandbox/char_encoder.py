@@ -261,21 +261,32 @@ class DualStreamMultiTaskModel(nn.Module):
                  vocab_size: int,
                  embed_dim: int = 128,
                  num_heads: int = 4,
+                 num_encoder_layers: int = 6,
+                 num_decoder_layers: int = 6,
                  feedforward_dim: int = 256,
-                 max_mem_slots: int = 4):
+                 max_mem_slots: int = 4,
+                 max_seq_len: int = 512,
+                 dropout: float = 0.1):
         super().__init__()
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.max_mem_slots = max_mem_slots
+        self.max_seq_len = max_seq_len
 
         # Shared embedding
-        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+        self.position_embedding = nn.Embedding(max_seq_len + max_mem_slots, embed_dim)  # TODO: why add mem slots?
+        self.token_embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+        self.embed_dropout = nn.Dropout(dropout)
 
-        # Non-causal block (for MLM, reconstruction)
-        self.encoder_block = SimpleTransformerBlock(embed_dim, num_heads, feedforward_dim)
+        # Non-causal layers (for MLM, reconstruction)
+        self.encoder_layers = nn.ModuleList([
+            SimpleTransformerBlock(embed_dim, num_heads, feedforward_dim) for _ in range(num_encoder_layers)
+        ])
 
-        # Causal block (for CLM)
-        self.decoder_block = SimpleCausalTransformerBlock(embed_dim, num_heads, feedforward_dim)
+        # Causal layers (for CLM)
+        self.decoder_layers = nn.ModuleList([
+            SimpleCausalTransformerBlock(embed_dim, num_heads, feedforward_dim) for _ in range(num_decoder_layers)
+        ])
 
         # Output heads
         self.mlm_head = nn.Linear(embed_dim, vocab_size)
@@ -285,6 +296,15 @@ class DualStreamMultiTaskModel(nn.Module):
         # Cheap projection so a memory vector looks like a "token"
         self.mem_proj = nn.Linear(embed_dim, embed_dim)
 
+    @staticmethod
+    @torch.no_grad()
+    def _arange_like(x, offset: int = 0):
+        """
+        Returns a [B, L] tensor [[offset, offset+1, …]] on x.device.
+        """
+        B, L = x.shape[:2]
+        return (torch.arange(L, device=x.device) + offset).unsqueeze(0).expand(B, -1)
+
     def forward(self,
                 input_ids:       torch.Tensor,  # (B, T)
                 memory_embs:     torch.Tensor | None):  # (B, K, E)  or  None
@@ -293,34 +313,36 @@ class DualStreamMultiTaskModel(nn.Module):
         vectors are prepended to the encoder stream and *ignored* for loss
         computation (they carry no labels).
         """
+        K = 0 if memory_embs is None else memory_embs.size(1)
 
         # Non-causal stream
-        inp_emb = self.embedding(input_ids)  # (B, T, E)
+        tok_emb  = self.token_embedding(input_ids)  # (B, T, E)
+        pos_emb  = self.position_embedding(self._arange_like(input_ids, offset=K))
+        inp_emb  = self.embed_dropout(tok_emb + pos_emb)  # (B, T, E)
 
         if memory_embs is not None:
-            K = memory_embs.size(1)
             mem_tok = self.mem_proj(memory_embs)  # (B, K, E)
-            enc_inp = torch.cat([mem_tok, inp_emb], dim=1)  # (B, K+T, E)
+            mem_pos   = self.position_embedding(self._arange_like(memory_embs[:, :, 0], offset=0))
+            mem_emb = self.embed_dropout(mem_tok + mem_pos)  # (B, K, E)
+            enc_inp = torch.cat([mem_emb, inp_emb], dim=1)  # (B, K+T, E)
         else:
             K = 0
             enc_inp = inp_emb
 
-        enc_out = self.encoder_block(enc_inp)  # (B, T, E)
-        enc_out_curr = enc_out[:, K:, :]  # drop mem vectors
+        for blk in self.encoder_layers:
+            enc_inp = blk(enc_inp)  # (B, T, E)
+        enc_out_curr = enc_inp[:, K:, :]  # drop mem vectors
 
         # Causal stream
-        causal_emb = self.embedding(input_ids)  # (B, T, E)
-        causal_hidden = self.decoder_block(causal_emb) # (B, T, E)
+        dec_inp_emb = inp_emb
+        for blk in self.decoder_layers:
+            dec_inp_emb = blk(dec_inp_emb) # (B, T, E)
 
         # Compute logits
-        mlm_logits = self.mlm_head(enc_out_curr)
-        clm_logits = self.clm_head(causal_hidden)
-        reconstruction_logits = self.reconstruction_head(enc_out_curr)
-
         return {
-            "mlm_logits": mlm_logits,
-            "clm_logits": clm_logits,
-            "reconstruction_logits": reconstruction_logits,
+            "mlm_logits": self.mlm_head(enc_out_curr),
+            "clm_logits": self.clm_head(dec_inp_emb),
+            "reconstruction_logits": self.reconstruction_head(enc_out_curr),
             # Expose pooled chunk embedding for caller
             "chunk_emb": enc_out_curr.mean(dim=1)  # (B, E)
         }
