@@ -83,12 +83,12 @@ def train_stream(main_model,
                  text: str,
                  char2idx: dict,
                  idx2char: list,
-                 max_len: int = 40,
+                 max_len: int = 256,
                  k_mem: int = 4,
                  ema_beta: float = 0.95,
                  device: torch.device = torch.device("cpu")):
     """
-    Splits `text` into 40-char chunks, feeds them sequentially.
+    Splits `text` into 256-char chunks, feeds them sequentially.
     After each chunk we:
         1. encode + compute LM / MLM / etc. loss  (supervised)
         2. treat -loss as reward to update the selector (REINFORCE)

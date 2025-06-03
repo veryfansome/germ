@@ -394,13 +394,14 @@ def fine_tune_token_head(
         accum_steps: int = 4,  # ← batch_size × accum_steps = “virtual batch”
         #accum_steps: int = 8,
         device: str | None = None,
+        epochs: int = 4,
         #epochs: int = 8,
-        epochs: int = 16,
+        #epochs: int = 16,
         #epochs: int = 24,
         #epochs: int = 32,
         #epochs: int = 40,
-        batch_size: int = 256,
-        #batch_size: int = 512,
+        #batch_size: int = 256,
+        batch_size: int = 512,
         lr: float = 1e-5,
         out_dir: str = "data/e5_token_embedding_model",
         recon_max_weight: float = 1.0,  # weight AFTER warm-up
@@ -451,7 +452,12 @@ def fine_tune_token_head(
         synonyms = build_synonym_map(corpus["all_lowercase_token"] + corpus["ngram"])
         with synonym_file.open("w") as f:
             json.dump(synonyms, f, ensure_ascii=False, indent=4)
-    dataset = VocabDataset([item for sublist in corpus.values() for item in sublist])
+    dataset = VocabDataset([
+        item for k, sublist in corpus.items() for item in sublist if k not in {
+            "anomalous_token",
+            "number",
+        }
+    ])
     g = torch.Generator().manual_seed(seed)
     dl = DataLoader(dataset, batch_size=batch_size, generator=g, shuffle=True, num_workers=0, collate_fn=lambda b: b)
 
