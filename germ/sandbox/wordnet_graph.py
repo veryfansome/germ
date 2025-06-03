@@ -84,7 +84,6 @@ async def main():
 
                 for usage in synset.usage_domains():
                     usage_name = usage.name().split('.')[0]
-                    print(f"{synset.name()} {usage_name}")
                     usage_pos = usage.pos()
                     await session.execute_write(create_word_node, usage_name, usage_pos)
                     await session.execute_write(
@@ -97,6 +96,7 @@ async def main():
                 await session.execute_write(create_definition_node, synset.definition())
                 for lemma in synset.lemmas():
                     lemma_name = lemma.name().replace("_", " ")
+                    print(f"{synset.name()} {lemma_name} {pos} {synset.usage_domains()}")
                     antonyms = lemma.antonyms()
                     await session.execute_write(create_word_node, lemma_name, pos)
                     await session.execute_write(
