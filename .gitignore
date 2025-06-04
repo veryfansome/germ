@@ -8,8 +8,8 @@
 .venv/
 __pycache__/
 
-germ/bot/static/*.html
-germ/bot/static/tests/*
+germ/services/bot/static/*.html
+germ/services/bot/static/tests/*
 data/e5_*
 germ_venv/
 
