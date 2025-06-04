@@ -8,8 +8,8 @@ import mistune
 import os
 import re
 
-from germ.bot.data.iana import IanaTLDCacher
-from germ.bot.lang.patterns import ipv4_addr_pattern, ipv6_addr_pattern
+from germ.data.iana import IanaTLDCacher
+from germ.utils.patterns import ipv4_addr_pattern, ipv6_addr_pattern
 
 logger = logging.getLogger(__name__)
 

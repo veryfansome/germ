@@ -7,8 +7,8 @@ import json
 import logging
 
 from germ.api.models import ChatRequest, ChatResponse
-from germ.bot.chat import async_openai_client, openai_beta
-from germ.bot.websocket import WebSocketReceiveEventHandler, WebSocketSender
+from germ.services.bot.chat import async_openai_client, openai_beta
+from germ.services.bot.websocket import WebSocketReceiveEventHandler, WebSocketSender
 from germ.observability.annotations import measure_exec_seconds
 from germ.settings.openai_settings import (CHAT_MODEL, MINI_MODEL, REASONING_MODEL, ROUTING_MODEL,
                                            ENABLED_CHAT_MODELS, ENABLED_IMAGE_MODELS, HTTPX_TIMEOUT)

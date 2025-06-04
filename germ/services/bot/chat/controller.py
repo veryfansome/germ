@@ -7,14 +7,14 @@ import numpy as np
 import tiktoken
 
 from germ.api.models import ChatRequest, ChatResponse
-from germ.bot.chat import async_openai_client
-from germ.bot.graph.control_plane import ControlPlane
-from germ.bot.lang.parsers import extract_markdown_page_elements, get_html_soup, strip_html_elements
-from germ.bot.websocket import (WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
-                                WebSocketSendEventHandler, WebSocketSender, WebSocketSessionMonitor)
+from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
+from germ.services.bot.chat import async_openai_client
+from germ.services.bot.websocket import (WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
+                                         WebSocketSendEventHandler, WebSocketSender, WebSocketSessionMonitor)
 from germ.settings import germ_settings
-from germ.utils.tokenize import naive_sentence_end_pattern
+from germ.utils.parsers import extract_markdown_page_elements, get_html_soup, strip_html_elements
+from germ.utils.patterns import naive_sentence_end_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ class MessageMeta:
     def __init__(self, content: str, token_size: int):
         self.content = content
         self.token_size = token_size
+
 
 class VectorMeta:
     def __init__(self, content: str, token_size: int, vector_id: int, vector, emotions, keywords):
@@ -37,14 +38,14 @@ class VectorMeta:
 class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                      WebSocketSendEventHandler, WebSocketSessionMonitor):
     def __init__(
-            self, control_plane: ControlPlane,
+            self, knowledge_graph: KnowledgeGraph,
             delegate: WebSocketReceiveEventHandler,
             # Based on embeddings model
             embedding_dimensions: int = 3072,  # text-embedding-3-large can be shortened to 256
             token_model: str = "text-embedding-3-large",
             truncation_threshold: int = 8191,
     ):
-        self.control_plane = control_plane
+        self.knowledge_graph = knowledge_graph
         self.delegate = delegate
         self.embedding_dimensions: int = embedding_dimensions
         self.token_encoder = tiktoken.encoding_for_model(token_model)
@@ -128,8 +129,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                             f"message {dt_created_ts}, paragraph {p_block_id}")
                 logger.info(f"extracted sentences {extracted_sentences}")
                 for sentence in extracted_sentences:
-                    pos_labels = await get_pos_labels(sentence)
-                    log_pos_labels(pos_labels)
+                    #pos_labels = await get_pos_labels(sentence)
+                    #log_pos_labels(pos_labels)
+                    pass
 
                 p_block_sentences.append(extracted_sentences)
 

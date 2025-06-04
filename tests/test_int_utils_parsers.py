@@ -1,6 +1,6 @@
 import logging
 
-from germ.bot.lang.parsers import extract_href_features, fqdn_to_proper_noun, resolve_fqdn
+from germ.utils.parsers import extract_href_features, fqdn_to_proper_noun, resolve_fqdn
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from germ.bot.main import bot_service
+from germ.services.bot.main import bot_service
 
 client = TestClient(bot_service)
 

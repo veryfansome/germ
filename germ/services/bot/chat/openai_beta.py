@@ -7,8 +7,8 @@ import asyncio
 import logging.config
 
 from germ.api.models import ChatRequest, ChatResponse
-from germ.bot.chat import async_openai_client
-from germ.bot.websocket import WebSocketSender
+from germ.services.bot.chat import async_openai_client
+from germ.services.bot.websocket import WebSocketSender
 from germ.observability.annotations import measure_exec_seconds
 from germ.settings import openai_settings
 

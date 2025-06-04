@@ -35,12 +35,12 @@ services:
       POSTGRES_PASSWORD: &pg-password ${POSTGRES_PASSWORD:-bacteria4life}
       POSTGRES_USER: &pg-user ${POSTGRES_USER:-germ}
     working_dir: /src
-    command: [ "scripts/app-start.sh", "germ.bot.main:bot_service", "8000" ]
+    command: [ "scripts/app-start.sh", "germ.services.bot.main:bot_service", "8000" ]
     ports:
       - "8001:8000"
     healthcheck:
       test: [ "CMD", "curl", "-s", "localhost:8000/healthz" ]
-      interval: 10s
+      interval: 60s
       timeout: 9s
       retries: 6
     logging:  # Needs rotation due to verbosity
@@ -130,7 +130,7 @@ services:
       - "9001:9000"
     healthcheck:
       test: [ "CMD", "curl", "-s", "localhost:9000/healthz" ]
-      interval: 10s
+      interval: 60s
       timeout: 9s
       retries: 6
 

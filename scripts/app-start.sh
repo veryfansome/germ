@@ -9,7 +9,7 @@ trap stop_app SIGTERM
 
 source germ_venv/bin/activate
 
-if grep -q 'bot' <<<"$1"; then
+if grep -q 'germ.services.bot.main' <<<"$1"; then
     ./scripts/update-static-files.sh
 fi
 mkdir -p /var/log/germ

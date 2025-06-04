@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 import httpx
 import logging
 
-from germ.bot.db.pg import DATABASE_URL
+from germ.database.pg import DATABASE_URL
 
 logger = logging.getLogger(__name__)
 

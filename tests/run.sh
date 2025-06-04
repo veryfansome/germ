@@ -2,8 +2,8 @@
 
 PYTEST_OPTS=(
     "--cov=germ"
-    "--cov-report=html:/src/germ/bot/static/tests/cov"
-    "--junitxml=/src/germ/bot/static/tests/report.xml"
+    "--cov-report=html:/src/germ/services/bot/static/tests/cov"
+    "--junitxml=/src/germ/services/bot/static/tests/report.xml"
 )
 
 rm -rf /src/germ/bot/static/tests

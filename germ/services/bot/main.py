@@ -24,16 +24,15 @@ import asyncio
 import os
 
 from germ.api.models import ChatResponse
-from germ.bot.auth import MAX_COOKIE_AGE, SESSION_COOKIE_NAME, AuthHelper, verify_password
-from germ.bot.chat.controller import ChatController
-from germ.bot.chat.openai_beta import AssistantHelper
-from germ.bot.chat.openai_handlers import ChatRoutingEventHandler
-from germ.bot.db.neo4j import AsyncNeo4jDriver
-from germ.bot.db.pg import DATABASE_URL, TableHelper
-from germ.bot.graph.control_plane import ControlPlane
-from germ.bot.websocket import WebSocketConnectionManager
+from germ.database.neo4j import KnowledgeGraph
+from germ.database.pg import DATABASE_URL, TableHelper
 from germ.observability.logging import logging, setup_logging
 from germ.observability.tracing import setup_tracing
+from germ.services.bot.auth import MAX_COOKIE_AGE, SESSION_COOKIE_NAME, AuthHelper, verify_password
+from germ.services.bot.chat.controller import ChatController
+from germ.services.bot.chat.openai_beta import AssistantHelper
+from germ.services.bot.chat.openai_handlers import ChatRoutingEventHandler
+from germ.services.bot.websocket import WebSocketConnectionManager
 from germ.settings import germ_settings
 
 scheduler = AsyncIOScheduler()
@@ -53,7 +52,6 @@ tracer = trace.get_tracer(__name__)
 ##
 # Databases
 
-neo4j_driver = AsyncNeo4jDriver()
 pg_async_engine = create_async_pg_engine(f"postgresql+asyncpg://{DATABASE_URL}", echo=False)
 pg_sync_engine = create_pg_engine(f"postgresql+psycopg2://{DATABASE_URL}", echo=False)
 pg_session_maker = async_pg_session_maker(
@@ -71,11 +69,11 @@ redis_client = Redis.from_url(
 # App
 
 auth_helper = AuthHelper(pg_table_helper.chat_user_table, pg_session_maker)
-control_plane = ControlPlane(neo4j_driver)
+knowledge_graph = KnowledgeGraph()
 websocket_manager = WebSocketConnectionManager(
     pg_table_helper.conversation_table,
     pg_table_helper.conversation_state_table,
-    control_plane,
+    knowledge_graph,
     pg_session_maker,
 )
 
@@ -97,7 +95,7 @@ async def lifespan(app: FastAPI):
     scheduler.scheduled_job(assistant_helper.refresh_files, "interval", minutes=5)
 
     router = ChatRoutingEventHandler(assistant_helper=assistant_helper)
-    chat_controller = ChatController(control_plane, router)
+    chat_controller = ChatController(knowledge_graph, router)
 
     websocket_manager.add_conversation_monitor(chat_controller)
     websocket_manager.add_receive_event_handler(chat_controller)
@@ -121,7 +119,7 @@ async def lifespan(app: FastAPI):
         websocket_manager.disconnect_all(),
     ])
     await asyncio.gather(*[
-        neo4j_driver.shutdown(),
+        knowledge_graph.shutdown(),
         pg_async_engine.dispose(),
         redis_client.close(),
     ])
@@ -143,10 +141,10 @@ bot_service = FastAPI(
         )
     ]
 )
-bot_service.mount("/static", StaticFiles(directory="germ/bot/static"), name="static")
-if os.path.exists("germ/bot/static/tests"):
-    bot_service.mount("/tests", StaticFiles(directory="germ/bot/static/tests"), name="tests")
-    bot_service.mount("/tests/cov", StaticFiles(directory="germ/bot/static/tests/cov"), name="tests_cov")
+bot_service.mount("/static", StaticFiles(directory="germ/services/bot/static"), name="static")
+if os.path.exists("germ/services/bot/static/tests"):
+    bot_service.mount("/tests", StaticFiles(directory="germ/services/bot/static/tests"), name="tests")
+    bot_service.mount("/tests/cov", StaticFiles(directory="germ/services/bot/static/tests/cov"), name="tests_cov")
 
 
 ##
@@ -266,7 +264,7 @@ async def post_register(request:  Request, username: str = Form(...), password: 
             error_params = urlencode({"error": "Failed to create new user."})
             logger.error(f"Failed to create new user: {username}")
         else:
-            await control_plane.add_chat_user(user_id, dt_created)
+            await knowledge_graph.add_chat_user(user_id, dt_created)
             await load_session_task
             request.session.clear()
             request.session.update({"user_id": user_id, "username": username})

@@ -12,7 +12,7 @@ import json
 import logging
 
 from germ.api.models import ChatRequest, ChatResponse
-from germ.bot.graph.control_plane import ControlPlane
+from germ.database.neo4j import KnowledgeGraph
 from germ.security.encryption import decrypt_integer, derive_key_from_passphrase, encrypt_integer
 from germ.settings.germ_settings import (ENCRYPTION_PASSWORD, UUID5_NS,
                                          WEBSOCKET_IDLE_TIMEOUT, WEBSOCKET_MONITOR_INTERVAL_SECONDS)
@@ -69,10 +69,10 @@ class WebSocketSessionMonitor(ABC):
 
 
 class DefaultWebSocketSender(WebSocketSender):
-    def __init__(self, control_plane: ControlPlane, conversation_id: int,
+    def __init__(self, knowledge_graph: KnowledgeGraph, conversation_id: int,
                  connection: WebSocket, send_event_handlers: list[WebSocketSendEventHandler] = None):
         self.connection = connection
-        self.control_plane = control_plane
+        self.knowledge_graph = knowledge_graph
         self.conversation_id = conversation_id
         self.send_event_handlers: list[WebSocketSendEventHandler] = (
             send_event_handlers if send_event_handlers is not None else []
@@ -98,9 +98,9 @@ class DefaultWebSocketSender(WebSocketSender):
         if chat_response.model != "none":
             async_tasks = []
             dt_created, text_sig = await new_chat_message_sent(self.conversation_id, chat_response)
-            await self.control_plane.add_chat_message(self.conversation_id, dt_created)
+            await self.knowledge_graph.add_chat_message(self.conversation_id, dt_created)
             async_tasks.append(asyncio.create_task(
-                self.control_plane.link_chat_message_sent_to_chat_message_received(
+                self.knowledge_graph.link_chat_message_sent_to_chat_message_received(
                     received_message_dt_created, dt_created, self.conversation_id)
             ))
             for handler in self.send_event_handlers:
@@ -139,9 +139,9 @@ class InterceptingWebSocketSender(WebSocketSender):
 
 class WebSocketConnectionManager:
     def __init__(self, conversation_table: Table, conversation_state: Table,
-                 control_plane: ControlPlane, pg_session_maker: async_pg_session_maker):
+                 knowledge_graph: KnowledgeGraph, pg_session_maker: async_pg_session_maker):
         self.active_connections: dict[int, WebSocket] = {}
-        self.control_plane: ControlPlane = control_plane
+        self.knowledge_graph: KnowledgeGraph = knowledge_graph
         self.conversation_monitors: list[WebSocketSessionMonitor] = []
         self.conversation_state: Table = conversation_state
         self.conversation_table: Table = conversation_table
@@ -173,8 +173,8 @@ class WebSocketConnectionManager:
                 or await self.conversation_not_found(conversation_id, user_id)
                 or conversation_id in self.active_connections):
             conversation_id, dt_created = await self.new_conversation(user_id)
-            await self.control_plane.add_conversation(conversation_id, dt_created)
-            await self.control_plane.link_chat_user_to_conversation(user_id, conversation_id)
+            await self.knowledge_graph.add_conversation(conversation_id, dt_created)
+            await self.knowledge_graph.link_chat_user_to_conversation(user_id, conversation_id)
         self.active_connections[conversation_id] = ws
 
         # Create and store a cancellation event, and start a monitor task
@@ -263,7 +263,7 @@ class WebSocketConnectionManager:
                     raise
 
     def new_ws_sender(self, conversation_id: int, ws: WebSocket):
-        return DefaultWebSocketSender(self.control_plane, conversation_id, ws,
+        return DefaultWebSocketSender(self.knowledge_graph, conversation_id, ws,
                                       send_event_handlers=self.send_event_handlers)
 
     async def receive(self, user_id: int, conversation_id: int):
@@ -272,9 +272,9 @@ class WebSocketConnectionManager:
 
         async_tasks = []
         dt_created, text_sig = await new_chat_message_received(user_id, conversation_id, chat_request)
-        await self.control_plane.add_chat_message(conversation_id, dt_created)
+        await self.knowledge_graph.add_chat_message(conversation_id, dt_created)
         async_tasks.append(asyncio.create_task(
-            self.control_plane.link_chat_message_received_to_chat_user(conversation_id, dt_created, user_id)
+            self.knowledge_graph.link_chat_message_received_to_chat_user(conversation_id, dt_created, user_id)
         ))
         ws_sender = self.new_ws_sender(conversation_id, ws)
         for handler in self.receive_event_handlers:
