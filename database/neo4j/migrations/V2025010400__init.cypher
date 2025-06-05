@@ -9,7 +9,7 @@ CREATE CONSTRAINT                     FOR (c:Conversation)    REQUIRE c.conversa
 CREATE CONSTRAINT                     FOR (d:Definition)      REQUIRE d.definition                            IS UNIQUE;
 CREATE FULLTEXT INDEX definitionText  FOR (d:Definition)      ON EACH [d.definition];
 //
-CREATE CONSTRAINT                     FOR (w:Word)            REQUIRE (w.word, w.pos)                         IS UNIQUE;
+CREATE CONSTRAINT                     FOR (w:Word)            REQUIRE (w.word, w.pos, w.sense)                IS UNIQUE;
 CREATE INDEX posIndex                 FOR (w:Word)            ON (w.pos);
 CREATE INDEX wordIndex                FOR (w:Word)            ON (w.word);
 
