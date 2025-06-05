@@ -4,13 +4,20 @@ import nltk
 from germ.database.neo4j import new_async_driver
 
 
-async def create_antonym_relationship(tx, word1, pos1, word2, pos2):
+async def create_antonym_relationship(tx, word1, pos1, sense1, word2, pos2, sense2):
     query = """
-    MATCH (w1:Word {word: $word1, pos: $pos1})
-    MATCH (w2:Word {word: $word2, pos: $pos2})
+    MATCH (w1:Word {word: $word1, pos: $pos1, sense: $sense1})
+    MATCH (w2:Word {word: $word2, pos: $pos2, sense: $sense2})
     MERGE (w1)-[:ANTONYM]->(w2)
     """
-    await tx.run(query, word1=word1, pos1=pos1, word2=word2, pos2=pos2)
+    await tx.run(query, word1=word1, pos1=pos1, sense1=sense1, word2=word2, pos2=pos2, sense2=sense2)
+
+
+async def create_definition_node(tx, definition):
+    query = """
+    MERGE (d:Definition {definition: $definition})
+    """
+    await tx.run(query, definition=definition)
 
 
 async def create_hypernym_relationship(tx, hypernym_word, hypernym_pos, hypernym_sense,
@@ -25,13 +32,6 @@ async def create_hypernym_relationship(tx, hypernym_word, hypernym_pos, hypernym
                  hyponym_word=hyponym_word, hyponym_pos=hyponym_pos, hyponym_sense=hyponym_sense)
 
 
-async def create_definition_node(tx, definition):
-    query = """
-    MERGE (d:Definition {definition: $definition})
-    """
-    await tx.run(query, definition=definition)
-
-
 async def create_means_relationship(tx, word, pos, sense, definition):
     query = """
     MATCH (w:Word {word: $word, pos: $pos, sense: $sense})
@@ -39,6 +39,15 @@ async def create_means_relationship(tx, word, pos, sense, definition):
     MERGE (w)-[:MEANS]->(d)
     """
     await tx.run(query, word=word, pos=pos, sense=sense, definition=definition)
+
+
+async def create_synonym_relationship(tx, word1, pos1, word2, pos2):
+    query = """
+    MATCH (w1:Word {word: $word1, pos: $pos1})
+    MATCH (w2:Word {word: $word2, pos: $pos2})
+    MERGE (w1)-[:SYNONYM]->(w2)
+    """
+    await tx.run(query, word1=word1, pos1=pos1, word2=word2, pos2=pos2)
 
 
 async def create_topic_domain_relationship(tx, word, pos, sense, definition):
@@ -97,53 +106,53 @@ async def process_synset_batch(driver, batch):
         for synset in batch:
             synset_definition = synset.definition()
             synset_name, synset_pos, synset_sense = tokenize_synset_name(synset.name())
-            await session.execute_write(create_definition_node, synset_definition)
-            await session.execute_write(create_word_node, synset_name, synset_pos, synset_sense)
-            await session.execute_write(
-                create_means_relationship,
-                synset_name, synset_pos, synset_sense, synset_definition)
+            #await session.execute_write(create_definition_node, synset_definition)
+            #await session.execute_write(create_word_node, synset_name, synset_pos, synset_sense)
+            #await session.execute_write(
+            #    create_means_relationship,
+            #    synset_name, synset_pos, synset_sense, synset_definition)
 
-            for hyponym in synset.hyponyms():
-                hyponym_name, hyponym_pos, hyponym_sense = tokenize_synset_name(hyponym.name())
-                await session.execute_write(create_word_node, hyponym_name, hyponym_pos, hyponym_sense)
-                await session.execute_write(
-                    create_hypernym_relationship,
-                    synset_name, synset_pos, synset_sense,
-                    hyponym_name, hyponym_pos, hyponym_sense)
-
-            for topic in synset.topic_domains():
-                topic_name, topic_pos, topic_sense = tokenize_synset_name(topic.name())
-                await session.execute_write(create_word_node, topic_name, topic_pos, topic_sense)
-                await session.execute_write(
-                    create_topic_domain_relationship,
-                    topic_name, topic_pos, topic_sense, synset_definition)
-
-            for usage in synset.usage_domains():
-                usage_name, usage_pos, usage_sense = tokenize_synset_name(usage.name())
-                await session.execute_write(create_word_node, usage_name, usage_pos, usage_sense)
-                await session.execute_write(
-                    create_usage_domain_relationship,
-                    usage_name, usage_pos, usage_sense, synset_definition)
-
-            #for lemma in synset.lemmas():
-            #    lemma_name = lemma.name().split('.')[0].replace("_", " ")
-            #    antonyms = lemma.antonyms()
-            #    await session.execute_write(create_word_node, lemma_name, synset_pos)
+            #for hyponym in synset.hyponyms():
+            #    hyponym_name, hyponym_pos, hyponym_sense = tokenize_synset_name(hyponym.name())
+            #    await session.execute_write(create_word_node, hyponym_name, hyponym_pos, hyponym_sense)
             #    await session.execute_write(
-            #        create_means_relationship,
-            #        lemma_name, synset_pos, synset_definition)
-            #    for antonym in antonyms:
-            #        antonym_synset = antonym.synset()
-            #        antonym_definition = antonym_synset.definition()
-            #        antonym_name = antonym.name().replace("_", " ")
-            #        antonym_pos = antonym_synset.pos()
-            #        await session.execute_write(create_definition_node, antonym.synset().definition())
-            #        await session.execute_write(
-            #            create_means_relationship,
-            #            antonym_name, antonym_pos, antonym_definition)
-            #        await session.execute_write(
-            #            create_antonym_relationship,
-            #            lemma_name, synset_pos, antonym_name, antonym_pos)
+            #        create_hypernym_relationship,
+            #        synset_name, synset_pos, synset_sense,
+            #        hyponym_name, hyponym_pos, hyponym_sense)
+
+            #for topic in synset.topic_domains():
+            #    topic_name, topic_pos, topic_sense = tokenize_synset_name(topic.name())
+            #    await session.execute_write(create_word_node, topic_name, topic_pos, topic_sense)
+            #    await session.execute_write(
+            #        create_topic_domain_relationship,
+            #        topic_name, topic_pos, topic_sense, synset_definition)
+
+            #for usage in synset.usage_domains():
+            #    usage_name, usage_pos, usage_sense = tokenize_synset_name(usage.name())
+            #    await session.execute_write(create_word_node, usage_name, usage_pos, usage_sense)
+            #    await session.execute_write(
+            #        create_usage_domain_relationship,
+            #        usage_name, usage_pos, usage_sense, synset_definition)
+
+            for lemma in synset.lemmas():
+                lemma_name = lemma.name()
+                #try:
+                #    print(f"{synset_name} -> {lemma} {nltk.corpus.wordnet.lemma_from_key(lemma.key()).name()}")
+                #except Exception as e:
+                #    pass
+                #await session.execute_write(create_word_node, lemma_name, synset_pos)
+                #await session.execute_write(
+                #    create_means_relationship,
+                #    lemma_name, synset_pos, synset_definition)
+
+                #antonyms = lemma.antonyms()
+                #for antonym in antonyms:
+                #    antonym_synset = antonym.synset()
+                #    antonym_name, antonym_pos, antonym_sense = tokenize_synset_name(antonym_synset.name())
+                #    await session.execute_write(create_word_node, antonym_name, antonym_pos, antonym_sense)
+                #    await session.execute_write(
+                #        create_antonym_relationship,
+                #        synset_name, synset_pos, synset_sense, antonym_name, antonym_pos, antonym_sense)
 
 
 def tokenize_synset_name(synset_name: str):

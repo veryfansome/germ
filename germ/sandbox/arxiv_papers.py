@@ -14,7 +14,7 @@ download_dir = 'data/arxiv-papers'
 # Search for papers
 search = arxiv.Search(
     query="language model",
-    max_results=150,
+    max_results=500,
     sort_by=arxiv.SortCriterion.SubmittedDate
 )
 
