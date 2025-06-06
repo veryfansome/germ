@@ -13,13 +13,13 @@ pos2id = {
 id2pos = {v: k for k, v in pos2id.items()}
 
 
-async def create_antonym_relationship(tx, word1, pos1, sense1, word2, pos2, sense2):
+async def create_antonym_relationship(tx, lemma1, pos1, sense1, lemma2, pos2, sense2):
     query = """
-    MATCH (w1:Word {word: $word1, pos: $pos1, sense: $sense1})
-    MATCH (w2:Word {word: $word2, pos: $pos2, sense: $sense2})
-    MERGE (w1)-[:ANTONYM]->(w2)
+    MATCH (s1:Synset {lemma: $lemma1, pos: $pos1, sense: $sense1})
+    MATCH (s2:Synset {lemma: $lemma2, pos: $pos2, sense: $sense2})
+    MERGE (s1)-[:ANTONYM]->(s2)
     """
-    await tx.run(query, word1=word1, pos1=pos1, sense1=sense1, word2=word2, pos2=pos2, sense2=sense2)
+    await tx.run(query, lemma1=lemma1, pos1=pos1, sense1=sense1, lemma2=lemma2, pos2=pos2, sense2=sense2)
 
 
 async def create_definition_node(tx, definition):
@@ -29,62 +29,62 @@ async def create_definition_node(tx, definition):
     await tx.run(query, definition=definition)
 
 
-async def create_kind_of_relationship(tx, hypernym_word, hypernym_pos, hypernym_sense,
-                                       hyponym_word, hyponym_pos, hyponym_sense):
+async def create_kind_of_relationship(tx, hypernym_lemma, hypernym_pos, hypernym_sense,
+                                       hyponym_lemma, hyponym_pos, hyponym_sense):
     query = """
-    MATCH (hyper:Word {word: $hypernym_word, pos: $hypernym_pos, sense: $hypernym_sense})
-    MATCH (hypo:Word {word: $hyponym_word, pos: $hyponym_pos, sense: $hyponym_sense})
+    MATCH (hyper:Synset {lemma: $hypernym_lemma, pos: $hypernym_pos, sense: $hypernym_sense})
+    MATCH (hypo:Synset {lemma: $hyponym_lemma, pos: $hyponym_pos, sense: $hyponym_sense})
     MERGE (hypo)-[:KIND_OF]->(hyper)
     """
     await tx.run(query,
-                 hypernym_word=hypernym_word, hypernym_pos=hypernym_pos, hypernym_sense=hypernym_sense,
-                 hyponym_word=hyponym_word, hyponym_pos=hyponym_pos, hyponym_sense=hyponym_sense)
+                 hypernym_lemma=hypernym_lemma, hypernym_pos=hypernym_pos, hypernym_sense=hypernym_sense,
+                 hyponym_lemma=hyponym_lemma, hyponym_pos=hyponym_pos, hyponym_sense=hyponym_sense)
 
 
-async def create_means_relationship(tx, word, pos, sense, definition):
+async def create_means_relationship(tx, lemma, pos, sense, definition):
     query = """
-    MATCH (w:Word {word: $word, pos: $pos, sense: $sense})
+    MATCH (s:Synset {lemma: $lemma, pos: $pos, sense: $sense})
     MATCH (d:Definition {definition: $definition})
-    MERGE (w)-[:MEANS]->(d)
+    MERGE (s)-[:MEANS]->(d)
     """
-    await tx.run(query, word=word, pos=pos, sense=sense, definition=definition)
+    await tx.run(query, lemma=lemma, pos=pos, sense=sense, definition=definition)
 
 
-async def create_member_of_relationship(tx, member_word, member_pos, member_sense,
-                                       group_word, group_pos, group_sense):
+async def create_member_of_relationship(tx, member_lemma, member_pos, member_sense,
+                                       group_lemma, group_pos, group_sense):
     query = """
-    MATCH (m:Word {word: $member_word, pos: $member_pos, sense: $member_sense})
-    MATCH (g:Word {word: $group_word, pos: $group_pos, sense: $group_sense})
+    MATCH (m:Synset {lemma: $member_lemma, pos: $member_pos, sense: $member_sense})
+    MATCH (g:Synset {lemma: $group_lemma, pos: $group_pos, sense: $group_sense})
     MERGE (m)-[:MEMBER_OF]->(g)
     """
     await tx.run(query,
-                 member_word=member_word, member_pos=member_pos, member_sense=member_sense,
-                 group_word=group_word, group_pos=group_pos, group_sense=group_sense)
+                 member_lemma=member_lemma, member_pos=member_pos, member_sense=member_sense,
+                 group_lemma=group_lemma, group_pos=group_pos, group_sense=group_sense)
 
 
-async def create_topic_domain_relationship(tx, word, pos, sense, definition):
+async def create_topic_domain_relationship(tx, lemma, pos, sense, definition):
     query = """
-    MATCH (w:Word {word: $word, pos: $pos, sense: $sense})
+    MATCH (s:Synset {lemma: $lemma, pos: $pos, sense: $sense})
     MATCH (d:Definition {definition: $definition})
-    MERGE (d)-[:TOPIC_DOMAIN]->(w)
+    MERGE (d)-[:TOPIC_DOMAIN]->(s)
     """
-    await tx.run(query, word=word, pos=pos, sense=sense, definition=definition)
+    await tx.run(query, lemma=lemma, pos=pos, sense=sense, definition=definition)
 
 
-async def create_usage_domain_relationship(tx, word, pos, sense, domain_word, domain_pos, domain_sense):
+async def create_usage_domain_relationship(tx, lemma, pos, sense, domain_lemma, domain_pos, domain_sense):
     query = """
-    MATCH (w:Word {word: $word, pos: $pos, sense: $sense})
-    MATCH (d:Word {word: $domain_word, pos: $domain_pos, sense: $domain_sense})
-    MERGE (w)-[:USAGE_DOMAIN]->(d)
+    MATCH (s:Synset {lemma: $lemma, pos: $pos, sense: $sense})
+    MATCH (d:Synset {lemma: $domain_lemma, pos: $domain_pos, sense: $domain_sense})
+    MERGE (s)-[:USAGE_DOMAIN]->(d)
     """
-    await tx.run(query, word=word, pos=pos, sense=sense, domain_word=domain_word, domain_pos=domain_pos, domain_sense=domain_sense)
+    await tx.run(query, lemma=lemma, pos=pos, sense=sense, domain_lemma=domain_lemma, domain_pos=domain_pos, domain_sense=domain_sense)
 
 
-async def create_word_node(tx, word, pos, sense):
+async def create_synset_node(tx, lemma, pos, sense):
     query = """
-    MERGE (w:Word {word: $word, pos: $pos, sense: $sense})
+    MERGE (s:Synset {lemma: $lemma, pos: $pos, sense: $sense})
     """
-    await tx.run(query, word=word, pos=pos, sense=sense)
+    await tx.run(query, lemma=lemma, pos=pos, sense=sense)
 
 
 async def main(batch_size: int = 250):
@@ -122,7 +122,7 @@ async def process_synset_batch(driver, batch, foo):
 
             await session.execute_write(create_definition_node, synset_definition)
             if synset.name() not in foo:
-                await session.execute_write(create_word_node, synset_name, synset_pos, synset_sense)
+                await session.execute_write(create_synset_node, synset_name, synset_pos, synset_sense)
                 foo.add(synset.name())
             await session.execute_write(
                 create_means_relationship,
@@ -131,7 +131,7 @@ async def process_synset_batch(driver, batch, foo):
             for holonym in synset.member_holonyms():
                 holonym_name, holonym_pos, holonym_sense = tokenize_synset_name(holonym.name())
                 if holonym.name() not in foo:
-                    await session.execute_write(create_word_node, holonym_name, holonym_pos, holonym_sense)
+                    await session.execute_write(create_synset_node, holonym_name, holonym_pos, holonym_sense)
                     foo.add(holonym.name())
                 rel_key = f"{synset.name()}_member_of_{holonym.name()}"
                 if rel_key not in foo:
@@ -143,7 +143,7 @@ async def process_synset_batch(driver, batch, foo):
             for meronym in synset.member_meronyms():
                 meronym_name, meronym_pos, meronym_sense = tokenize_synset_name(meronym.name())
                 if meronym.name() not in foo:
-                    await session.execute_write(create_word_node, meronym_name, meronym_pos, meronym_sense)
+                    await session.execute_write(create_synset_node, meronym_name, meronym_pos, meronym_sense)
                     foo.add(meronym.name())
                 rel_key = f"{meronym.name()}_member_of_{synset.name()}"
                 if rel_key not in foo:
@@ -156,7 +156,7 @@ async def process_synset_batch(driver, batch, foo):
             for hyponym in synset.hyponyms():
                 hyponym_name, hyponym_pos, hyponym_sense = tokenize_synset_name(hyponym.name())
                 if hyponym.name() not in foo:
-                    await session.execute_write(create_word_node, hyponym_name, hyponym_pos, hyponym_sense)
+                    await session.execute_write(create_synset_node, hyponym_name, hyponym_pos, hyponym_sense)
                     foo.add(hyponym.name())
                 rel_key = f"{synset.name()}_kind_of_{hyponym.name()}"
                 if rel_key not in foo:
@@ -168,7 +168,7 @@ async def process_synset_batch(driver, batch, foo):
             for hypernym in synset.hypernyms():
                 hypernym_name, hypernym_pos, hypernym_sense = tokenize_synset_name(hypernym.name())
                 if hypernym.name() not in foo:
-                    await session.execute_write(create_word_node, hypernym_name, hypernym_pos, hypernym_sense)
+                    await session.execute_write(create_synset_node, hypernym_name, hypernym_pos, hypernym_sense)
                     foo.add(hypernym.name())
                 rel_key = f"{hypernym.name()}_kind_of_{synset.name()}"
                 if rel_key not in foo:
@@ -181,7 +181,7 @@ async def process_synset_batch(driver, batch, foo):
             for topic in synset.topic_domains():
                 topic_name, topic_pos, topic_sense = tokenize_synset_name(topic.name())
                 if topic.name() not in foo:
-                    await session.execute_write(create_word_node, topic_name, topic_pos, topic_sense)
+                    await session.execute_write(create_synset_node, topic_name, topic_pos, topic_sense)
                     foo.add(topic.name())
                 await session.execute_write(
                     create_topic_domain_relationship,
@@ -190,7 +190,7 @@ async def process_synset_batch(driver, batch, foo):
             for usage in synset.usage_domains():
                 usage_name, usage_pos, usage_sense = tokenize_synset_name(usage.name())
                 if usage.name() not in foo:
-                    await session.execute_write(create_word_node, usage_name, usage_pos, usage_sense)
+                    await session.execute_write(create_synset_node, usage_name, usage_pos, usage_sense)
                     foo.add(usage.name())
                 await session.execute_write(
                     create_usage_domain_relationship,
@@ -205,7 +205,7 @@ async def process_synset_batch(driver, batch, foo):
                         antonym_synset = antonym.synset()
                         antonym_name, antonym_pos, antonym_sense = tokenize_synset_name(antonym_synset.name())
                         if antonym_synset.name() not in foo:
-                            await session.execute_write(create_word_node, antonym_name, antonym_pos, antonym_sense)
+                            await session.execute_write(create_synset_node, antonym_name, antonym_pos, antonym_sense)
                             foo.add(antonym_synset.name())
                         await session.execute_write(
                             create_antonym_relationship,
