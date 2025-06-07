@@ -11,7 +11,7 @@ stop_redis() {
 
 trap stop_redis SIGINT SIGTERM
 
-mapfile -t DUMP_DIRS < <(find /data -type d | sort -n)
+mapfile -t DUMP_DIRS < <(find /data/* -type d | sort -n)
 DUMP_CNT=${#DUMP_DIRS[@]}
 MAX_DUMP_CNT=3
 if ((DUMP_CNT)); then
