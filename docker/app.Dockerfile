@@ -2,7 +2,7 @@
 FROM python:3.12-slim
 
 RUN apt-get update
-RUN apt-get install -y netcat-traditional postgresql-client
+RUN apt-get install -y curl netcat-traditional postgresql-client unzip
 
 # Install Python dependencies
 RUN pip install --upgrade pip

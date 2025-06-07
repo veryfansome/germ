@@ -2,8 +2,8 @@ networks:
   bots: {}
 
 volumes:
-  bot-data: {}
   grafana-storage: {}
+  nltk-data: { }
 
 services:
   bot:
@@ -19,9 +19,12 @@ services:
       test:
         condition: service_completed_successfully
     image: "germ:latest"
+    ports:
+      - "8001:8000"
     volumes:
       - ./:/src:rw
-      - bot-data:/var/lib/germ
+      - nltk-data:/root/nltk_data
+    working_dir: /src
     environment: &local-dev
       HF_HOME: &hf-home ${HF_HOME:-/src/data/huggingface}
       NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
@@ -34,13 +37,10 @@ services:
       PG_HOST: &pg-host germ-pg
       POSTGRES_PASSWORD: &pg-password ${POSTGRES_PASSWORD:-bacteria4life}
       POSTGRES_USER: &pg-user ${POSTGRES_USER:-germ}
-    working_dir: /src
-    command: [ "scripts/app-start.sh", "bot.main:bot", "8000" ]
-    ports:
-      - "8001:8000"
+    command: [ "scripts/app-start.sh", "germ.services.bot.main:bot_service", "8000" ]
     healthcheck:
       test: [ "CMD", "curl", "-s", "localhost:8000/healthz" ]
-      interval: 10s
+      interval: 60s
       timeout: 9s
       retries: 6
     logging:  # Needs rotation due to verbosity
@@ -63,11 +63,11 @@ services:
       dockerfile: docker/db-migrate.Dockerfile
     volumes:
       - ./:/src
+    working_dir: /src
     environment:
       <<: *local-dev
       PGPASSWORD: ${POSTGRES_PASSWORD:-bacteria4life}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-Ma9icMicr0be}
-    working_dir: /src
     command: [ "scripts/db-migrate.sh" ]
 
   grafana:
@@ -77,16 +77,16 @@ services:
       prometheus-init:
         condition: service_completed_successfully
     image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
     volumes:
-      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+      - ./data/grafana/provisioning:/etc/grafana/provisioning
       - "grafana-storage:/var/lib/grafana"
     environment:
-      - GF_LOG_LEVEL=warn
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_NAME=Main Org.
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
-    ports:
-      - "3000:3000"
+      - GF_LOG_LEVEL=warn
 
   # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
   jaeger:
@@ -103,10 +103,10 @@ services:
     image: "germ:latest"
     volumes:
       - ./:/src
+    working_dir: /src
     environment:
       WAIT_FOR_HOST: *jaeger-host
       WAIT_FOR_PORT: 4317
-    working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
 
   models:
@@ -120,17 +120,17 @@ services:
       test:
         condition: service_completed_successfully
     image: "germ:latest"
-    volumes:
-      - ./:/src:rw
-    environment:
-      HF_HOME: *hf-home
-    working_dir: /src
-    command: [ "scripts/app-start.sh", "models.main:model_service", "9000" ]
     ports:
       - "9001:9000"
+    volumes:
+      - ./:/src:rw
+    working_dir: /src
+    environment:
+      HF_HOME: *hf-home
+    command: [ "scripts/app-start.sh", "germ.services.models.main:model_service", "9000" ]
     healthcheck:
       test: [ "CMD", "curl", "-s", "localhost:9000/healthz" ]
-      interval: 10s
+      interval: 60s
       timeout: 9s
       retries: 6
 
@@ -138,15 +138,16 @@ services:
     networks: [bots]
     container_name: *neo4j-host
     image: neo4j:latest
-    volumes:
-      - ./scripts/neo4j-start.sh:/neo4j-start.sh
-      - ./database_dump/neo4j:/dump  # Persist data
-    environment:
-      NEO4J_AUTH: *neo4j-auth
     ports:
       - "7474:7474" # HTTP
       - "7687:7687" # Bolt
+    volumes:
+      - ./database_dump/neo4j:/dump:rw
+      - ./scripts/neo4j-start.sh:/neo4j-start.sh
+    environment:
+      NEO4J_AUTH: *neo4j-auth
     command: [ "/neo4j-start.sh" ]
+    stop_grace_period: 1m
 
   neo4j-init:
     networks: [bots]
@@ -154,23 +155,27 @@ services:
     image: "germ:latest"
     volumes:
       - ./:/src
+    working_dir: /src
     environment:
       WAIT_FOR_HOST: *neo4j-host
       WAIT_FOR_PORT: 7474
-    working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
 
   pg:
     networks: [bots]
     container_name: *pg-host
-    #image: postgres:16
-    image: ankane/pgvector:latest
+    image: pgvector/pgvector:pg17
     ports:
       - "5432:5432"
+    volumes:
+      - ./database_dump/sql:/dump:rw
+      - ./scripts/pg-start.sh:/pg-start.sh
     environment:
       POSTGRES_DB: germ
       POSTGRES_PASSWORD: *pg-password
       POSTGRES_USER: *pg-user
+    command: [ "/pg-start.sh" ]
+    stop_grace_period: 1m
 
   pg-init:
     networks: [bots]
@@ -178,11 +183,11 @@ services:
     image: "germ:latest"
     volumes:
       - ./:/src
+    working_dir: /src
     environment:
       <<: *local-dev
       WAIT_FOR_HOST: *pg-host
       WAIT_FOR_PORT: 5432
-    working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
 
   # See: https://www.jaegertracing.io/docs/1.58/spm/#architecture
@@ -190,10 +195,10 @@ services:
     networks: [bots]
     container_name: &prometheus-host germ-prometheus
     image: prom/prometheus:v2.52.0
-    volumes:
-      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - '9090:9090'
+    volumes:
+      - ./data/prometheus.yml:/etc/prometheus/prometheus.yml
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       #- --log.level=debug
@@ -205,10 +210,10 @@ services:
     image: "germ:latest"
     volumes:
       - ./:/src
+    working_dir: /src
     environment:
       WAIT_FOR_HOST: *prometheus-host
       WAIT_FOR_PORT: 9090
-    working_dir: /src
     command: [ "scripts/wait-for-port-up.sh" ]
 
   redis:
@@ -217,6 +222,11 @@ services:
     image: redis:latest
     ports:
       - "6379:6379"
+    volumes:
+      - ./database_dump/redis:/data:rw
+      - ./scripts/redis-start.sh:/redis-start.sh
+    entrypoint: [ "/redis-start.sh" ]
+    stop_grace_period: 1m
 
   test:
     networks: [bots]
@@ -227,11 +237,11 @@ services:
     image: "germ:latest"
     volumes:
       - ./:/src
+    working_dir: /src
     environment:
       <<: *local-dev
       SKIP_INTEGRATION_TESTS: ${SKIP_INTEGRATION_TESTS:-true}
       SKIP_TESTS: ${SKIP_TESTS:-true}
-    working_dir: /src
     command: ["tests/run.sh"]
 
   venv:

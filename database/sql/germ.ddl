@@ -42,7 +42,7 @@ LANGUAGE 'plpgsql';
 
 DROP TABLE IF EXISTS struct_type CASCADE;
 CREATE TABLE struct_type (
-                             struct_type_id                                            SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
+      struct_type_id                                            SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
     , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , att_pub_ident                                             TEXT                                NOT NULL   /* exp: 3XL, 0000FF - identifier */
@@ -74,7 +74,7 @@ COMMENT ON TABLE chat_user IS 'This table stores chat user records';
 
 DROP TABLE IF EXISTS conversation CASCADE;
 CREATE TABLE conversation (
-      conversation_id                                           SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
+      conversation_id                                           INT                                 NOT NULL GENERATED ALWAYS AS IDENTITY
     , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , user_id                                                   SMALLINT                            NOT NULL
@@ -89,7 +89,7 @@ COMMENT ON TABLE conversation IS 'This table stores conversation records';
 DROP TABLE IF EXISTS conversation_state CASCADE;
 CREATE TABLE conversation_state (
       conversation_state_id                                     INT                                 NOT NULL GENERATED ALWAYS AS IDENTITY
-    , conversation_id                                           SMALLINT                            NOT NULL
+    , conversation_id                                           INT                                 NOT NULL
     , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
     , status                                                    SMALLINT                            NOT NULL

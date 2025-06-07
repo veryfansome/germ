@@ -6,33 +6,32 @@ cd database || exit 1
 neo4j-migrations -p $NEO4J_PASSWORD apply
 
 # PostgreSQL
-# MD5 hash based approach until something more robust.
-CURRENT_GERM_HASH=$(md5sum "./sql/germ.ddl" | awk '{print $1}')
-CURRENT_GERM_DATA_HASH=$(md5sum "./sql/germ_data.sql" | awk '{print $1}')
-CACHED_GERM_HASH_FILE="/tmp/germ.ddl.md5"
-CACHED_GERM_DATA_HASH_FILE="/tmp/germ_data.sql.md5"
-if [[ -f "$CACHED_GERM_HASH_FILE" ]]; then
-    CACHED_GERM_HASH=$(cat "$CACHED_GERM_HASH_FILE")
-    if [[ "$CURRENT_GERM_HASH" != "$CACHED_GERM_HASH" ]]; then
-        echo "germ.ddl changed"
-        psql -U "$POSTGRES_USER" -h "$PG_HOST" -d germ < sql/germ.ddl
-    else
-        echo "germ.ddl has not changed"
-    fi
-else
-    psql -U "$POSTGRES_USER" -h "$PG_HOST" -d germ < sql/germ.ddl
-fi
-if [[ -f "$CACHED_GERM_DATA_HASH_FILE" ]]; then
-    CACHED_GERM_DATA_HASH=$(cat "$CACHED_GERM_DATA_HASH_FILE")
-    if [[ "$CURRENT_GERM_DATA_HASH" != "$CACHED_GERM_DATA_HASH" ]]; then
-        echo "germ_data.sql changed"
+echo "Loading SQL schema"
+psql -U "$POSTGRES_USER" -h "$PG_HOST" -d germ < sql/germ.ddl
+
+mapfile -t DUMP_DIRS < <(find /src/database_dump/sql/* -type d | sort -n)
+DUMP_CNT=${#DUMP_DIRS[@]}
+MAX_DUMP_CNT=3
+if ((DUMP_CNT)); then
+    # Load most recent dump file and retain MAX_DUMP_CNT most recent dumps
+    LOADED_FROM_DUMP=0
+    for (( i=${#DUMP_DIRS[@]}-1; i>=0 && ! (LOADED_FROM_DUMP); i-- )); do
+        DUMP_FILE="${DUMP_DIRS[i]}/data.sql"
+        if [ -f "$DUMP_FILE" ]; then
+            echo "Loading data from $DUMP_FILE"
+            psql -U "$POSTGRES_USER" -h "$PG_HOST" -d germ < "$DUMP_FILE"
+            LOADED_FROM_DUMP=1
+        fi
+    done
+    if ! ((LOADED_FROM_DUMP)); then
+        echo "Failed to load any dumps, loading initial data instead"
         psql -U "$POSTGRES_USER" -h "$PG_HOST" -d germ < sql/germ_data.sql
-    else
-        echo "germ_data.sql has not changed"
+    fi
+    if ((DUMP_CNT > MAX_DUMP_CNT)); then
+        rm -rf "${DUMP_DIRS[@]:0:$((DUMP_CNT - MAX_DUMP_CNT))}"
     fi
 else
+    # Load initial data if no dump files
+    echo "Loading initial data"
     psql -U "$POSTGRES_USER" -h "$PG_HOST" -d germ < sql/germ_data.sql
 fi
-# Update cached MD5s
-echo "$CURRENT_GERM_HASH" > "/tmp/germ.ddl.md5"
-echo "$CURRENT_GERM_DATA_HASH" > "/tmp/germ_data.sql.md5"

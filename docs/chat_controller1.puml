@@ -1,0 +1,69 @@
+@startuml
+User -> ChatController: User message
+
+ChatController -> ConversationHistory:\
+Index user message by time created
+
+ChatController -> LLM:\
+Get future chat completion
+
+ChatController -> LLM:\
+Get future message embedding vector
+
+ChatController -> ChatController:\
+Extract code block, text chunks,\n\
+and sentence chunks
+
+ChatController -> ChatController:\
+Classify emotions, top keywords (TF-IDF),\n\
+and await future embedding vector
+
+ChatController -> MessageCache:\
+Cache user message metadata
+
+ChatController -> UserMessageIndex:\
+Do embedding vector similarity search
+
+ChatController -> AssistantMessageIndex:\
+Do embedding vector similarity search
+
+ChatController -> MessageCache:\
+Hydrate retrieved messages\n\
+(TODO: whole messages or chunks?)
+
+ChatController -> ChatController:\
+Await future chat completion\n\
+and compare with search results\n\
+(TODO: compare how?)
+
+ChatController --> User:\
+Assistant message,\n\
+newly awaited or regenerated\n\
+based on search results
+
+ChatController -> ConversationHistory:\
+Index assistant message by time created
+
+ChatController -> LLM:\
+Get future message embedding vector
+
+ChatController -> ChatController:\
+Extract code block, text chunks,\n\
+and sentence chunks
+
+ChatController -> ChatController:\
+Classify top keywords (TF-IDF), and await\n\
+future embedding vector
+
+ChatController -> MessageCache:\
+Cache assistant message metadata
+
+ChatController -> UserMessageIndex:\
+Index user message using user message\n\
+embedding vector
+
+ChatController -> AssistantMessageIndex:\
+Index assistant message using assistant\n\
+message embedding vector
+
+@enduml
