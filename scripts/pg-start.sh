@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
 
 stop_pg() {
-  _NOW=$(date +"%Y%m%d-%H%M")
-  mkdir /dump/$_NOW
-  pg_dump -U "${POSTGRES_USER:-germ}" -f "/dump/$_NOW/dump.sql" --data-only \
-      -t struct_type \
-      -t chat_user \
-      -t conversation \
-      -t conversation_state \
-      -t top_level_domain
+  _NOW=$(date +"%Y%m%d%H%M")
+  mkdir "/dump/$_NOW"
+  pg_dump -U "${POSTGRES_USER:-germ}" -f "/dump/$_NOW/schema.sql" --schema-only
+  pg_dump -U "${POSTGRES_USER:-germ}" -f "/dump/$_NOW/data.sql" --data-only
   su - postgres -c "$(find /usr/lib/postgresql -type f -name pg_ctl) -D $PGDATA stop"
 }
 

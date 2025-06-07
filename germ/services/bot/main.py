@@ -315,10 +315,11 @@ async def websocket_chat(ws: WebSocket):
         await websocket_manager.new_ws_sender(conversation_id, ws).send_message(
             ChatResponse(complete=True, content="Reconnected!")
         )
+        logger.info(f"Resuming conversation {conversation_id} with user {user_id}")
     else:
         conversation_id = await websocket_manager.connect(user_id, ws)
         await websocket_manager.new_ws_sender(conversation_id, ws).send_message(
             ChatResponse(complete=True, content="Connected!")
         )
-    logger.info(f"starting conversation {conversation_id} with user {user_id}")
+        logger.info(f"Starting conversation {conversation_id} with user {user_id}")
     await websocket_manager.wait_for_receive(user_id, conversation_id)

@@ -138,12 +138,12 @@ services:
     networks: [bots]
     container_name: *neo4j-host
     image: neo4j:latest
-    volumes:
-      - ./database_dump/neo4j:/dump:rw
-      - ./scripts/neo4j-start.sh:/neo4j-start.sh
     ports:
       - "7474:7474" # HTTP
       - "7687:7687" # Bolt
+    volumes:
+      - ./database_dump/neo4j:/dump:rw
+      - ./scripts/neo4j-start.sh:/neo4j-start.sh
     environment:
       NEO4J_AUTH: *neo4j-auth
     command: [ "/neo4j-start.sh" ]
@@ -165,11 +165,11 @@ services:
     networks: [bots]
     container_name: *pg-host
     image: pgvector/pgvector:pg17
+    ports:
+      - "5432:5432"
     volumes:
       - ./database_dump/sql:/dump:rw
       - ./scripts/pg-start.sh:/pg-start.sh
-    ports:
-      - "5432:5432"
     environment:
       POSTGRES_DB: germ
       POSTGRES_PASSWORD: *pg-password
@@ -195,10 +195,10 @@ services:
     networks: [bots]
     container_name: &prometheus-host germ-prometheus
     image: prom/prometheus:v2.52.0
-    volumes:
-      - ./data/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - '9090:9090'
+    volumes:
+      - ./data/prometheus.yml:/etc/prometheus/prometheus.yml
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       #- --log.level=debug
@@ -222,6 +222,11 @@ services:
     image: redis:latest
     ports:
       - "6379:6379"
+    volumes:
+      - ./database_dump/redis:/data:rw
+      - ./scripts/redis-start.sh:/redis-start.sh
+    entrypoint: [ "/redis-start.sh" ]
+    stop_grace_period: 1m
 
   test:
     networks: [bots]
@@ -246,7 +251,7 @@ services:
       context: .
       dockerfile: docker/app.Dockerfile
     image: "germ:latest"
-    working_dir: /src
     volumes:
       - ./:/src
+    working_dir: /src
     command: [ "scripts/venv.sh" ]

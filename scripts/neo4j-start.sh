@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 stop_neo4j() {
-  _NOW=$(date +"%Y%m%d-%H%M")
-  mkdir /dump/$_NOW
+  _NOW=$(date +"%Y%m%d%H%M")
+  mkdir "/dump/$_NOW"
   /var/lib/neo4j/bin/neo4j-admin server stop
   /var/lib/neo4j/bin/neo4j-admin database dump neo4j --to-path=/dump/$_NOW
 }

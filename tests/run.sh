@@ -8,10 +8,12 @@ PYTEST_OPTS=(
 
 rm -rf /src/germ/bot/static/tests
 if [ "$SKIP_TESTS" == 'false' ] || [ "$SKIP_INTEGRATION_TESTS" == 'false' ]; then
+    echo "Starting test suite"
     source germ_venv/bin/activate
-    set -ex
+    set -e
 
     if [ "$SKIP_INTEGRATION_TESTS" == 'false' ]; then
+        echo "Running all test cases"
         # Wait for PG
         export WAIT_FOR_HOST=$PG_HOST WAIT_FOR_PORT=5432
         bash /src/scripts/wait-for-port-up.sh
@@ -24,6 +26,7 @@ if [ "$SKIP_TESTS" == 'false' ] || [ "$SKIP_INTEGRATION_TESTS" == 'false' ]; the
 
         pytest -vvv -n auto "${PYTEST_OPTS[@]}" tests
     elif [ "$SKIP_TESTS" == 'false' ]; then
+        echo "Running unit test cases"
         pytest -vvv -n auto "${PYTEST_OPTS[@]}" tests/test_unit_*
     fi
 fi
