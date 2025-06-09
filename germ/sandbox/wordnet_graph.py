@@ -16,6 +16,9 @@ pos2id = {
 }
 id2pos = {v: k for k, v in pos2id.items()}
 
+# TODO:
+#   - Verify bidirectional antonyms
+#   - Dedupe senses with identical connections
 
 async def main():
     driver = new_async_driver()
@@ -23,29 +26,30 @@ async def main():
     all_synsets = [s for s in reader.all_synsets()]
     #foo_cnt = 0
     #for synset in all_synsets:
-    #    foo = synset.instance_hypernyms()
+    #    foo = synset.substance_meronyms()
     #    if foo:
     #        print(f"{synset.name()} -> {foo}")
     #        foo_cnt += 1
     #print(f"{foo_cnt} foo synsets")
     #exit()
-    #logger.info(f"Processing {len(all_synsets)} synsets")
+    logger.info(f"Processing {len(all_synsets)} synsets")
     processors = [
         process_synset_and_definition_batch,
-        process_also_sees_batch,
+        process_also_see_batch,
         process_antonym_batch,
-        process_attributes_batch,
-        process_causes_batch,
-        process_entailments_batch,
+        process_attribute_batch,
+        process_cause_batch,
+        process_entailment_batch,
         process_hypernym_batch,
         process_instance_hypernym_batch,
         process_meronym_batch,
         process_pertainym_batch,
-        process_region_domains_batch,
-        process_related_forms_batch,
+        process_region_domain_batch,
+        process_related_form_batch,
         process_root_hypernym_batch,
-        process_topic_domains_batch,
-        process_usage_domains_batch,
+        #process_substance_meronym_batch,  # TODO: has to be object
+        process_topic_domain_batch,
+        process_usage_domain_batch,
         process_verb_group_batch,
     ]
     for processor in processors:
@@ -53,7 +57,7 @@ async def main():
             await session.execute_write(processor, all_synsets)
 
 
-async def process_also_sees_batch(tx, synsets):
+async def process_also_see_batch(tx, synsets):
     query = """
     UNWIND $in_struct AS in_struct
     MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
@@ -97,7 +101,7 @@ async def process_antonym_batch(tx, synsets):
     await tx.run(query, in_struct=in_struct)
 
 
-async def process_attributes_batch(tx, synsets):
+async def process_attribute_batch(tx, synsets):
     query = """
     UNWIND $in_struct AS in_struct
     MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
@@ -123,7 +127,7 @@ async def process_attributes_batch(tx, synsets):
     await tx.run(query, in_struct=in_struct)
 
 
-async def process_causes_batch(tx, synsets):
+async def process_cause_batch(tx, synsets):
     query = """
     UNWIND $in_struct AS in_struct
     MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
@@ -143,7 +147,7 @@ async def process_causes_batch(tx, synsets):
     await tx.run(query, in_struct=in_struct)
 
 
-async def process_entailments_batch(tx, synsets):
+async def process_entailment_batch(tx, synsets):
     query = """
     UNWIND $in_struct AS in_struct
     MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
@@ -245,7 +249,7 @@ async def process_pertainym_batch(tx, synsets):
     await tx.run(query, in_struct=in_struct)
 
 
-async def process_region_domains_batch(tx, synsets):
+async def process_region_domain_batch(tx, synsets):
     query = """
     UNWIND $in_struct AS in_struct
     MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
@@ -265,7 +269,7 @@ async def process_region_domains_batch(tx, synsets):
     await tx.run(query, in_struct=in_struct)
 
 
-async def process_related_forms_batch(tx, synsets):
+async def process_related_form_batch(tx, synsets):
     query = """
     UNWIND $in_struct AS in_struct
     MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
@@ -310,6 +314,26 @@ async def process_root_hypernym_batch(tx, synsets):
     await tx.run(query, in_struct=in_struct)
 
 
+async def process_substance_meronym_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    MATCH (sub:Synset {lemma: in_struct.sub_lemma, pos: in_struct.sub_pos, sense: in_struct.sub_sense})
+    MERGE (s)-[:MADE_OF]->(sub)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for substance in synset.member_meronyms():
+            substance_lemma, substance_pos, substance_sense = tokenize_synset_name(substance.name())
+            in_struct.append({
+                "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                "sub_lemma": substance_lemma, "sub_pos": substance_pos, "sub_sense": substance_sense,
+            })
+    logger.info(f"Merged {len(in_struct)} substance meronym relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
 async def process_synset_and_definition_batch(tx, synsets):
     query = """
     UNWIND $in_struct AS in_struct
@@ -330,7 +354,7 @@ async def process_synset_and_definition_batch(tx, synsets):
     await tx.run(query, in_struct=in_struct)
 
 
-async def process_topic_domains_batch(tx, synsets):
+async def process_topic_domain_batch(tx, synsets):
     query = """
     UNWIND $in_struct AS in_struct
     MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
@@ -350,7 +374,7 @@ async def process_topic_domains_batch(tx, synsets):
     await tx.run(query, in_struct=in_struct)
 
 
-async def process_usage_domains_batch(tx, synsets):
+async def process_usage_domain_batch(tx, synsets):
     query = """
     UNWIND $in_struct AS in_struct
     MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
