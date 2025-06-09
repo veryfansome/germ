@@ -1,229 +1,408 @@
 import asyncio
-import nltk
-#
-#from germ.database.neo4j import new_async_driver
-#
-#pos2id = {
-#    "a": 1,  # Adjective
-#    "n": 2,  # Noun
-#    "r": 3,  # Adverb
-#    "s": 4,  # Adjective Satellite
-#    "v": 5,  # Verb
-#}
-#id2pos = {v: k for k, v in pos2id.items()}
-#
-#
-#async def create_antonym_relationship(tx, lemma1, pos1, sense1, lemma2, pos2, sense2):
-#    query = """
-#    MATCH (s1:Synset {lemma: $lemma1, pos: $pos1, sense: $sense1})
-#    MATCH (s2:Synset {lemma: $lemma2, pos: $pos2, sense: $sense2})
-#    MERGE (s1)-[:ANTONYM]->(s2)
-#    """
-#    await tx.run(query, lemma1=lemma1, pos1=pos1, sense1=sense1, lemma2=lemma2, pos2=pos2, sense2=sense2)
-#
-#
-#async def create_definition_node(tx, definition):
-#    query = """
-#    MERGE (d:Definition {definition: $definition})
-#    """
-#    await tx.run(query, definition=definition)
-#
-#
-#async def create_kind_of_relationship(tx, hypernym_lemma, hypernym_pos, hypernym_sense,
-#                                       hyponym_lemma, hyponym_pos, hyponym_sense):
-#    query = """
-#    MATCH (hyper:Synset {lemma: $hypernym_lemma, pos: $hypernym_pos, sense: $hypernym_sense})
-#    MATCH (hypo:Synset {lemma: $hyponym_lemma, pos: $hyponym_pos, sense: $hyponym_sense})
-#    MERGE (hypo)-[:KIND_OF]->(hyper)
-#    """
-#    await tx.run(query,
-#                 hypernym_lemma=hypernym_lemma, hypernym_pos=hypernym_pos, hypernym_sense=hypernym_sense,
-#                 hyponym_lemma=hyponym_lemma, hyponym_pos=hyponym_pos, hyponym_sense=hyponym_sense)
-#
-#
-#async def create_means_relationship(tx, lemma, pos, sense, definition):
-#    query = """
-#    MATCH (s:Synset {lemma: $lemma, pos: $pos, sense: $sense})
-#    MATCH (d:Definition {definition: $definition})
-#    MERGE (s)-[:MEANS]->(d)
-#    """
-#    await tx.run(query, lemma=lemma, pos=pos, sense=sense, definition=definition)
-#
-#
-#async def create_member_of_relationship(tx, member_lemma, member_pos, member_sense,
-#                                       group_lemma, group_pos, group_sense):
-#    query = """
-#    MATCH (m:Synset {lemma: $member_lemma, pos: $member_pos, sense: $member_sense})
-#    MATCH (g:Synset {lemma: $group_lemma, pos: $group_pos, sense: $group_sense})
-#    MERGE (m)-[:MEMBER_OF]->(g)
-#    """
-#    await tx.run(query,
-#                 member_lemma=member_lemma, member_pos=member_pos, member_sense=member_sense,
-#                 group_lemma=group_lemma, group_pos=group_pos, group_sense=group_sense)
-#
-#
-#async def create_topic_domain_relationship(tx, lemma, pos, sense, definition):
-#    query = """
-#    MATCH (s:Synset {lemma: $lemma, pos: $pos, sense: $sense})
-#    MATCH (d:Definition {definition: $definition})
-#    MERGE (d)-[:TOPIC_DOMAIN]->(s)
-#    """
-#    await tx.run(query, lemma=lemma, pos=pos, sense=sense, definition=definition)
-#
-#
-#async def create_usage_domain_relationship(tx, lemma, pos, sense, domain_lemma, domain_pos, domain_sense):
-#    query = """
-#    MATCH (s:Synset {lemma: $lemma, pos: $pos, sense: $sense})
-#    MATCH (d:Synset {lemma: $domain_lemma, pos: $domain_pos, sense: $domain_sense})
-#    MERGE (s)-[:USAGE_DOMAIN]->(d)
-#    """
-#    await tx.run(query, lemma=lemma, pos=pos, sense=sense, domain_lemma=domain_lemma, domain_pos=domain_pos, domain_sense=domain_sense)
-#
-#
-#async def create_synset_node(tx, lemma, pos, sense):
-#    query = """
-#    MERGE (s:Synset {lemma: $lemma, pos: $pos, sense: $sense})
-#    """
-#    await tx.run(query, lemma=lemma, pos=pos, sense=sense)
-#
-#
-#async def main(batch_size: int = 250):
-#    driver = new_async_driver()
-#    #all_synsets = [s for s in nltk.corpus.wordnet.all_synsets()]
-#    #all_synsets = [s for s in nltk.corpus.wordnet31.all_synsets()]
-#    all_synsets = [s for s in nltk.corpus.oewn.all_synsets()]
-#    all_synsets_len = len(all_synsets)
-#    synset_idx = 0
-#    max_concurrent_batches = 10
-#    pending_batches = []
-#    foo = set()
-#    while synset_idx < all_synsets_len:
-#        batch = []
-#        for _ in range(batch_size):
-#            if synset_idx >= all_synsets_len:
-#                break
-#            batch.append(all_synsets[synset_idx])
-#            synset_idx += 1
-#        if len(pending_batches) >= max_concurrent_batches:
-#            await asyncio.gather(*pending_batches)
-#            pending_batches = []
-#        else:
-#            pending_batches.append(asyncio.create_task(process_synset_batch(driver, batch, foo)))
-#        if synset_idx > 0 and synset_idx % 2500 == 0:
-#            print(f"Processed {synset_idx} synsets")
-#    if pending_batches:
-#        await asyncio.gather(*pending_batches)
-#    await driver.close()
-#
-#
-#async def process_synset_batch(driver, batch, foo):
-#    async with driver.session() as session:
-#        for synset in batch:
-#            synset_definition = synset.definition()
-#            synset_name, synset_pos, synset_sense = tokenize_synset_name(synset.name())
-#
-#            await session.execute_write(create_definition_node, synset_definition)
-#            if synset.name() not in foo:
-#                await session.execute_write(create_synset_node, synset_name, synset_pos, synset_sense)
-#                foo.add(synset.name())
-#            await session.execute_write(
-#                create_means_relationship,
-#                synset_name, synset_pos, synset_sense, synset_definition)
-#
-#            for holonym in synset.member_holonyms():
-#                holonym_name, holonym_pos, holonym_sense = tokenize_synset_name(holonym.name())
-#                if holonym.name() not in foo:
-#                    await session.execute_write(create_synset_node, holonym_name, holonym_pos, holonym_sense)
-#                    foo.add(holonym.name())
-#                rel_key = f"{synset.name()}_member_of_{holonym.name()}"
-#                if rel_key not in foo:
-#                    await session.execute_write(
-#                        create_member_of_relationship,
-#                        synset_name, synset_pos, synset_sense,
-#                        holonym_name, holonym_pos, holonym_sense)
-#                    foo.add(rel_key)
-#            for meronym in synset.member_meronyms():
-#                meronym_name, meronym_pos, meronym_sense = tokenize_synset_name(meronym.name())
-#                if meronym.name() not in foo:
-#                    await session.execute_write(create_synset_node, meronym_name, meronym_pos, meronym_sense)
-#                    foo.add(meronym.name())
-#                rel_key = f"{meronym.name()}_member_of_{synset.name()}"
-#                if rel_key not in foo:
-#                    await session.execute_write(
-#                        create_member_of_relationship,
-#                        meronym_name, meronym_pos, meronym_sense,
-#                        synset_name, synset_pos, synset_sense)
-#                    foo.add(rel_key)
-#
-#            for hyponym in synset.hyponyms():
-#                hyponym_name, hyponym_pos, hyponym_sense = tokenize_synset_name(hyponym.name())
-#                if hyponym.name() not in foo:
-#                    await session.execute_write(create_synset_node, hyponym_name, hyponym_pos, hyponym_sense)
-#                    foo.add(hyponym.name())
-#                rel_key = f"{synset.name()}_kind_of_{hyponym.name()}"
-#                if rel_key not in foo:
-#                    await session.execute_write(
-#                        create_kind_of_relationship,
-#                        synset_name, synset_pos, synset_sense,
-#                        hyponym_name, hyponym_pos, hyponym_sense)
-#                    foo.add(rel_key)
-#            for hypernym in synset.hypernyms():
-#                hypernym_name, hypernym_pos, hypernym_sense = tokenize_synset_name(hypernym.name())
-#                if hypernym.name() not in foo:
-#                    await session.execute_write(create_synset_node, hypernym_name, hypernym_pos, hypernym_sense)
-#                    foo.add(hypernym.name())
-#                rel_key = f"{hypernym.name()}_kind_of_{synset.name()}"
-#                if rel_key not in foo:
-#                    await session.execute_write(
-#                        create_kind_of_relationship,
-#                        hypernym_name, hypernym_pos, hypernym_sense,
-#                        synset_name, synset_pos, synset_sense)
-#                    foo.add(rel_key)
-#
-#            for topic in synset.topic_domains():
-#                topic_name, topic_pos, topic_sense = tokenize_synset_name(topic.name())
-#                if topic.name() not in foo:
-#                    await session.execute_write(create_synset_node, topic_name, topic_pos, topic_sense)
-#                    foo.add(topic.name())
-#                await session.execute_write(
-#                    create_topic_domain_relationship,
-#                    topic_name, topic_pos, topic_sense, synset_definition)
-#
-#            for usage in synset.usage_domains():
-#                usage_name, usage_pos, usage_sense = tokenize_synset_name(usage.name())
-#                if usage.name() not in foo:
-#                    await session.execute_write(create_synset_node, usage_name, usage_pos, usage_sense)
-#                    foo.add(usage.name())
-#                await session.execute_write(
-#                    create_usage_domain_relationship,
-#                    synset_name, synset_pos, synset_sense,
-#                    usage_name, usage_pos, usage_sense)
-#
-#            for lemma in synset.lemmas():
-#                lemma_name = lemma.name()
-#                if lemma_name == synset_name:
-#                    antonyms = lemma.antonyms()
-#                    for antonym in antonyms:
-#                        antonym_synset = antonym.synset()
-#                        antonym_name, antonym_pos, antonym_sense = tokenize_synset_name(antonym_synset.name())
-#                        if antonym_synset.name() not in foo:
-#                            await session.execute_write(create_synset_node, antonym_name, antonym_pos, antonym_sense)
-#                            foo.add(antonym_synset.name())
-#                        await session.execute_write(
-#                            create_antonym_relationship,
-#                            synset_name, synset_pos, synset_sense, antonym_name, antonym_pos, antonym_sense)
-#
-#
-#def tokenize_synset_name(synset_name: str):
-#    components = synset_name.split('.')
-#    synset_sense = components.pop()
-#    synset_pos = components.pop()
-#    synset_name = '.'.join(components).replace('_', ' ')
-#    return synset_name, pos2id[synset_pos], int(synset_sense)
+import logging
+from nltk.corpus.reader import WordNetCorpusReader
+
+from germ.database.neo4j import new_async_driver
+
+logger = logging.getLogger(__name__)
+
+oewn_path = "data/oewn2024"
+pos2id = {
+    "a": 1,  # Adjective
+    "n": 2,  # Noun
+    "r": 3,  # Adverb
+    "s": 4,  # Adjective Satellite
+    "v": 5,  # Verb
+}
+id2pos = {v: k for k, v in pos2id.items()}
+
+
+async def main():
+    driver = new_async_driver()
+    reader = WordNetCorpusReader(oewn_path, omw_reader=None)
+    all_synsets = [s for s in reader.all_synsets()]
+    #foo_cnt = 0
+    #for synset in all_synsets:
+    #    foo = synset.instance_hypernyms()
+    #    if foo:
+    #        print(f"{synset.name()} -> {foo}")
+    #        foo_cnt += 1
+    #print(f"{foo_cnt} foo synsets")
+    #exit()
+    #logger.info(f"Processing {len(all_synsets)} synsets")
+    processors = [
+        process_synset_and_definition_batch,
+        process_also_sees_batch,
+        process_antonym_batch,
+        process_attributes_batch,
+        process_causes_batch,
+        process_entailments_batch,
+        process_hypernym_batch,
+        process_instance_hypernym_batch,
+        process_meronym_batch,
+        process_pertainym_batch,
+        process_region_domains_batch,
+        process_related_forms_batch,
+        process_root_hypernym_batch,
+        process_topic_domains_batch,
+        process_usage_domains_batch,
+        process_verb_group_batch,
+    ]
+    for processor in processors:
+        async with driver.session() as session:
+            await session.execute_write(processor, all_synsets)
+
+
+async def process_also_sees_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    MATCH (r:Synset {lemma: in_struct.relation_lemma, pos: in_struct.relation_pos, sense: in_struct.relation_sense})
+    MERGE (r)-[:ALSO_SEE]->(s)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for relation in synset.also_sees():
+            relation_lemma, relation_pos, relation_sense = tokenize_synset_name(relation.name())
+            in_struct.append({
+                "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                "relation_lemma": relation_lemma, "relation_pos": relation_pos, "relation_sense": relation_sense,
+            })
+    logger.info(f"Merged {len(in_struct)} also-sees relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_antonym_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    MATCH (a:Synset {lemma: in_struct.antonym_lemma, pos: in_struct.antonym_pos, sense: in_struct.antonym_sense})
+    MERGE (s)-[:ANTONYM_OF]->(a)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for lemma in synset.lemmas():
+            # Each synset can have many lemmas. Currently, we focus on the main lemma that's used in the synset name
+            # because individual lemmas are not associated with senses, which we require.
+            if lemma.name() == synset_lemma:
+                for antonym in lemma.antonyms():
+                    antonym_lemma, antonym_pos, antonym_sense = tokenize_synset_name(antonym.synset().name())
+                    in_struct.append({
+                        "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                        "antonym_lemma": antonym_lemma, "antonym_pos": antonym_pos, "antonym_sense": antonym_sense,
+                    })
+    logger.info(f"Merged {len(in_struct)} antonym relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_attributes_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    MATCH (a:Synset {lemma: in_struct.attribute_lemma, pos: in_struct.attribute_pos, sense: in_struct.attribute_sense})
+    MERGE (a)-[:ATTRIBUTE_OF]->(s)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for attribute in synset.attributes():
+            attribute_lemma, attribute_pos, attribute_sense = tokenize_synset_name(attribute.name())
+            # In the data, these relationships are bidirectional but attributes are adjectives that convey a
+            # property or condition related to some noun word. For example:
+            #
+            #   presence.n.01 -> [Synset('absent.a.01'), Synset('present.a.02')]
+            #
+            if id2pos[synset_pos] == "n":
+                in_struct.append({
+                    "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                    "attribute_lemma": attribute_lemma, "attribute_pos": attribute_pos, "attribute_sense": attribute_sense,
+                })
+    logger.info(f"Merged {len(in_struct)} attribute relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_causes_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    MATCH (e:Synset {lemma: in_struct.effect_lemma, pos: in_struct.effect_pos, sense: in_struct.effect_sense})
+    MERGE (s)-[:CAUSES]->(e)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for effect in synset.causes():
+            effect_lemma, effect_pos, effect_sense = tokenize_synset_name(effect.name())
+            in_struct.append({
+                "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                "effect_lemma": effect_lemma, "effect_pos": effect_pos, "effect_sense": effect_sense,
+            })
+    logger.info(f"Merged {len(in_struct)} cause relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_entailments_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    MATCH (i:Synset {lemma: in_struct.imp_lemma, pos: in_struct.imp_pos, sense: in_struct.imp_sense})
+    MERGE (s)-[:IMPLIES]->(i)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for implication in synset.entailments():
+            implication_lemma, implication_pos, implication_sense = tokenize_synset_name(implication.name())
+            in_struct.append({
+                "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                "imp_lemma": implication_lemma, "imp_pos": implication_pos, "imp_sense": implication_sense,
+            })
+    logger.info(f"Merged {len(in_struct)} entailment relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_hypernym_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (hpr:Synset {lemma: in_struct.hypernym_lemma, pos: in_struct.hypernym_pos, sense: in_struct.hypernym_sense})
+    MATCH (hpo:Synset {lemma: in_struct.hyponym_lemma, pos: in_struct.hyponym_pos, sense: in_struct.hyponym_sense})
+    MERGE (hpo)-[:IS_A]->(hpr)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for hypernym in synset.hypernyms():
+            hypernym_lemma, hypernym_pos, hypernym_sense = tokenize_synset_name(hypernym.name())
+            in_struct.append({
+                "hypernym_lemma": hypernym_lemma, "hypernym_pos": hypernym_pos, "hypernym_sense": hypernym_sense,
+                "hyponym_lemma": synset_lemma, "hyponym_pos": synset_pos, "hyponym_sense": synset_sense,
+            })
+    logger.info(f"Merged {len(in_struct)} hypernym relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_instance_hypernym_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (hpr:Synset {lemma: in_struct.hypernym_lemma, pos: in_struct.hypernym_pos, sense: in_struct.hypernym_sense})
+    MATCH (hpo:Synset {lemma: in_struct.hyponym_lemma, pos: in_struct.hyponym_pos, sense: in_struct.hyponym_sense})
+    MERGE (hpo)-[:INSTANCE_IS_A]->(hpr)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for hypernym in synset.instance_hypernyms():
+            hypernym_lemma, hypernym_pos, hypernym_sense = tokenize_synset_name(hypernym.name())
+            in_struct.append({
+                "hypernym_lemma": hypernym_lemma, "hypernym_pos": hypernym_pos, "hypernym_sense": hypernym_sense,
+                "hyponym_lemma": synset_lemma, "hyponym_pos": synset_pos, "hyponym_sense": synset_sense,
+            })
+    logger.info(f"Merged {len(in_struct)} instance hypernym relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_meronym_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (m:Synset {lemma: in_struct.member_lemma, pos: in_struct.member_pos, sense: in_struct.member_sense})
+    MATCH (g:Synset {lemma: in_struct.group_lemma, pos: in_struct.group_pos, sense: in_struct.group_sense})
+    MERGE (m)-[:MEMBER_OF]->(g)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for meronym in synset.member_meronyms():
+            meronym_lemma, meronym_pos, meronym_sense = tokenize_synset_name(meronym.name())
+            in_struct.append({
+                "member_lemma": meronym_lemma, "member_pos": meronym_pos, "member_sense": meronym_sense,
+                "group_lemma": synset_lemma, "group_pos": synset_pos, "group_sense": synset_sense,
+            })
+    logger.info(f"Merged {len(in_struct)} meronym relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_pertainym_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    MATCH (p:Synset {lemma: in_struct.pertainym_lemma, pos: in_struct.pertainym_pos, sense: in_struct.pertainym_sense})
+    MERGE (s)-[:FORM_OF]->(p)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for lemma in synset.lemmas():
+            if lemma.name() == synset_lemma:
+                for pertainym in lemma.pertainyms():
+                    pertainym_lemma, pertainym_pos, pertainym_sense = tokenize_synset_name(pertainym.synset().name())
+                    in_struct.append({
+                        "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                        "pertainym_lemma": pertainym_lemma, "pertainym_pos": pertainym_pos, "pertainym_sense": pertainym_sense,
+                    })
+    logger.info(f"Merged {len(in_struct)} pertainym relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_region_domains_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    MATCH (rd:Synset {lemma: in_struct.domain_lemma, pos: in_struct.domain_pos, sense: in_struct.domain_sense})
+    MERGE (s)-[:OF_REGION]->(rd)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for domain in synset.region_domains():
+            domain_lemma, domain_pos, domain_sense = tokenize_synset_name(domain.name())
+            in_struct.append({
+                "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                "domain_lemma": domain_lemma, "domain_pos": domain_pos, "domain_sense": domain_sense,
+            })
+    logger.info(f"Merged {len(in_struct)} region domain relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_related_forms_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    MATCH (r:Synset {lemma: in_struct.related_lemma, pos: in_struct.related_pos, sense: in_struct.related_sense})
+    MERGE (s)-[:FORM_OF]->(r)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for lemma in synset.lemmas():
+            # Each synset can have many lemmas. Currently, we focus on the main lemma that's used in the synset name
+            # because individual lemmas are not associated with senses, which we require.
+            if lemma.name() == synset_lemma:
+                for derived in lemma.derivationally_related_forms():
+                    derived_lemma, derived_pos, derived_sense = tokenize_synset_name(derived.synset().name())
+                    in_struct.append({
+                        "lemma": derived_lemma, "pos": derived_pos, "sense": derived_sense,
+                        "related_lemma": synset_lemma, "related_pos": synset_pos, "related_sense": synset_sense,
+                    })
+    logger.info(f"Merged {len(in_struct)} related form relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_root_hypernym_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (hpr:Synset {lemma: in_struct.hypernym_lemma, pos: in_struct.hypernym_pos, sense: in_struct.hypernym_sense})
+    MATCH (hpo:Synset {lemma: in_struct.hyponym_lemma, pos: in_struct.hyponym_pos, sense: in_struct.hyponym_sense})
+    MERGE (hpo)-[:ROOT_IS_A]->(hpr)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for hypernym in synset.root_hypernyms():
+            hypernym_lemma, hypernym_pos, hypernym_sense = tokenize_synset_name(hypernym.name())
+            if hypernym_lemma != synset_lemma:
+                in_struct.append({
+                    "hypernym_lemma": hypernym_lemma, "hypernym_pos": hypernym_pos, "hypernym_sense": hypernym_sense,
+                    "hyponym_lemma": synset_lemma, "hyponym_pos": synset_pos, "hyponym_sense": synset_sense,
+                })
+    logger.info(f"Merged {len(in_struct)} root hypernym relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_synset_and_definition_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MERGE (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    MERGE (d:SynsetDefinition {text: in_struct.definition})
+    MERGE (d)-[:DEFINES]->(s)
+    """
+    in_struct = [
+        {
+            "lemma": pair[0][0],
+            "pos": pair[0][1],
+            "sense": pair[0][2],
+            "definition": pair[1].definition(),
+        }
+        for pair in [(tokenize_synset_name(s.name()), s) for s in synsets]
+    ]
+    logger.info(f"Merged {len(in_struct)} synsets")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_topic_domains_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    MATCH (td:Synset {lemma: in_struct.domain_lemma, pos: in_struct.domain_pos, sense: in_struct.domain_sense})
+    MERGE (s)-[:OF_TOPIC]->(td)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for domain in synset.topic_domains():
+            domain_lemma, domain_pos, domain_sense = tokenize_synset_name(domain.name())
+            in_struct.append({
+                "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                "domain_lemma": domain_lemma, "domain_pos": domain_pos, "domain_sense": domain_sense,
+            })
+    logger.info(f"Merged {len(in_struct)} topic domain relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_usage_domains_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    MATCH (ud:Synset {lemma: in_struct.domain_lemma, pos: in_struct.domain_pos, sense: in_struct.domain_sense})
+    MERGE (s)-[:USED_AS]->(ud)
+    """
+    # Convert the list of tuples into a list of dicts for the query
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for domain in synset.usage_domains():
+            domain_lemma, domain_pos, domain_sense = tokenize_synset_name(domain.name())
+            in_struct.append({
+                "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                "domain_lemma": domain_lemma, "domain_pos": domain_pos, "domain_sense": domain_sense,
+            })
+    logger.info(f"Merged {len(in_struct)} usage domain relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_verb_group_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    MATCH (p:Synset {lemma: in_struct.peer_lemma, pos: in_struct.peer_pos, sense: in_struct.peer_sense})
+    MERGE (s)-[:VERB_GROUP_WITH]->(p)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for peer in synset.verb_groups():
+            peer_lemma, peer_pos, peer_sense = tokenize_synset_name(peer.name())
+            in_struct.append({
+                "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                "peer_lemma": peer_lemma, "peer_pos": peer_pos, "peer_sense": peer_sense,
+            })
+    logger.info(f"Merged {len(in_struct)} verb group relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+def tokenize_synset_name(synset_name: str):
+    components = synset_name.split('.')
+    synset_sense = components.pop()
+    synset_pos = components.pop()
+    synset_name = '.'.join(components).replace('_', ' ')
+    return synset_name, pos2id[synset_pos], int(synset_sense)
 
 
 if __name__ == '__main__':
-    #nltk.download('wordnet')
-    #nltk.download('oewn')
-    nltk.download('wordnet2024')
+    import nltk
+    from germ.observability.logging import setup_logging
+
+    nltk.download('wordnet')
+    setup_logging()
     asyncio.run(main())
