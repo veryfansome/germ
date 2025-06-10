@@ -20,18 +20,34 @@ id2pos = {v: k for k, v in pos2id.items()}
 #   - Verify bidirectional antonyms
 #   - Dedupe senses with identical connections
 
+# TODO:
+#   - pertainyms and derived forms needs more thought.
+#   - maybe lemmas need to be a 1st-class thing
+#       alular.a.01 - related -> [Lemma('alula.n.01.alula'), Lemma('bastard_wing.n.01.bastard_wing')]
+#       alular.a.01 - pertainyms -> [Lemma('bastard_wing.n.01.bastard_wing')]
+#       calyptrate.a.01 - pertainyms -> [Lemma('alula.n.01.calypter')]
+#       alula.n.01 - related -> [Lemma('alular.a.01.alular')]
+#       alula.n.01 - pertainyms -> []
+
 async def main():
     driver = new_async_driver()
     reader = WordNetCorpusReader(oewn_path, omw_reader=None)
     all_synsets = [s for s in reader.all_synsets()]
+
     #foo_cnt = 0
     #for synset in all_synsets:
-    #    foo = synset.substance_meronyms()
-    #    if foo:
-    #        print(f"{synset.name()} -> {foo}")
-    #        foo_cnt += 1
+    #    #foo = synset.part_meronyms()
+    #    #if foo:
+    #    #    print(f"{synset.name()} -> {foo}")
+    #    #    foo_cnt += 1
+    #    synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+    #    for lemma in synset.lemmas():
+    #        if lemma.name() == synset_lemma:
+    #            print(f"{synset.name()} - related -> {lemma.derivationally_related_forms()}")
+    #            print(f"{synset.name()} - pertainyms -> {lemma.pertainyms()}")
     #print(f"{foo_cnt} foo synsets")
     #exit()
+
     logger.info(f"Processing {len(all_synsets)} synsets")
     processors = [
         process_synset_and_definition_batch,
@@ -42,12 +58,13 @@ async def main():
         process_entailment_batch,
         process_hypernym_batch,
         process_instance_hypernym_batch,
-        process_meronym_batch,
-        process_pertainym_batch,
+        process_member_meronym_batch,
+        process_part_meronym_batch,
+        #process_pertainym_batch,
         process_region_domain_batch,
-        process_related_form_batch,
+        #process_related_form_batch,
         process_root_hypernym_batch,
-        #process_substance_meronym_batch,  # TODO: has to be object
+        process_substance_meronym_batch,
         process_topic_domain_batch,
         process_usage_domain_batch,
         process_verb_group_batch,
@@ -82,7 +99,7 @@ async def process_antonym_batch(tx, synsets):
     UNWIND $in_struct AS in_struct
     MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
     MATCH (a:Synset {lemma: in_struct.antonym_lemma, pos: in_struct.antonym_pos, sense: in_struct.antonym_sense})
-    MERGE (s)-[:ANTONYM_OF]->(a)
+    MERGE (s)-[:ANTONYM_OF {pair: in_struct.pair}]-(a)
     """
     in_struct = []
     for synset in synsets:
@@ -90,13 +107,14 @@ async def process_antonym_batch(tx, synsets):
         for lemma in synset.lemmas():
             # Each synset can have many lemmas. Currently, we focus on the main lemma that's used in the synset name
             # because individual lemmas are not associated with senses, which we require.
-            if lemma.name() == synset_lemma:
-                for antonym in lemma.antonyms():
-                    antonym_lemma, antonym_pos, antonym_sense = tokenize_synset_name(antonym.synset().name())
-                    in_struct.append({
-                        "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
-                        "antonym_lemma": antonym_lemma, "antonym_pos": antonym_pos, "antonym_sense": antonym_sense,
-                    })
+            #if lemma.name() == synset_lemma:
+            for antonym in lemma.antonyms():
+                antonym_lemma, antonym_pos, antonym_sense = tokenize_synset_name(antonym.synset().name())
+                in_struct.append({
+                    "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                    "antonym_lemma": antonym_lemma, "antonym_pos": antonym_pos, "antonym_sense": antonym_sense,
+                    "pair": " <> ".join(sorted([lemma.name().replace('_', ' '), antonym.name().replace('_', ' ')])),
+                })
     logger.info(f"Merged {len(in_struct)} antonym relationships")
     await tx.run(query, in_struct=in_struct)
 
@@ -207,23 +225,43 @@ async def process_instance_hypernym_batch(tx, synsets):
     await tx.run(query, in_struct=in_struct)
 
 
-async def process_meronym_batch(tx, synsets):
+async def process_member_meronym_batch(tx, synsets):
     query = """
     UNWIND $in_struct AS in_struct
+    MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
     MATCH (m:Synset {lemma: in_struct.member_lemma, pos: in_struct.member_pos, sense: in_struct.member_sense})
-    MATCH (g:Synset {lemma: in_struct.group_lemma, pos: in_struct.group_pos, sense: in_struct.group_sense})
-    MERGE (m)-[:MEMBER_OF]->(g)
+    MERGE (m)-[:MEMBER_OF]->(s)
     """
     in_struct = []
     for synset in synsets:
         synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
-        for meronym in synset.member_meronyms():
-            meronym_lemma, meronym_pos, meronym_sense = tokenize_synset_name(meronym.name())
+        for member in synset.member_meronyms():
+            member_lemma, member_pos, member_sense = tokenize_synset_name(member.name())
             in_struct.append({
-                "member_lemma": meronym_lemma, "member_pos": meronym_pos, "member_sense": meronym_sense,
-                "group_lemma": synset_lemma, "group_pos": synset_pos, "group_sense": synset_sense,
+                "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                "member_lemma": member_lemma, "member_pos": member_pos, "member_sense": member_sense,
             })
-    logger.info(f"Merged {len(in_struct)} meronym relationships")
+    logger.info(f"Merged {len(in_struct)} member meronym relationships")
+    await tx.run(query, in_struct=in_struct)
+
+
+async def process_part_meronym_batch(tx, synsets):
+    query = """
+    UNWIND $in_struct AS in_struct
+    MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    MATCH (p:Synset {lemma: in_struct.part_lemma, pos: in_struct.part_pos, sense: in_struct.part_sense})
+    MERGE (p)-[:PART_OF]->(s)
+    """
+    in_struct = []
+    for synset in synsets:
+        synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
+        for part in synset.part_meronyms():
+            part_lemma, part_pos, part_sense = tokenize_synset_name(part.name())
+            in_struct.append({
+                "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                "part_lemma": part_lemma, "part_pos": part_pos, "part_sense": part_sense,
+            })
+    logger.info(f"Merged {len(in_struct)} part meronym relationships")
     await tx.run(query, in_struct=in_struct)
 
 
@@ -238,7 +276,7 @@ async def process_pertainym_batch(tx, synsets):
     for synset in synsets:
         synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
         for lemma in synset.lemmas():
-            if lemma.name() == synset_lemma:
+            if lemma.name() == synset_lemma and id2pos[synset_pos] == "a":
                 for pertainym in lemma.pertainyms():
                     pertainym_lemma, pertainym_pos, pertainym_sense = tokenize_synset_name(pertainym.synset().name())
                     in_struct.append({
@@ -319,12 +357,12 @@ async def process_substance_meronym_batch(tx, synsets):
     UNWIND $in_struct AS in_struct
     MATCH (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
     MATCH (sub:Synset {lemma: in_struct.sub_lemma, pos: in_struct.sub_pos, sense: in_struct.sub_sense})
-    MERGE (s)-[:MADE_OF]->(sub)
+    MERGE (sub)-[:SUBSTANCE_IN]->(s)
     """
     in_struct = []
     for synset in synsets:
         synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
-        for substance in synset.member_meronyms():
+        for substance in synset.substance_meronyms():
             substance_lemma, substance_pos, substance_sense = tokenize_synset_name(substance.name())
             in_struct.append({
                 "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
@@ -338,12 +376,16 @@ async def process_synset_and_definition_batch(tx, synsets):
     query = """
     UNWIND $in_struct AS in_struct
     MERGE (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
+    WITH in_struct, s
+    SET s.lemmas = in_struct.lemmas
+    WITH in_struct, s
     MERGE (d:SynsetDefinition {text: in_struct.definition})
     MERGE (d)-[:DEFINES]->(s)
     """
     in_struct = [
         {
             "lemma": pair[0][0],
+            "lemmas": [l.name().replace("_", " ") for l in pair[1].lemmas()],
             "pos": pair[0][1],
             "sense": pair[0][2],
             "definition": pair[1].definition(),
