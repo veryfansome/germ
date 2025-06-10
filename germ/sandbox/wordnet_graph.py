@@ -33,30 +33,45 @@ async def main():
     #print(f"{foo_cnt} foo synsets")
     #exit()
 
-    logger.info(f"Processing {len(all_synsets)} synsets")
-    processors = [
-        process_synset_and_definition_batch,
-        process_also_see_batch,
-        process_antonym_batch,
-        process_attribute_batch,
-        process_cause_batch,
-        process_derived_from_batch,
-        process_entailment_batch,
-        process_hypernym_batch,
-        process_instance_hypernym_batch,
-        process_member_meronym_batch,
-        process_part_meronym_batch,
-        process_pertainym_batch,
-        process_region_domain_batch,
-        process_root_hypernym_batch,
-        process_substance_meronym_batch,
-        process_topic_domain_batch,
-        process_usage_domain_batch,
-        process_verb_group_batch,
-    ]
-    for processor in processors:
-        async with driver.session() as session:
-            await session.execute_write(processor, all_synsets)
+    #logger.info(f"Processing {len(all_synsets)} synsets")
+    #processors = [
+    #    process_synset_and_definition_batch,
+    #    process_also_see_batch,
+    #    process_antonym_batch,
+    #    process_attribute_batch,
+    #    process_cause_batch,
+    #    process_derived_from_batch,
+    #    process_entailment_batch,
+    #    process_hypernym_batch,
+    #    process_instance_hypernym_batch,
+    #    process_member_meronym_batch,
+    #    process_part_meronym_batch,
+    #    process_pertainym_batch,
+    #    process_region_domain_batch,
+    #    process_root_hypernym_batch,
+    #    process_substance_meronym_batch,
+    #    process_topic_domain_batch,
+    #    process_usage_domain_batch,
+    #    process_verb_group_batch,
+    #]
+    #for processor in processors:
+    #    async with driver.session() as session:
+    #        await session.execute_write(processor, all_synsets)
+
+    async with driver.session() as session:
+        results = await session.execute_write(foo, [
+            "johnny", "cut", "down", "the", "apple", "tree", "yesterday",
+        ])
+        print(results)
+
+async def foo(tx, tokens):
+    query = """
+    UNWIND $tokens AS token
+    MATCH (s1:Synset {lemma: token})-[r1]-(s2)
+    MATCH (s3)-[r2]-(s4:Synset {lemma: token})
+    RETURN s1, r1, s2, s3, r2, s4
+    """
+    return await tx.run(query, tokens=tokens)
 
 
 async def _process_also_see_batch(tx, in_struct):
