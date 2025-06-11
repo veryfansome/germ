@@ -125,10 +125,12 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             p_block_sentences = []
             for p_block_id, p_block_text in enumerate(p_blocks):
                 extracted_sentences = await process_p_block(p_block_text)
+                sentence_embeddings = (await get_text_embedding(extracted_sentences))["embeddings"]
                 logger.info(f"{len(extracted_sentences)} sentences extracted from conversation {conversation_id}, "
                             f"message {dt_created_ts}, paragraph {p_block_id}")
                 logger.info(f"extracted sentences {extracted_sentences}")
-                for sentence in extracted_sentences:
+                for sentence_idx, sentence in enumerate(extracted_sentences):
+                    logger.info(f"{sentence} >> {sentence_embeddings}")
                     #pos_labels = await get_pos_labels(sentence)
                     #log_pos_labels(pos_labels)
                     pass
@@ -263,6 +265,13 @@ async def get_pos_labels(text: str):
     async with aiohttp.ClientSession() as session:
         async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/classification/ud",
                                 json={"text": text}) as response:
+            return await response.json()
+
+
+async def get_text_embedding(texts: list[str]):
+    async with aiohttp.ClientSession() as session:
+        async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/embedding",
+                                json={"texts": texts}) as response:
             return await response.json()
 
 
