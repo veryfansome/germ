@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from sentence_transformers import SentenceTransformer
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 import os
@@ -28,6 +29,7 @@ tracer = trace.get_tracer(__name__)
 ##
 # App
 
+text_embedding_model = SentenceTransformer('intfloat/e5-base-v2')
 #text_emotions_classifier = GoEmotionsPredictor(
 #    "veryfansome/deberta-goemotions", subfolder="pos_weight_best")
 #ud_token_multi_classifier = MultiHeadPredictor(
@@ -82,3 +84,10 @@ async def get_metrics():
 #@model_service.post("/text/classification/ud")
 #async def post_text_classification_ud(payload: TextPayload):
 #    return await run_in_threadpool(ud_token_multi_classifier.predict, payload.text)
+
+
+@model_service.post("/text/embedding")
+async def post_text_embedding(payload: TextListPayload):
+    embeddings = await run_in_threadpool(text_embedding_model.encode, payload.texts,
+                                         normalize_embeddings=False, show_progress_bar=False)
+    return {"embeddings": embeddings.tolist()}

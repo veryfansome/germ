@@ -62,7 +62,8 @@ async def main():
         results = await session.execute_write(foo, [
             "johnny", "cut", "down", "the", "apple", "tree", "yesterday",
         ])
-        print(results)
+        for record in results:
+            print(record)
 
 async def foo(tx, tokens):
     query = """
@@ -71,7 +72,10 @@ async def foo(tx, tokens):
     MATCH (s3)-[r2]-(s4:Synset {lemma: token})
     RETURN s1, r1, s2, s3, r2, s4
     """
-    return await tx.run(query, tokens=tokens)
+    results = []
+    async for record in await tx.run(query, tokens=tokens):
+        results.append(record)
+    return results
 
 
 async def _process_also_see_batch(tx, in_struct):

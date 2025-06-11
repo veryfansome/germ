@@ -42,6 +42,7 @@ python-dotenv
 python-multipart
 redis
 scikit-learn
+sentence-transformers
 sqlalchemy[asyncio]
 starlette
 starsessions[redis]
