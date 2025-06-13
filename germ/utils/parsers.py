@@ -1,5 +1,3 @@
-from bs4 import BeautifulSoup
-from typing import Any
 import dns.exception
 import dns.resolver
 import logging
@@ -7,6 +5,9 @@ import mimetypes
 import mistune
 import os
 import re
+from bs4 import BeautifulSoup
+from copy import copy
+from typing import Any
 
 from germ.data.iana import IanaTLDCacher
 from germ.utils.patterns import ipv4_addr_pattern, ipv6_addr_pattern
@@ -19,42 +20,53 @@ iana_data = IanaTLDCacher()
 class MarkdownPageElementExtractor(mistune.HTMLRenderer):
     def __init__(self):
         super().__init__()
+        self._headings_context = {}
+        self._list_items = []
         self.elements = []
 
     def block_code(self, code, info=None):
-        self.elements.append(('block_code', info, code))
+        self.elements.append({
+            "type": "block_code",
+            "language": info,
+            "text": code,
+            "headings": copy(self._headings_context),
+        })
         return super().block_code(code, info)
 
-    def block_error(self, text):
-        self.elements.append(('block_error', text))
-        return super().block_error(text)
-
-    def block_html(self, html):
-        self.elements.append(('block_html', html))
-        return super().block_html(html)
-
-    def block_quote(self, text):
-        self.elements.append(('block_quote', text))
-        return super().block_quote(text)
-
-    def block_text(self, text):
-        self.elements.append(('block_text', text))
-        return super().block_text(text)
-
     def heading(self, text, level, **attrs):
-        self.elements.append(('heading', level, text))
+        p_soup = get_html_soup(f"<p>{text}</p>")
+        p_text, p_elements = strip_html_elements(p_soup, "p")
+        self._headings_context[level] = {"text": text, "elements": p_elements}
         return super().heading(text, level, **attrs)
 
     def list(self, text: str, ordered: bool, **attrs: Any) -> str:
-        self.elements.append(('list', ordered))
+        self.elements.append({
+            "tag": "list",
+            "ordered": ordered,
+            "items": copy(self._list_items),
+            "headings": copy(self._headings_context),
+        })
+        self._list_items = []
         return super().list(text, ordered, **attrs)
 
     def list_item(self, text):
-        self.elements.append(('list_item', text))
+        p_soup = get_html_soup(f"<p>{text}</p>")
+        p_text, p_elements = strip_html_elements(p_soup, "p")
+        self._list_items.append({
+            "tag": "list_item",
+            "text": p_text,
+            "elements": p_elements,
+        })
         return super().list_item(text)
 
     def paragraph(self, text):
-        self.elements.append(('paragraph', text))
+        p_soup = get_html_soup(f"<p>{text}</p>")
+        p_text, p_elements = strip_html_elements(p_soup, "p")
+        self.elements.append({ "tag": "paragraph",
+            "text": p_text,
+            "elements": p_elements,
+            "headings": copy(self._headings_context),
+        })
         return super().paragraph(text)
 
 
@@ -227,7 +239,7 @@ def resolve_fqdn(fqdn: str, nameservers: list[str] = None, timeout: int = 2):
         return None, True, False
 
 
-async def strip_html_elements(soup: BeautifulSoup, tag: str = None):
+def strip_html_elements(soup: BeautifulSoup, tag: str = None):
     text_elements = []
     html_elements = {}
     for idx, element in enumerate(soup.find_all() if tag is None else soup.find(tag)):
@@ -241,13 +253,13 @@ async def strip_html_elements(soup: BeautifulSoup, tag: str = None):
     for idx, element in html_elements.items():
         if element.find():  # Has inner elements
             logger.info(f"found <{element.name}>, with inner elements: {element}")
-            inner_string, inner_artifacts = await strip_html_elements(element)
+            inner_string, inner_artifacts = strip_html_elements(element)
             if inner_artifacts:
                 element_artifacts += inner_artifacts
         else:  # Doesn't have inner elements
             logger.info(f"stripped <{element.name}>, kept inner string: {element.string}")
-            #if element.name == "code":  # Translate back to backticks, which the token classifier knows
-            #    element.string = f"`{element.string}`"
+            if element.name == "code":  # Translate back to backticks, which the token classifier knows
+                element.string = f"`{element.string}`"
         text_elements[idx] = element.string if element.string else ""
     return ''.join(text_elements), element_artifacts
 
