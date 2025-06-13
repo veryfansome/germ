@@ -1,21 +1,16 @@
 from datetime import datetime
 from starlette.concurrency import run_in_threadpool
 import aiohttp
-import faiss
 import logging
-import numpy as np
-import tiktoken
 
 from germ.api.models import ChatRequest, ChatResponse
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
-from germ.services.bot.chat import async_openai_client
 from germ.services.bot.websocket import (WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                                          WebSocketSendEventHandler, WebSocketSender, WebSocketSessionMonitor)
 from germ.services.models.predict.multi_predict import log_pos_labels
 from germ.settings import germ_settings
-from germ.utils.parsers import extract_markdown_page_elements, get_html_soup, strip_html_elements
-from germ.utils.patterns import naive_sentence_end_pattern
+from germ.utils.parsers import extract_markdown_page_elements
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +68,19 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             message_elements = await run_in_threadpool(extract_markdown_page_elements, newest_message_content)
             logger.info(f"parsed message: {message_elements}")
 
+            code_to_enrich = []
+            text_to_enrich = []
+            scaffolds = []
+            for element_idx, element in enumerate(message_elements):
+                element_copy = element.copy()
+                if element["tag"] == "paragraph":
+                    for sentence_idx, sentence in enumerate(element["text"]):
+                        text_to_enrich.append(sentence)
+                        element_copy["text"][sentence_idx] = len(text_to_enrich) - 1  # Index position
+                scaffolds.append(element_copy)
+            logger.info(f"text_to_enrich: {text_to_enrich}")
+            logger.info(f"scaffolds: {scaffolds}")
+
             #p_block_sentences = []
             ## TODO: It make sense to do embeddings and POS labels for all sentences from all p_blocks at once
             #for p_block_id, p_block_text in enumerate(p_blocks):
@@ -115,18 +123,3 @@ async def get_text_embedding(texts: list[str]):
         async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/embedding",
                                 json={"texts": texts}) as response:
             return await response.json()
-
-
-async def process_p_block(p_text: str) -> list[str]:
-    sentences: list[str] = []
-    while p_text:
-       # Not always perfect but good enough
-       sentence_end_match = await run_in_threadpool(
-           naive_sentence_end_pattern.search, p_text, 0, len(p_text))
-       if sentence_end_match:
-           sentences.append(p_text[:sentence_end_match.end()])
-           p_text = p_text[sentence_end_match.end():].strip()
-       else:
-           sentences.append(p_text.strip())
-           p_text = ""
-    return sentences

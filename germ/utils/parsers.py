@@ -10,7 +10,7 @@ from copy import copy
 from typing import Any
 
 from germ.data.iana import IanaTLDCacher
-from germ.utils.patterns import ipv4_addr_pattern, ipv6_addr_pattern
+from germ.utils.patterns import ipv4_addr_pattern, ipv6_addr_pattern, naive_sentence_end_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class MarkdownPageElementExtractor(mistune.HTMLRenderer):
 
     def block_code(self, code, info=None):
         self.elements.append({
-            "type": "block_code",
+            "tag": "block_code",
             "language": info,
             "text": code,
             "headings": copy(self._headings_context),
@@ -62,8 +62,9 @@ class MarkdownPageElementExtractor(mistune.HTMLRenderer):
     def paragraph(self, text):
         p_soup = get_html_soup(f"<p>{text}</p>")
         p_text, p_elements = strip_html_elements(p_soup, "p")
-        self.elements.append({ "tag": "paragraph",
-            "text": p_text,
+        self.elements.append({
+            "tag": "paragraph",
+            "text": split_sentences(p_text),
             "elements": p_elements,
             "headings": copy(self._headings_context),
         })
@@ -237,6 +238,20 @@ def resolve_fqdn(fqdn: str, nameservers: list[str] = None, timeout: int = 2):
         return None, False, True
     except dns.exception.DNSException as e:
         return None, True, False
+
+
+def split_sentences(p_text: str) -> list[str]:
+    sentences: list[str] = []
+    while p_text:
+       # Not always perfect but good enough
+       sentence_end_match = naive_sentence_end_pattern.search(p_text, 0, len(p_text))
+       if sentence_end_match:
+           sentences.append(p_text[:sentence_end_match.end()])
+           p_text = p_text[sentence_end_match.end():].strip()
+       else:
+           sentences.append(p_text.strip())
+           p_text = ""
+    return sentences
 
 
 def strip_html_elements(soup: BeautifulSoup, tag: str = None):
