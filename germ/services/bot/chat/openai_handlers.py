@@ -119,7 +119,7 @@ class ImageModelEventHandler(RoutableChatEventHandler):
 
 class ReasoningChatModelEventHandler(RoutableChatEventHandler):
     def __init__(self, assistant_helper: openai_beta.AssistantHelper = None,
-                 model: str = REASONING_MODEL, httpx_timeout: float = 120):
+                 model: str = REASONING_MODEL, httpx_timeout: float = 180):
         self.assistant_helper = assistant_helper
         self.function_name = f"use_{model}"
         self.function_settings = {
