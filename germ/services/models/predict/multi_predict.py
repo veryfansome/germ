@@ -1,9 +1,12 @@
-from transformers import DebertaV2TokenizerFast
+import logging
 import torch
+from transformers import DebertaV2TokenizerFast
 
 from germ.services.models.predict.multi_head_model import MultiHeadModel
 from germ.utils import get_torch_device
 from germ.utils.tokenize import naive_tokenize
+
+logger = logging.getLogger(__name__)
 
 
 class MultiHeadPredictor:
@@ -18,21 +21,18 @@ class MultiHeadPredictor:
         self.model.to(self.device)
         self.model.eval()
 
-    def predict(self, text: str):
+    def predict_batch(self, texts: list[str]):
         """
-        Perform multi-headed token classification on a single piece of text.
-
-        :param text: The raw text string.
-
-        :return: A dict with {head_name: [predicted_label_for_each_token]} for the tokens in `text`.
+        Perform multi-headed token classification for a batch of texts.
+        Returns a list of prediction dicts, one per input text.
         """
-        raw_tokens = naive_tokenize(text)
+        # Split each text into raw tokens
+        all_raw_tokens = [naive_tokenize(t) for t in texts]
 
-        # We'll do a single-example batch to replicate training chunk logic.
-        # is_split_into_words=True => we pass a list of tokens, not a single string.
-        # This returns possibly multiple overflows if the sequence is long:
+        # Tokenize in batch mode with is_split_into_words=True. This automatically keeps track of the sample index via
+        # 'overflow_to_sample_mapping'.
         encoded = self.tokenizer(
-            raw_tokens,
+            all_raw_tokens,
             is_split_into_words=True,
             max_length=512,
             stride=128,
@@ -42,98 +42,114 @@ class MultiHeadPredictor:
             padding="max_length"
         )
 
-        # 'overflow_to_sample_mapping' indicates which chunk maps back to this example's index
-        # For a single example, they should all map to 0, but let's handle it anyway:
-        sample_map = encoded.get("overflow_to_sample_mapping", [0] * len(encoded["input_ids"]))
+        # sample_map[i] tells us which text in the batch chunk i belongs to
+        sample_map = encoded.get("overflow_to_sample_mapping", [])
+        n_chunks = len(encoded["input_ids"])
 
-        # We'll store predictions for each chunk, then reconcile them.
-        chunk_preds = []
-        chunk_word_ids = []
+        # Do one forward pass for all chunks.
+        input_ids_tensor = torch.tensor(encoded["input_ids"], dtype=torch.long).to(self.device)
+        attention_mask_tensor = torch.tensor(encoded["attention_mask"], dtype=torch.long).to(self.device)
 
-        # Model forward:
-        # We iterate over each chunk, move them to device, and compute logits_dict.
-        for i in range(len(encoded["input_ids"])):
-            # Build a batch of size 1 for chunk i
-            input_ids_tensor = torch.tensor([encoded["input_ids"][i]], dtype=torch.long).to(self.device)
-            attention_mask_tensor = torch.tensor([encoded["attention_mask"][i]], dtype=torch.long).to(self.device)
+        with torch.no_grad():
+            # model(...) returns logits_dict = {head_name: [batch_size, seq_len, num_labels]}
+            logits_dict = self.model(
+                input_ids=input_ids_tensor,
+                attention_mask=attention_mask_tensor
+            )
 
-            # The model forward returns logits_dict since we don't provide labels_dict
-            with torch.no_grad():
-                logits_dict = self.model(
-                    input_ids=input_ids_tensor,
-                    attention_mask=attention_mask_tensor
-                )  # shape for each head: (1, seq_len, num_labels)
+        # logits_dict is {head_name: (n_chunks, seq_len, num_labels)}.
+        # We'll do argmax across dim=-1 for each head:
+        pred_ids_dict = {}
+        for head_name, logits in logits_dict.items():
+            pred_ids_dict[head_name] = torch.argmax(logits, dim=-1).cpu().numpy()
 
-            # Convert each head's logits to predicted IDs
-            # logits_dict is {head_name: Tensor of shape [1, seq_len, num_labels]}
-            pred_ids_dict = {}
-            for head_name, logits in logits_dict.items():
-                # shape (1, seq_len, num_labels)
-                preds = torch.argmax(logits, dim=-1)  # => shape (1, seq_len)
-                # Move to CPU numpy
-                pred_ids_dict[head_name] = preds[0].cpu().numpy().tolist()
+        # Build final predictions for each text based on the chunk predictions. We'll accumulate predictions per text,
+        # then combine them token-by-token.
+        final_predictions = []
+        for text_idx, raw_tokens in enumerate(all_raw_tokens):
+            # For each text, set up a dictionary similar to your single-text predict
+            final_pred_labels = {
+                "text": texts[text_idx],
+                "tokens": raw_tokens,
+            }
+            # Add a placeholder label list for each head
+            for head_name in self.id2label.keys():
+                final_pred_labels[head_name] = ["X"] * len(raw_tokens)  # or some default
+            final_predictions.append(final_pred_labels)
 
-            # Keep track of predicted IDs + the corresponding word_ids for alignment
-            chunk_preds.append(pred_ids_dict)
+        # Keep track which tokens were assigned for each text
+        assigned_tokens_for_text = [set() for _ in texts]
 
-            # Also store the chunk's word_ids (so we can map subwords -> actual token index)
-            # Note: you MUST call `tokenizer.word_ids(batch_index=i)` with is_split_into_words=True
-            # which is only available on a batched encoding. So we re-call it carefully:
-            word_ids_chunk = encoded.word_ids(batch_index=i)
-            chunk_word_ids.append(word_ids_chunk)
+        # Because we asked for word_ids in “batched” format, we need to call:
+        #   tokenizer.word_ids(batch_index=some_index)
+        # but that is only valid one chunk at a time. We'll do that in a loop:
+        for chunk_idx in range(n_chunks):
+            # Determine which text this chunk belongs to
+            text_idx = sample_map[chunk_idx]
+            word_ids_chunk = encoded.word_ids(batch_index=chunk_idx)
 
-        # Now we combine chunk predictions into a single sequence of token-level labels.
-        # Because we used a sliding window, tokens appear in multiple chunks. We can
-        # keep the first occurrence, or we might want to carefully handle overlaps.
-        # Below is a simplistic approach: We will read each chunk in order, skipping
-        # positions with word_id=None or repeated word_id (subword).
-
-        # We'll build final predictions for each head at the *token* level (not subword).
-        # For each original token index from 0..len(raw_tokens)-1, we pick the first chunk
-        # that includes it, and the subword=first-subword label.
-
-        # We define an array of "final predictions" for each head, size = len(raw_tokens).
-        final_pred_labels = {**{
-            "text": text,
-            "tokens": raw_tokens,
-        }, **{
-            head: ["O"] * len(raw_tokens)  # or "O" or "" placeholder
-            for head in self.id2label.keys()
-        }}
-
-        # We'll keep track of which tokens we've already assigned. Each chunk is
-        # processed left-to-right, so effectively the earliest chunk covers it.
-        assigned_tokens = set()
-
-        for i, pred_dict in enumerate(chunk_preds):
-            w_ids = chunk_word_ids[i]
-            for pos, w_id in enumerate(w_ids):
+            # For each position in the chunk, map to a token ID in the text. Then set the label.
+            for pos, w_id in enumerate(word_ids_chunk):
                 if w_id is None:
-                    # This is a special token (CLS, SEP, or padding)
-                    continue
-                if w_id in assigned_tokens:
-                    # Already assigned from a previous chunk
-                    continue
+                    continue  # special token (CLS, SEP, padding, etc.)
+                if w_id in assigned_tokens_for_text[text_idx]:
+                    continue  # already assigned from an earlier chunk
 
-                # If it's the first subword of that token, record the predicted label for each head.
-                # pred_dict[head_name] is a list of length seq_len
-                for head_name, pred_ids in pred_dict.items():
-                    label_id = pred_ids[pos]
+                # For each head, look up the predicted label:
+                for head_name in pred_ids_dict.keys():
+                    label_id = pred_ids_dict[head_name][chunk_idx][pos]
                     label_str = self.id2label[head_name][label_id]
-                    final_pred_labels[head_name][w_id] = label_str
+                    final_predictions[text_idx][head_name][w_id] = label_str
 
-                assigned_tokens.add(w_id)
+                assigned_tokens_for_text[text_idx].add(w_id)
 
-        return final_pred_labels
+        return final_predictions
+
+
+def log_pos_labels(pos_labels: dict[str, list[str]]):
+    token_cnt = len(pos_labels["tokens"])
+    token_idx_positions = range(token_cnt)
+    longest_token_lengths = [0 for _ in token_idx_positions]
+    for idx in token_idx_positions:
+        # Get longest token lengths per position
+        for head in pos_labels.keys():
+            if head == "text":
+                continue
+            else:
+                label_len = len(pos_labels[head][idx])
+                if label_len > longest_token_lengths[idx]:
+                    longest_token_lengths[idx] = label_len
+    log_blobs = []
+    for head, labels in pos_labels.items():
+        # Legible formatting for examples
+        if head == "text":
+            log_blobs.append(f"{head}{' ' * (12 - len(head))}{labels}")
+            positions_blob = ''.join([
+                f"{l},{' ' * (longest_token_lengths[i] - len(str(l)) + 3)}" if i != token_cnt - 1 else str(
+                    l)
+                for i, l in enumerate(token_idx_positions)])
+            log_blobs.append(f"idx{' ' * 9} {positions_blob}")
+        else:
+            label_blobs = []
+            for idx, label in enumerate(labels):
+                label_blobs.append(
+                    f"\"{label}\",{' ' * (longest_token_lengths[idx] - len(label) + 1)}" if idx != token_cnt - 1 else f"\"{label}\"")
+                if head == "tokens":
+                    continue
+            log_blobs.append(f"{head}{' ' * (12 - len(head))}[{''.join(label_blobs)}]")
+    logger.info(f"pos labels:\n" + ("\n".join(log_blobs)))
 
 
 if __name__ == "__main__":
-    predictor = MultiHeadPredictor("veryfansome/multi-classifier", subfolder="models/o3-mini_20250218")
+    from germ.observability.logging import setup_logging
+    setup_logging()
 
+    predictor = MultiHeadPredictor(
+        "veryfansome/multi-classifier", subfolder="models/ud_ewt_gum_pud_20250611")
     test_cases = [
-        "How to convince my parents to let me get a Ball python?",
+        "Hello world!",
+        "How should I convince my parents to let me get a Ball python?",
     ]
-    for case in test_cases:
-        predictions = predictor.predict(case)
-        for head_name, labels in predictions.items():
-            print(f"{head_name}: {labels}")
+    for prediction in predictor.predict_batch(test_cases):
+        log_pos_labels(prediction)
+

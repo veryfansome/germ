@@ -12,6 +12,7 @@ from germ.observability.annotations import measure_exec_seconds
 from germ.services.bot.chat import async_openai_client
 from germ.services.bot.websocket import (WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                                          WebSocketSendEventHandler, WebSocketSender, WebSocketSessionMonitor)
+from germ.services.models.predict.multi_predict import log_pos_labels
 from germ.settings import germ_settings
 from germ.utils.parsers import extract_markdown_page_elements, get_html_soup, strip_html_elements
 from germ.utils.patterns import naive_sentence_end_pattern
@@ -123,18 +124,17 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                         f"message {dt_created_ts}")
 
             p_block_sentences = []
+            # TODO: It make sense to do embeddings and POS labels for all sentences from all p_blocks at once
             for p_block_id, p_block_text in enumerate(p_blocks):
                 extracted_sentences = await process_p_block(p_block_text)
                 sentence_embeddings = (await get_text_embedding(extracted_sentences))["embeddings"]
+                pos_labels = await get_pos_labels(extracted_sentences)
                 logger.info(f"{len(extracted_sentences)} sentences extracted from conversation {conversation_id}, "
                             f"message {dt_created_ts}, paragraph {p_block_id}")
                 logger.info(f"extracted sentences {extracted_sentences}")
                 for sentence_idx, sentence in enumerate(extracted_sentences):
-                    logger.info(f"{sentence} >> {sentence_embeddings}")
-                    #pos_labels = await get_pos_labels(sentence)
-                    #log_pos_labels(pos_labels)
-                    pass
-
+                    logger.info(f"{sentence} >> {sentence_embeddings[sentence_idx]}")
+                    log_pos_labels(pos_labels[sentence_idx])
                 p_block_sentences.append(extracted_sentences)
 
             # TODO:
@@ -261,10 +261,10 @@ async def get_emotions_classifications(texts: list[str]):
             return await response.json()
 
 
-async def get_pos_labels(text: str):
+async def get_pos_labels(texts: list[str]):
     async with aiohttp.ClientSession() as session:
         async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/classification/ud",
-                                json={"text": text}) as response:
+                                json={"texts": texts}) as response:
             return await response.json()
 
 
@@ -273,40 +273,6 @@ async def get_text_embedding(texts: list[str]):
         async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/embedding",
                                 json={"texts": texts}) as response:
             return await response.json()
-
-
-def log_pos_labels(pos_labels: dict[str, list[str]]):
-    token_cnt = len(pos_labels["tokens"])
-    token_idx_positions = range(token_cnt)
-    longest_token_lengths = [0 for _ in token_idx_positions]
-    for idx in token_idx_positions:
-        # Get longest token lengths per position
-        for head in pos_labels.keys():
-            if head == "text":
-                continue
-            else:
-                label_len = len(pos_labels[head][idx])
-                if label_len > longest_token_lengths[idx]:
-                    longest_token_lengths[idx] = label_len
-    log_blobs = []
-    for head, labels in pos_labels.items():
-        # Legible formatting for examples
-        if head == "text":
-            log_blobs.append(f"{head}{' ' * (12 - len(head))}{labels}")
-            positions_blob = ''.join([
-                f"{l},{' ' * (longest_token_lengths[i] - len(str(l)) + 3)}" if i != token_cnt - 1 else str(
-                    l)
-                for i, l in enumerate(token_idx_positions)])
-            log_blobs.append(f"idx{' ' * 9} {positions_blob}")
-        else:
-            label_blobs = []
-            for idx, label in enumerate(labels):
-                label_blobs.append(
-                    f"\"{label}\",{' ' * (longest_token_lengths[idx] - len(label) + 1)}" if idx != token_cnt - 1 else f"\"{label}\"")
-                if head == "tokens":
-                    continue
-            log_blobs.append(f"{head}{' ' * (12 - len(head))}[{''.join(label_blobs)}]")
-    logger.info(f"pos labels:\n" + ("\n".join(log_blobs)))
 
 
 async def process_markdown_elements(markdown_elements):
