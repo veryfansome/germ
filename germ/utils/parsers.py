@@ -200,7 +200,34 @@ def extract_href_features(href: str):
 def extract_markdown_page_elements(text: str):
     extractor = MarkdownPageElementExtractor()
     mistune.create_markdown(renderer=extractor)(text)
-    return extractor.elements
+
+    code_blocks = []
+    text_blocks = []
+    scaffold = []
+    for element_idx, element in enumerate(extractor.elements):
+        element_copy = element.copy()
+        if element["tag"] == "block_code":
+            if element["text"] not in code_blocks:
+                code_blocks.append(element["text"])
+            element_copy["text"] = code_blocks.index(element["text"])
+        elif element["tag"] == "list":
+            # TODO
+            pass
+        elif element["tag"] == "paragraph":
+            for level, heading in element["headings"].items():
+                if heading["text"] not in text_blocks:
+                    text_blocks.append(heading["text"])
+                element_copy["headings"][level] = text_blocks.index(heading["text"])
+            for sentence_idx, sentence in enumerate(element["text"]):
+                if sentence not in text_blocks:
+                    text_blocks.append(sentence)
+                element_copy["text"][sentence_idx] = text_blocks.index(sentence)
+        scaffold.append(element_copy)
+    return {
+        "scaffold": scaffold,
+        "code": code_blocks,
+        "text": text_blocks,
+    }
 
 
 def fqdn_to_proper_noun(fqdn: str):

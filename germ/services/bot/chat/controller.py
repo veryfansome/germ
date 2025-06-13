@@ -68,18 +68,6 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             message_elements = await run_in_threadpool(extract_markdown_page_elements, newest_message_content)
             logger.info(f"parsed message: {message_elements}")
 
-            code_to_enrich = []
-            text_to_enrich = []
-            scaffolds = []
-            for element_idx, element in enumerate(message_elements):
-                element_copy = element.copy()
-                if element["tag"] == "paragraph":
-                    for sentence_idx, sentence in enumerate(element["text"]):
-                        text_to_enrich.append(sentence)
-                        element_copy["text"][sentence_idx] = len(text_to_enrich) - 1  # Index position
-                scaffolds.append(element_copy)
-            logger.info(f"text_to_enrich: {text_to_enrich}")
-            logger.info(f"scaffolds: {scaffolds}")
 
             #p_block_sentences = []
             ## TODO: It make sense to do embeddings and POS labels for all sentences from all p_blocks at once
