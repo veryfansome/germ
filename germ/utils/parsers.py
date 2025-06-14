@@ -6,7 +6,7 @@ import mistune
 import os
 import re
 from bs4 import BeautifulSoup
-from bs4.element import PageElement as BeautifulSoupPageElement
+from bs4.element import PageElement
 from copy import copy
 from enum import Enum
 from pydantic import BaseModel
@@ -25,40 +25,40 @@ class TextElement(BaseModel):
     elements: list[Any] | None
 
 
-class PageElement(BaseModel):
+class DocElement(BaseModel):
     type: int
     headings: dict[int, TextElement] | None
 
 
-class PageElementType(Enum):
+class DocElementType(Enum):
     CODE_BLOCK = 1
     LIST = 2
     PARAGRAPH = 3
 
 
-class CodeElement(PageElement):
-    type: int = PageElementType.CODE_BLOCK
+class CodeElement(DocElement):
+    type: int = DocElementType.CODE_BLOCK
     text: list[int | str]
     language: str | None
 
 
-class ListElement(PageElement):
-    type: int = PageElementType.LIST
+class ListElement(DocElement):
+    type: int = DocElementType.LIST
     ordered: bool
     items: list[TextElement]
 
 
-class ParagraphElement(PageElement, TextElement):
-    type: int = PageElementType.PARAGRAPH
+class ParagraphElement(DocElement, TextElement):
+    type: int = DocElementType.PARAGRAPH
 
 
-class ParsedMarkdownPage(BaseModel):
+class ParsedDoc(BaseModel):
     scaffold: list[CodeElement | ListElement | ParagraphElement] = []
     code: list[str] = []
     text: list[str] = []
 
 
-class MarkdownPageElementExtractor(mistune.HTMLRenderer):
+class MarkdownDocExtractor(mistune.HTMLRenderer):
     def __init__(self):
         super().__init__()
         self._headings_context: dict[int, TextElement] = {}
@@ -237,36 +237,36 @@ def extract_href_features(href: str):
     return artifacts
 
 
-def extract_markdown_page_elements(text: str) -> ParsedMarkdownPage:
-    extractor = MarkdownPageElementExtractor()
+def parse_markdown_doc(text: str) -> ParsedDoc:
+    extractor = MarkdownDocExtractor()
     mistune.create_markdown(renderer=extractor)(text)
 
-    parsed_page = ParsedMarkdownPage()
+    doc = ParsedDoc()
     for element_idx, element in enumerate(extractor.elements):
         element_copy = element.model_copy(deep=True)
         for level, heading in element.headings.items():
             for blob_idx, blob in enumerate(heading.text):
-                if blob not in parsed_page.text:
-                    parsed_page.text.append(blob)
-                element_copy.headings[level].text[blob_idx] = parsed_page.text.index(blob)
-        if element.type == PageElementType.CODE_BLOCK:
+                if blob not in doc.text:
+                    doc.text.append(blob)
+                element_copy.headings[level].text[blob_idx] = doc.text.index(blob)
+        if element.type == DocElementType.CODE_BLOCK:
             for chunk_idx, chunk in enumerate(element.text):
-                if chunk not in parsed_page.code:
-                    parsed_page.code.append(chunk)
-                element_copy.text[chunk_idx] = parsed_page.code.index(chunk)
-        elif element.type == PageElementType.LIST:
+                if chunk not in doc.code:
+                    doc.code.append(chunk)
+                element_copy.text[chunk_idx] = doc.code.index(chunk)
+        elif element.type == DocElementType.LIST:
             for item_idx, item in enumerate(element.items):
                 for sentence_idx, sentence in enumerate(item.text):
-                    if sentence not in parsed_page.text:
-                        parsed_page.text.append(sentence)
-                    element_copy.items[item_idx].text[sentence_idx] = parsed_page.text.index(sentence)
-        elif element.type == PageElementType.PARAGRAPH:
+                    if sentence not in doc.text:
+                        doc.text.append(sentence)
+                    element_copy.items[item_idx].text[sentence_idx] = doc.text.index(sentence)
+        elif element.type == DocElementType.PARAGRAPH:
             for sentence_idx, sentence in enumerate(element.text):
-                if sentence not in parsed_page.text:
-                    parsed_page.text.append(sentence)
-                element_copy.text[sentence_idx] = parsed_page.text.index(sentence)
-        parsed_page.scaffold.append(element_copy)
-    return parsed_page
+                if sentence not in doc.text:
+                    doc.text.append(sentence)
+                element_copy.text[sentence_idx] = doc.text.index(sentence)
+        doc.scaffold.append(element_copy)
+    return doc
 
 
 def fqdn_to_proper_noun(fqdn: str):
@@ -320,10 +320,7 @@ def split_sentences(p_text: str) -> list[str]:
     return sentences
 
 
-def strip_html_elements(
-        soup: BeautifulSoup | BeautifulSoupPageElement,
-        tag: str = None
-) -> (str, BeautifulSoupPageElement):
+def strip_html_elements(soup: BeautifulSoup | PageElement, tag: str = None) -> (str, PageElement):
     text_elements = []
     html_elements = {}
     for idx, element in enumerate(soup.find_all() if tag is None else soup.find(tag)):
