@@ -12,13 +12,13 @@ from germ.services.bot.websocket import (WebSocketDisconnectEventHandler, WebSoc
                                          WebSocketSendEventHandler, WebSocketSender, WebSocketSessionMonitor)
 from germ.services.models.predict.multi_predict import log_pos_labels
 from germ.settings import germ_settings
-from germ.utils.parsers import PageElementType, ParsedMarkdownPage, extract_markdown_page_elements
+from germ.utils.parsers import DocElementType, ParsedDoc, parse_markdown_doc
 
 logger = logging.getLogger(__name__)
 
 
 class MessageMeta(BaseModel):
-    doc: ParsedMarkdownPage
+    doc: ParsedDoc
     pos: list[dict[str, str | list[str]]]
     text_embs: list[list[float]]
 
@@ -54,32 +54,47 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.sig_to_conversation_id.get(text_sig, set()).add(conversation_id)
 
         if text_sig not in self.sig_to_message_meta:
+            # Parse message into a ParsedMarkdownPage, which includes a document scaffold (with idx pointers to text),
+            # list of text blobs, and list of code blobs.
             parsed_message = await run_in_threadpool(
-                extract_markdown_page_elements, chat_request.messages[-1].content
+                parse_markdown_doc, chat_request.messages[-1].content
             )
+            # Get embeddings and POS labels
             text_embs, pos = await asyncio.gather(*[
                 get_text_embedding(parsed_message.text),
                 get_pos_labels(parsed_message.text)
             ])
+            # Cache results
             self.sig_to_message_meta[text_sig] = meta = MessageMeta(
                 doc=parsed_message, pos=pos, text_embs=text_embs["embeddings"]
             )
         else:
             meta = self.sig_to_message_meta[text_sig]
 
-        for element_idx, element in enumerate(meta.doc.scaffold):
-            if element.type == PageElementType.CODE_BLOCK:
+        # Walk through each element of
+        all_hydrated_elements = []
+        for element_idx, scaffold_element in enumerate(meta.doc.scaffold):
+            hydrated_headings = {}
+            for level, heading in scaffold_element.headings.items():
+                hydrated_headings[level] = [(meta.text_embs[idx], meta.pos[idx]) for idx in heading.text]
+
+            hydrated_element = []
+            if scaffold_element.type == DocElementType.CODE_BLOCK:
                 pass  # TODO
-            elif element.type == PageElementType.LIST:
-                for item_idx, item in enumerate(element.items):
-                    for sentence_idx in item.text:
-                        logger.info(f"{meta.doc.text[sentence_idx]} >> {meta.text_embs[sentence_idx]}")
-                        log_pos_labels(meta.pos[sentence_idx])
-            elif element.type == PageElementType.PARAGRAPH:
-                for sentence_idx in element.text:
-                    logger.info(f"{meta.doc.text[sentence_idx]} >> {meta.text_embs[sentence_idx]}")
-                    log_pos_labels(meta.pos[sentence_idx])
-                    #await self.knowledge_graph.match_synset(tokens=meta.pos[sentence_idx]["tokens"])
+            elif scaffold_element.type == DocElementType.LIST:
+                for item_idx, item in enumerate(scaffold_element.items):
+                    for text_idx in item.text:
+                        hydrated_element.append((meta.text_embs[text_idx], meta.pos[text_idx]))
+            elif scaffold_element.type == DocElementType.PARAGRAPH:
+                for text_idx in scaffold_element.text:
+                    hydrated_element.append((meta.text_embs[text_idx], meta.pos[text_idx]))
+
+            for emb, pos in hydrated_element:
+                logger.info(f"{pos['text']} >> {emb}")
+                log_pos_labels(pos)
+                #await self.knowledge_graph.match_synset(tokens=meta.pos[sentence_idx]["tokens"])
+
+            all_hydrated_elements.append((hydrated_headings, hydrated_element))
 
         # Send to LLM
         await self.delegate.on_receive(user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender)

@@ -45,10 +45,21 @@ async def lifespan(app: FastAPI):
     :return:
     """
     # Started
+    logger.info("Starting")
+
+    warmup_payload = TextListPayload(texts=["Hello, world!"])
+    await post_text_embedding(warmup_payload)
+    await post_text_classification_ud(warmup_payload)
+
+    logger.info("Started")
 
     yield
 
+    logger.info("Stopping")
+
     # Stopping
+
+    logger.info("Stopped")
 
 
 model_service = FastAPI(lifespan=lifespan)

@@ -60,7 +60,20 @@ async def _link_chat_user_to_conversation(tx, user_id: int, conversation_id: int
     return await tx.run(query, user_id=user_id, conversation_id=conversation_id)
 
 
-async def _match_synset(tx, tokens):
+async def _match_synset(tx, lemma: str, pos: str):
+    query = """
+    MATCH (n1 {pos: $pos})-[r1]-(m1)
+    WHERE $lemma IN n1.lemmas
+    MATCH (n2)-[r2:DEFINES]-(m1)
+    RETURN n2,r2,m1
+    """
+    results = []
+    async for record in await tx.run(query, lemma=lemma, pos=pos):
+        results.append(record)
+    return results
+
+
+async def _match_synset_with_unwind(tx, tokens):
     query = """
     UNWIND $tokens AS token
     MATCH (s1:Synset {lemma: token})-[r1]-(s2)
@@ -136,12 +149,9 @@ class KnowledgeGraph:
                             f"(user:ChatUser {{user_id: {user_id}}})")
             return results
 
-    async def match_synset(self, tokens):
+    async def match_synset(self, lemma: str, pos: str):
         async with self.driver.session() as session:
-            results = await session.execute_write(_match_synset, tokens=tokens)
-            for result in results:
-                logger.info(result)
-            return results
+            return await session.execute_read(_match_synset, lemma=lemma, pos=pos)
 
     async def shutdown(self):
         if self.driver:
