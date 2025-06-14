@@ -80,35 +80,39 @@ class DefaultWebSocketSender(WebSocketSender):
 
     async def send_message(self, chat_response: ChatResponse):
         chat_response.conversation_ident = encrypt_integer(self.conversation_id, ENCRYPTION_KEY)
-        await self.connection.send_text(chat_response.model_dump_json())
-
-        if chat_response.model != "none":
-            async_tasks = []
-            dt_created, text_sig = await new_chat_message_sent(self.conversation_id, chat_response)
-            for handler in self.send_event_handlers:
-                async_tasks.append(asyncio.create_task(
-                    handler.on_send(self.conversation_id, dt_created, text_sig, chat_response)
-                ))
-            await asyncio.gather(*async_tasks)
+        try:
+            await self.connection.send_text(chat_response.model_dump_json())
+            if chat_response.model != "none":
+                async_tasks = []
+                dt_created, text_sig = await new_chat_message_sent(self.conversation_id, chat_response)
+                for handler in self.send_event_handlers:
+                    async_tasks.append(asyncio.create_task(
+                        handler.on_send(self.conversation_id, dt_created, text_sig, chat_response)
+                    ))
+                await asyncio.gather(*async_tasks)
+        except Exception:
+            logger.error(format_exc())
 
     async def send_reply(self, received_message_dt_created: datetime, chat_response: ChatResponse):
         chat_response.conversation_ident = encrypt_integer(self.conversation_id, ENCRYPTION_KEY)
-        await self.connection.send_text(chat_response.model_dump_json())
-
-        if chat_response.model != "none":
-            async_tasks = []
-            dt_created, text_sig = await new_chat_message_sent(self.conversation_id, chat_response)
-            await self.knowledge_graph.add_chat_message(self.conversation_id, dt_created)
-            async_tasks.append(asyncio.create_task(
-                self.knowledge_graph.link_chat_message_sent_to_chat_message_received(
-                    received_message_dt_created, dt_created, self.conversation_id)
-            ))
-            for handler in self.send_event_handlers:
+        try:
+            await self.connection.send_text(chat_response.model_dump_json())
+            if chat_response.model != "none":
+                async_tasks = []
+                dt_created, text_sig = await new_chat_message_sent(self.conversation_id, chat_response)
+                await self.knowledge_graph.add_chat_message(self.conversation_id, dt_created)
                 async_tasks.append(asyncio.create_task(
-                    handler.on_send(self.conversation_id, dt_created, text_sig, chat_response,
-                                    received_message_dt_created=received_message_dt_created)
+                    self.knowledge_graph.link_chat_message_sent_to_chat_message_received(
+                        received_message_dt_created, dt_created, self.conversation_id)
                 ))
-            await asyncio.gather(*async_tasks)
+                for handler in self.send_event_handlers:
+                    async_tasks.append(asyncio.create_task(
+                        handler.on_send(self.conversation_id, dt_created, text_sig, chat_response,
+                                        received_message_dt_created=received_message_dt_created)
+                    ))
+                await asyncio.gather(*async_tasks)
+        except Exception:
+            logger.error(format_exc())
 
 
 class InterceptingWebSocketSender(WebSocketSender):

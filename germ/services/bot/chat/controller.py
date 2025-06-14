@@ -1,7 +1,9 @@
-from datetime import datetime
-from starlette.concurrency import run_in_threadpool
 import aiohttp
+import asyncio
 import logging
+from datetime import datetime
+from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from germ.api.models import ChatRequest, ChatResponse
 from germ.database.neo4j import KnowledgeGraph
@@ -10,25 +12,15 @@ from germ.services.bot.websocket import (WebSocketDisconnectEventHandler, WebSoc
                                          WebSocketSendEventHandler, WebSocketSender, WebSocketSessionMonitor)
 from germ.services.models.predict.multi_predict import log_pos_labels
 from germ.settings import germ_settings
-from germ.utils.parsers import extract_markdown_page_elements
+from germ.utils.parsers import PageElementType, ParsedMarkdownPage, extract_markdown_page_elements
 
 logger = logging.getLogger(__name__)
 
 
-class MessageMeta:
-    def __init__(self, content: str, token_size: int):
-        self.content = content
-        self.token_size = token_size
-
-
-class VectorMeta:
-    def __init__(self, content: str, token_size: int, vector_id: int, vector, emotions, keywords):
-        self.content = content
-        self.emotions = emotions
-        self.keywords = keywords
-        self.token_size = token_size
-        self.vector = vector
-        self.vector_id = vector_id
+class MessageMeta(BaseModel):
+    doc: ParsedMarkdownPage
+    pos: list[dict[str, str | list[str]]]
+    text_embs: list[list[float]]
 
 
 class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
@@ -43,8 +35,6 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.conversations: dict[int, dict] = {}
         self.sig_to_conversation_id: dict[str, set] = {}
         self.sig_to_message_meta: dict[str, MessageMeta] = {}
-        self.sig_to_vector: dict[str, VectorMeta] = {}
-        self.vector_id_to_sig: dict[int, str] = {}
 
     async def on_disconnect(self, conversation_id: int):
         pass
@@ -58,35 +48,38 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 "messages": {},
                 "token_size": 0,
             }
-        dt_created_ts = int(dt_created.timestamp())
-        self.conversations[conversation_id]["messages"][dt_created_ts] = {
+        self.conversations[conversation_id]["messages"][int(dt_created.timestamp())] = {
             "user_id": user_id, "text_sig": text_sig
         }
+        self.sig_to_conversation_id.get(text_sig, set()).add(conversation_id)
 
-        newest_message_content = chat_request.messages[-1].content
         if text_sig not in self.sig_to_message_meta:
-            message_elements = await run_in_threadpool(extract_markdown_page_elements, newest_message_content)
-            logger.info(f"parsed message: {message_elements}")
-
-
-            #p_block_sentences = []
-            ## TODO: It make sense to do embeddings and POS labels for all sentences from all p_blocks at once
-            #for p_block_id, p_block_text in enumerate(p_blocks):
-            #    extracted_sentences = await process_p_block(p_block_text)
-
-            #    sentence_embeddings = (await get_text_embedding(extracted_sentences))["embeddings"]
-            #    pos_labels = await get_pos_labels(extracted_sentences)
-            #    logger.info(f"{len(extracted_sentences)} sentences extracted from conversation {conversation_id}, "
-            #                f"message {dt_created_ts}, paragraph {p_block_id}")
-            #    logger.info(f"extracted sentences {extracted_sentences}")
-            #    for sentence_idx, sentence in enumerate(extracted_sentences):
-            #        logger.info(f"{sentence} >> {sentence_embeddings[sentence_idx]}")
-            #        log_pos_labels(pos_labels[sentence_idx])
-            #    p_block_sentences.append(extracted_sentences)
-
+            parsed_message = await run_in_threadpool(
+                extract_markdown_page_elements, chat_request.messages[-1].content
+            )
+            text_embs, pos = await asyncio.gather(*[
+                get_text_embedding(parsed_message.text),
+                get_pos_labels(parsed_message.text)
+            ])
+            self.sig_to_message_meta[text_sig] = meta = MessageMeta(
+                doc=parsed_message, pos=pos, text_embs=text_embs["embeddings"]
+            )
         else:
             meta = self.sig_to_message_meta[text_sig]
-            self.sig_to_conversation_id[text_sig].add(conversation_id)
+
+        for element_idx, element in enumerate(meta.doc.scaffold):
+            if element.type == PageElementType.CODE_BLOCK:
+                pass  # TODO
+            elif element.type == PageElementType.LIST:
+                for item_idx, item in enumerate(element.items):
+                    for sentence_idx in item.text:
+                        logger.info(f"{meta.doc.text[sentence_idx]} >> {meta.text_embs[sentence_idx]}")
+                        log_pos_labels(meta.pos[sentence_idx])
+            elif element.type == PageElementType.PARAGRAPH:
+                for sentence_idx in element.text:
+                    logger.info(f"{meta.doc.text[sentence_idx]} >> {meta.text_embs[sentence_idx]}")
+                    log_pos_labels(meta.pos[sentence_idx])
+                    #await self.knowledge_graph.match_synset(tokens=meta.pos[sentence_idx]["tokens"])
 
         # Send to LLM
         await self.delegate.on_receive(user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender)

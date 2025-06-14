@@ -60,6 +60,19 @@ async def _link_chat_user_to_conversation(tx, user_id: int, conversation_id: int
     return await tx.run(query, user_id=user_id, conversation_id=conversation_id)
 
 
+async def _match_synset(tx, tokens):
+    query = """
+    UNWIND $tokens AS token
+    MATCH (s1:Synset {lemma: token})-[r1]-(s2)
+    MATCH (s3)-[r2]-(s4:Synset {lemma: token})
+    RETURN s1, r1, s2, s3, r2, s4
+    """
+    results = []
+    async for record in await tx.run(query, tokens=tokens):
+        results.append(record)
+    return results
+
+
 class KnowledgeGraph:
     def __init__(self, driver: AsyncGraphDatabase | None = None):
         self.driver = driver if driver is not None else new_async_driver()
@@ -121,6 +134,13 @@ class KnowledgeGraph:
                 logger.info("MERGE "
                             f"(conversation:Conversation {{conversation_id: {conversation_id}}})-[rel:WITH]->"
                             f"(user:ChatUser {{user_id: {user_id}}})")
+            return results
+
+    async def match_synset(self, tokens):
+        async with self.driver.session() as session:
+            results = await session.execute_write(_match_synset, tokens=tokens)
+            for result in results:
+                logger.info(result)
             return results
 
     async def shutdown(self):
