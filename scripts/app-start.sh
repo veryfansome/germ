@@ -11,6 +11,7 @@ source germ_venv/bin/activate
 
 if grep -q 'germ.services.bot.main' <<<"$1"; then
     ./scripts/update-static-files.sh
+    python -m germ.data.wordnet_graph &
 fi
 mkdir -p /var/log/germ
 

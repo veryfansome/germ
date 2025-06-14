@@ -6,7 +6,10 @@ import mistune
 import os
 import re
 from bs4 import BeautifulSoup
+from bs4.element import PageElement as BeautifulSoupPageElement
 from copy import copy
+from enum import Enum
+from pydantic import BaseModel
 from typing import Any
 
 from germ.data.iana import IanaTLDCacher
@@ -17,57 +20,94 @@ logger = logging.getLogger(__name__)
 iana_data = IanaTLDCacher()
 
 
+class TextElement(BaseModel):
+    text: list[int | str]
+    elements: list[Any] | None
+
+
+class PageElement(BaseModel):
+    type: int
+    headings: dict[int, TextElement] | None
+
+
+class PageElementType(Enum):
+    CODE_BLOCK = 1
+    LIST = 2
+    PARAGRAPH = 3
+
+
+class CodeElement(PageElement):
+    type: int = PageElementType.CODE_BLOCK
+    text: list[int | str]
+    language: str | None
+
+
+class ListElement(PageElement):
+    type: int = PageElementType.LIST
+    ordered: bool
+    items: list[TextElement]
+
+
+class ParagraphElement(PageElement, TextElement):
+    type: int = PageElementType.PARAGRAPH
+
+
+class ParsedMarkdownPage(BaseModel):
+    scaffold: list[CodeElement | ListElement | ParagraphElement] = []
+    code: list[str] = []
+    text: list[str] = []
+
+
 class MarkdownPageElementExtractor(mistune.HTMLRenderer):
     def __init__(self):
         super().__init__()
-        self._headings_context = {}
-        self._list_items = []
-        self.elements = []
+        self._headings_context: dict[int, TextElement] = {}
+        self._list_items: list[TextElement] = []
+        self.elements: list[CodeElement | ListElement | ParagraphElement] = []
 
     def block_code(self, code, info=None):
-        self.elements.append({
-            "tag": "block_code",
-            "language": info,
-            "text": code,
-            "headings": copy(self._headings_context),
-        })
+        self.elements.append(CodeElement(
+            language=info,
+            text=[code],
+            headings=copy(self._headings_context),
+        ))
         return super().block_code(code, info)
 
     def heading(self, text, level, **attrs):
         p_soup = get_html_soup(f"<p>{text}</p>")
         p_text, p_elements = strip_html_elements(p_soup, "p")
-        self._headings_context[level] = {"text": text, "elements": p_elements}
+        self._headings_context[level] = TextElement(
+            text=split_sentences(p_text),
+            elements=p_elements,
+        )
         return super().heading(text, level, **attrs)
 
     def list(self, text: str, ordered: bool, **attrs: Any) -> str:
-        self.elements.append({
-            "tag": "list",
-            "ordered": ordered,
-            "items": copy(self._list_items),
-            "headings": copy(self._headings_context),
-        })
+        self.elements.append(ListElement(
+            ordered=ordered,
+            items=copy(self._list_items),
+            headings=copy(self._headings_context),
+        ))
         self._list_items = []
         return super().list(text, ordered, **attrs)
 
     def list_item(self, text):
         p_soup = get_html_soup(f"<p>{text}</p>")
         p_text, p_elements = strip_html_elements(p_soup, "p")
-        self._list_items.append({
-            "tag": "list_item",
-            "text": p_text,
-            "elements": p_elements,
-        })
+        self._list_items.append(TextElement(
+            text=split_sentences(p_text),
+            elements=p_elements,
+        ))
         return super().list_item(text)
 
     def paragraph(self, text):
         p_soup = get_html_soup(f"<p>{text}</p>")
         p_text, p_elements = strip_html_elements(p_soup, "p")
-        self.elements.append({
-            "tag": "paragraph",
-            "text": split_sentences(p_text),
-            "elements": p_elements,
-            "headings": copy(self._headings_context),
-        })
+        self.elements.append(ParagraphElement(
+            text=split_sentences(p_text),
+            elements=p_elements,
+            headings=copy(self._headings_context),
+        ))
         return super().paragraph(text)
 
 
@@ -197,37 +237,36 @@ def extract_href_features(href: str):
     return artifacts
 
 
-def extract_markdown_page_elements(text: str):
+def extract_markdown_page_elements(text: str) -> ParsedMarkdownPage:
     extractor = MarkdownPageElementExtractor()
     mistune.create_markdown(renderer=extractor)(text)
 
-    code_blocks = []
-    text_blocks = []
-    scaffold = []
+    parsed_page = ParsedMarkdownPage()
     for element_idx, element in enumerate(extractor.elements):
-        element_copy = element.copy()
-        if element["tag"] == "block_code":
-            if element["text"] not in code_blocks:
-                code_blocks.append(element["text"])
-            element_copy["text"] = code_blocks.index(element["text"])
-        elif element["tag"] == "list":
-            # TODO
-            pass
-        elif element["tag"] == "paragraph":
-            for level, heading in element["headings"].items():
-                if heading["text"] not in text_blocks:
-                    text_blocks.append(heading["text"])
-                element_copy["headings"][level] = text_blocks.index(heading["text"])
-            for sentence_idx, sentence in enumerate(element["text"]):
-                if sentence not in text_blocks:
-                    text_blocks.append(sentence)
-                element_copy["text"][sentence_idx] = text_blocks.index(sentence)
-        scaffold.append(element_copy)
-    return {
-        "scaffold": scaffold,
-        "code": code_blocks,
-        "text": text_blocks,
-    }
+        element_copy = element.model_copy(deep=True)
+        for level, heading in element.headings.items():
+            for blob_idx, blob in enumerate(heading.text):
+                if blob not in parsed_page.text:
+                    parsed_page.text.append(blob)
+                element_copy.headings[level].text[blob_idx] = parsed_page.text.index(blob)
+        if element.type == PageElementType.CODE_BLOCK:
+            for chunk_idx, chunk in enumerate(element.text):
+                if chunk not in parsed_page.code:
+                    parsed_page.code.append(chunk)
+                element_copy.text[chunk_idx] = parsed_page.code.index(chunk)
+        elif element.type == PageElementType.LIST:
+            for item_idx, item in enumerate(element.items):
+                for sentence_idx, sentence in enumerate(item.text):
+                    if sentence not in parsed_page.text:
+                        parsed_page.text.append(sentence)
+                    element_copy.items[item_idx].text[sentence_idx] = parsed_page.text.index(sentence)
+        elif element.type == PageElementType.PARAGRAPH:
+            for sentence_idx, sentence in enumerate(element.text):
+                if sentence not in parsed_page.text:
+                    parsed_page.text.append(sentence)
+                element_copy.text[sentence_idx] = parsed_page.text.index(sentence)
+        parsed_page.scaffold.append(element_copy)
+    return parsed_page
 
 
 def fqdn_to_proper_noun(fqdn: str):
@@ -281,7 +320,10 @@ def split_sentences(p_text: str) -> list[str]:
     return sentences
 
 
-def strip_html_elements(soup: BeautifulSoup, tag: str = None):
+def strip_html_elements(
+        soup: BeautifulSoup | BeautifulSoupPageElement,
+        tag: str = None
+) -> (str, BeautifulSoupPageElement):
     text_elements = []
     html_elements = {}
     for idx, element in enumerate(soup.find_all() if tag is None else soup.find(tag)):

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import warnings
 from difflib import SequenceMatcher
 from nltk.corpus.reader import WordNetCorpusReader
 
@@ -7,31 +8,21 @@ from germ.database.neo4j import new_async_driver
 
 logger = logging.getLogger(__name__)
 
+warnings.filterwarnings(
+    "ignore",
+    message="The multilingual functions are not available with this Wordnet version",
+    category=UserWarning
+)
+
 OEWN_PATH = "data/oewn2024"
 
 # TODO:
-#   - Verify bidirectional antonyms
 #   - Dedupe senses with identical connections
 
 async def main():
     driver = new_async_driver()
     reader = WordNetCorpusReader(OEWN_PATH, omw_reader=None)
     all_synsets = [s for s in reader.all_synsets()]
-
-    #foo_cnt = 0
-    #for synset in all_synsets:
-    #    foo = synset.similar_tos()
-    #    if foo:
-    #        print(f"{synset.name()} -> {foo}")
-    #        foo_cnt += 1
-    #    synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
-    #    #for lemma in synset.lemmas():
-    #    #    #if lemma.name() == synset_lemma:
-    #    #    for derived_form in lemma.derivationally_related_forms():
-    #    #        if lemma.name() != derived_form.name():
-    #    #            print(f"{lemma.name()} -> {derived_form}")
-    #print(f"{foo_cnt} foo synsets")
-    #exit()
 
     logger.info(f"Processing {len(all_synsets)} synsets")
     processors = [
@@ -57,25 +48,6 @@ async def main():
     for processor in processors:
         async with driver.session() as session:
             await session.execute_write(processor, all_synsets)
-
-    #async with driver.session() as session:
-    #    results = await session.execute_write(foo, [
-    #        "johnny", "cut", "down", "the", "apple", "tree", "yesterday",
-    #    ])
-    #    for record in results:
-    #        print(record)
-
-async def foo(tx, tokens):
-    query = """
-    UNWIND $tokens AS token
-    MATCH (s1:Synset {lemma: token})-[r1]-(s2)
-    MATCH (s3)-[r2]-(s4:Synset {lemma: token})
-    RETURN s1, r1, s2, s3, r2, s4
-    """
-    results = []
-    async for record in await tx.run(query, tokens=tokens):
-        results.append(record)
-    return results
 
 
 async def _process_also_see_batch(tx, in_struct):
@@ -207,6 +179,7 @@ async def process_derived_from_batch(tx, synsets):
                     })
     logger.info(f"Merging {len(in_struct)} derived from and {len(also_see_struct)} also-see relationships")
     await tx.run(query, in_struct=in_struct)
+    await _process_also_see_batch(tx, also_see_struct)
 
 
 async def process_entailment_batch(tx, synsets):
@@ -316,6 +289,7 @@ async def process_pertainym_batch(tx, synsets):
     MATCH (p:Synset {lemma: in_struct.pertainym_lemma, pos: in_struct.pertainym_pos, sense: in_struct.pertainym_sense})
     MERGE (p)-[:PERTAINYM_OF {pair: in_struct.pair}]->(s)
     """
+    also_see_struct = []
     in_struct = []
     for synset in synsets:
         synset_lemma, synset_pos, synset_sense = tokenize_synset_name(synset.name())
@@ -324,18 +298,24 @@ async def process_pertainym_batch(tx, synsets):
             #
             #   insufferably.r.02.insufferably -> [Lemma('insufferable.s.01.insufferable')]
             #
-            if synset_pos == "r":  # The WordNet data deviates from this pattern, but we enforce it.
-                # TODO: Send rest to ALSO_SEE?
-                for pertainym in lemma.pertainyms():
-                    pertainym_lemma, pertainym_pos, pertainym_sense = tokenize_synset_name(pertainym.synset().name())
+            for pertainym in lemma.pertainyms():
+                pertainym_lemma, pertainym_pos, pertainym_sense = tokenize_synset_name(pertainym.synset().name())
+                if synset_pos == "r":  # The WordNet data deviates from this pattern, but we enforce it.
                     in_struct.append({
                         "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
                         "pertainym_lemma": pertainym_lemma, "pertainym_pos": pertainym_pos, "pertainym_sense": pertainym_sense,
                         "pair": " >> ".join([f"{synset_pos}." + lemma.name().replace('_', ' '),
                                              f"{pertainym_pos}." + pertainym.name().replace('_', ' ')]),
                     })
-    logger.info(f"Merging {len(in_struct)} pertainym relationships")
+                else:
+                    # If not adverb, mark as ALSO_SEE
+                    also_see_struct.append({
+                        "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
+                        "relation_lemma": pertainym_lemma, "relation_pos": pertainym_pos, "relation_sense": pertainym_sense,
+                    })
+    logger.info(f"Merging {len(in_struct)} pertainym and {len(also_see_struct)} also-see relationships")
     await tx.run(query, in_struct=in_struct)
+    await _process_also_see_batch(tx, also_see_struct)
 
 
 async def process_region_domain_batch(tx, synsets):
