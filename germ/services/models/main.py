@@ -30,6 +30,7 @@ tracer = trace.get_tracer(__name__)
 # App
 
 text_embedding_model = SentenceTransformer('intfloat/e5-base-v2')
+text_embedding_model_dim = text_embedding_model.get_sentence_embedding_dimension()
 #text_emotions_classifier = GoEmotionsPredictor(
 #    "veryfansome/deberta-goemotions", subfolder="pos_weight_best")
 ud_token_multi_classifier = MultiHeadPredictor(
@@ -85,6 +86,11 @@ async def get_healthz():
 @model_service.get("/metrics")
 async def get_metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@model_service.get("/text/embedding/info")
+async def get_text_embedding_info():
+    return {"dim": text_embedding_model_dim}
 
 
 #@model_service.post("/text/classification/emotions")
