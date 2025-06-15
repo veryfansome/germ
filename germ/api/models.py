@@ -25,5 +25,5 @@ class TextListPayload(BaseModel):
     texts: list[str]
 
 
-class TextPayload(BaseModel):
-    text: str
+class EmbeddingRequestPayload(TextListPayload):
+    prompt: str = "query: "
