@@ -57,7 +57,7 @@ async def _process_also_see_batch(tx, in_struct):
     MATCH (r:Synset {lemma: in_struct.relation_lemma, pos: in_struct.relation_pos, sense: in_struct.relation_sense})
     MERGE (r)-[:ALSO_SEE]-(s)
     """
-    logger.info(f"Merging {len(in_struct)} also-sees relationships")
+    logger.info(f"Merging {len(in_struct)} also-see relationships")
     await tx.run(query, in_struct=in_struct)
 
 

@@ -14,6 +14,8 @@ services:
         condition: service_completed_successfully
       jaeger-init:
         condition: service_completed_successfully
+      models:
+        condition: service_healthy
       prometheus-init:
         condition: service_completed_successfully
       test:
