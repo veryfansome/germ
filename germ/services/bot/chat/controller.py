@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from germ.api.models import ChatRequest, ChatResponse
-from germ.data.vector_anchors import intent_anchors
+from germ.data.vector_anchors import emotion_anchors, intent_anchors, topic_anchors
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
 from germ.services.bot.websocket import (WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
@@ -36,8 +36,12 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.delegate = delegate
 
         self.conversations: dict[int, dict] = {}
+        self.faiss_emotion: faiss.IndexIDMap | None = None
         self.faiss_intent: faiss.IndexIDMap | None = None
+        self.faiss_topic: faiss.IndexIDMap | None = None
+        self.id_to_emotion: dict[int, str] = {i: k for i, k in enumerate(emotion_anchors)}
         self.id_to_intent: dict[int, str] = {i: k for i, k in enumerate(intent_anchors)}
+        self.id_to_topic: dict[int, str] = {i: k for i, k in enumerate(topic_anchors)}
         self.sig_to_conversation_id: dict[str, set] = {}
         self.sig_to_message_meta: dict[str, MessageMeta] = {}
 
@@ -112,10 +116,18 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 interrogative = "Int" in pos["Mood"] or (
                         "?" in pos["tokens"] and pos["pos"][pos["tokens"].index("?")] == "PUNCT"
                 )
-                logger.info(f"Intent signals: Exc:{exclamatory} Imp:{imperative}, "
+                logger.info(f"Grammatical intent signals: Exc:{exclamatory} Imp:{imperative}, "
                             f"Ind:{indicative}, Int:{interrogative}")
-                await run_in_threadpool(search_faiss_index, self.faiss_intent, emb, self.id_to_intent)
-                #logger.info(f"{pos['text']} >> {emb}")
+
+                emotion_labels, intent_labels, topic_labels = await asyncio.gather(*[
+                    run_in_threadpool(search_faiss_index, self.faiss_emotion, emb, self.id_to_emotion),
+                    run_in_threadpool(search_faiss_index, self.faiss_intent, emb, self.id_to_intent),
+                    run_in_threadpool(search_faiss_index, self.faiss_topic, emb, self.id_to_topic),
+                ])
+                logger.info(f"Embeddings emotion signals: {emotion_labels}")
+                logger.info(f"Embeddings intent signals: {intent_labels}")
+                logger.info(f"Embeddings topic signals: {topic_labels}")
+
                 log_pos_labels(pos)
                 #await self.knowledge_graph.match_synset(tokens=meta.pos[sentence_idx]["tokens"])
                 #
@@ -129,9 +141,17 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
     async def on_start(self):
         embedding_info = await get_text_embedding_info()
+        self.faiss_emotion = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
         self.faiss_intent = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
-        for idx, emb in enumerate((await get_text_embedding(intent_anchors))["embeddings"]):
-            await run_in_threadpool(index_embedding, self.faiss_intent.add_with_ids, emb, idx)
+        self.faiss_topic = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
+
+        for index, anchors in [
+            (self.faiss_emotion, emotion_anchors),
+            (self.faiss_intent, intent_anchors),
+            (self.faiss_topic, topic_anchors)
+        ]:
+            for idx, emb in enumerate((await get_text_embedding(anchors))["embeddings"]):
+                await run_in_threadpool(index_embedding, index.add_with_ids, emb, idx)
 
     async def on_tick(self, conversation_id: int, ws_sender: WebSocketSender):
         logger.info(f"conversation {conversation_id} is still active")
@@ -167,8 +187,9 @@ def search_faiss_index(index: faiss.IndexIDMap, embedding, id2result: dict[int, 
     vector = np.array([embedding], dtype=np.float32)
     faiss.normalize_L2(vector)
 
+    results = []
     sim_scores, neighbors = index.search(vector, num_results)
-    for rank, (vector_id, sim_score) in enumerate(zip(neighbors[0], sim_scores[0]), 1):
+    for vector_id, sim_score in zip(neighbors[0], sim_scores[0]):
         if vector_id != -1 and sim_score > min_sim_score:  # -1 means no match
-            logger.info(f"{rank:>2}. vector_id={vector_id} sim={sim_score:.4f} result={id2result[vector_id]}")
-    #return results
+            results.append((id2result[vector_id], sim_score))
+    return results
