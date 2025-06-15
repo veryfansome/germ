@@ -150,7 +150,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             (self.faiss_intent, intent_anchors),
             (self.faiss_topic, topic_anchors)
         ]:
-            for idx, emb in enumerate((await get_text_embedding(anchors))["embeddings"]):
+            for idx, emb in enumerate((await get_text_embedding(anchors, prompt="passage: "))["embeddings"]):
                 await run_in_threadpool(index_embedding, index.add_with_ids, emb, idx)
 
     async def on_tick(self, conversation_id: int, ws_sender: WebSocketSender):
@@ -164,10 +164,10 @@ async def get_pos_labels(texts: list[str]):
             return await response.json()
 
 
-async def get_text_embedding(texts: list[str]):
+async def get_text_embedding(texts: list[str], prompt: str = "query: "):
     async with aiohttp.ClientSession() as session:
         async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/embedding",
-                                json={"texts": texts}) as response:
+                                json={"texts": texts, "prompt": prompt}) as response:
             return await response.json()
 
 
