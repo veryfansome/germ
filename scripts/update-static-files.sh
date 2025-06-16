@@ -7,14 +7,6 @@ TEMPLATED_STATIC_FILES=(
   "register.html"
 )
 
-if ! [ -d data/oewn2024 ]; then
-    curl -L \
-        -o data/english-wordnet-2024.zip \
-        https://github.com/globalwordnet/english-wordnet/releases/download/2024-edition/english-wordnet-2024.zip
-    unzip data/english-wordnet-2024.zip -d data
-    rm data/english-wordnet-2024.zip
-fi
-
 source germ_venv/bin/activate
 
 # VERSION_SIGNATURE for cache busting
