@@ -49,6 +49,22 @@ services:
         max-size: "250m"
         max-file: "3"
 
+  data:
+    networks: [bots]
+    container_name: germ-data
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      test:
+        condition: service_completed_successfully
+    image: "germ:latest"
+    volumes:
+      - ./:/src:rw
+      - nltk-data:/root/nltk_data
+    working_dir: /src
+    environment: *local-dev
+    command: [ "scripts/bootstrap-data.sh" ]
+
   db-migrate:
     networks: [bots]
     container_name: germ-db-migrate
