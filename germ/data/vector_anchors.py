@@ -69,11 +69,15 @@ emotion_anchors = [
 ]
 
 intent_anchors = [
-    "A command.",
-    #"A fact.",
-    "A statement.",
-    "An affirmation.",
-    "An outburst.",
+    "Comfort me.",
+    "Enlighten me.",
+    "Help me.",
+    "Know this.",
+    "Maybe.",
+    "No.",
+    "Praise me.",
+    "Show me.",
+    "Yes.",
 ]
 
 topic_anchors = [

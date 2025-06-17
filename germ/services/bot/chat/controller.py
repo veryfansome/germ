@@ -183,7 +183,7 @@ def index_embedding(index_func, embedding, row_id: int):
     index_func(vector, np.array([row_id], dtype=np.int64))
 
 def search_faiss_index(index: faiss.IndexIDMap, embedding, id2result: dict[int, str],
-                       num_results: int = 3, min_sim_score: float = 0.3):
+                       num_results: int = 3, min_sim_score: float = 0.75):
     vector = np.array([embedding], dtype=np.float32)
     faiss.normalize_L2(vector)
 
