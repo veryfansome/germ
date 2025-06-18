@@ -1,6 +1,7 @@
 import aiohttp
 import asyncio
 import faiss
+import inflect
 import logging
 import numpy as np
 from datetime import datetime
@@ -18,6 +19,8 @@ from germ.settings import germ_settings
 from germ.utils.parsers import DocElementType, ParsedDoc, parse_markdown_doc
 
 logger = logging.getLogger(__name__)
+
+infect_eng = inflect.engine()
 
 
 class MessageMeta(BaseModel):
@@ -110,14 +113,14 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             #   - Learn new reactions to existing patterns
             # - Instinctive vs learned behavior?
             for emb, pos in hydrated_element:
-                exclamatory = "!" in pos["tokens"] and pos["pos"][pos["tokens"].index("!")] == "PUNCT"
-                imperative = "Imp" in pos["Mood"]
-                indicative = "Ind" in pos["Mood"]
-                interrogative = "Int" in pos["Mood"] or (
+                is_exclamatory = "!" in pos["tokens"] and pos["pos"][pos["tokens"].index("!")] == "PUNCT"
+                is_imperative = "Imp" in pos["Mood"]
+                is_indicative = "Ind" in pos["Mood"]
+                is_interrogative = "Int" in pos["Mood"] or (
                         "?" in pos["tokens"] and pos["pos"][pos["tokens"].index("?")] == "PUNCT"
                 )
-                logger.info(f"Grammatical intent signals: Exc:{exclamatory} Imp:{imperative}, "
-                            f"Ind:{indicative}, Int:{interrogative}")
+                logger.info(f"Grammatical intent signals: Exc:{is_exclamatory} Imp:{is_imperative}, "
+                            f"Ind:{is_indicative}, Int:{is_interrogative}")
 
                 emotion_labels, intent_labels, topic_labels = await asyncio.gather(*[
                     run_in_threadpool(search_faiss_index, self.faiss_emotion, emb, self.id_to_emotion),
@@ -129,6 +132,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 logger.info(f"Embeddings topic signals: {topic_labels}")
 
                 log_pos_labels(pos)
+                extract_noun_groups(pos)
                 #await self.knowledge_graph.match_synset(tokens=meta.pos[sentence_idx]["tokens"])
                 #
             all_hydrated_elements.append((hydrated_headings, hydrated_element))
@@ -157,11 +161,129 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         logger.info(f"conversation {conversation_id} is still active")
 
 
+def extract_label_groups(labels: list[str], target_labels: set[str] = None):
+    """
+    Given a list of labels (e.g. ["X", "X", "NN", "NN", "X", "X", "NNS", "X"]) and target labels
+    (e.g. [NN, NNS, NNP, NNPS]), this function will return a list of consecutive index grouping of target labels.
+
+    For example, given:
+        ["O", "O", "NN", "NN", "O", "O", "NNS", "O"]
+    this function would return:
+        [[2, 3], [6]]
+
+    Args:
+        labels (list of str): Token labels
+        target_labels (set of str): The set of tags to target.
+
+    Returns:
+        list of lists of int: A list where each sub-list contains consecutive indices
+                              of labels that match NN, NNS, NNP, NNPS.
+    """
+    groups = []
+    current_group = []
+    for idx, label in enumerate(labels):
+        if (label in target_labels) if target_labels is not None else label != "X":
+            # If current_group is empty or the current idx is consecutive (i.e., previous index + 1),
+            # append to current_group. Otherwise, start a new group.
+            if current_group and idx == current_group[-1] + 1:
+                current_group.append(idx)
+            else:
+                if current_group:
+                    groups.append(current_group)
+                current_group = [idx]
+        else:
+            if current_group:
+                groups.append(current_group)
+                current_group = []
+    # If there's an open group at the end, add it
+    if current_group:
+        groups.append(current_group)
+    return groups
+
+
+def extract_noun_groups(label_dict: dict[str, list[str]]):
+    token_cnt = len(label_dict["tokens"])
+    idx_to_noun_group = {}
+    idx_to_noun_joined_base_form = {}
+    idx_to_noun_joined_raw_form = {}
+    # Extract consecutive NN* groups and split further if needed.
+    for noun_group in extract_label_groups(label_dict["xpos"], target_labels={"NN", "NNS", "NNP", "NNPS"}):
+        grp_stop_idx = noun_group[-1] + 1
+        grp_start_idx = None
+        joined_base_form = None
+        joined_raw_form = None
+        for idx in noun_group:
+            if (joined_base_form is None
+                    and is_plausible_noun_phrase(label_dict["deprel"][idx:grp_stop_idx])):
+                # Look for joined base form from this idx to end of group
+                joined_base_form = " ".join([get_noun_base_form(
+                    label_dict["tokens"][idx], label_dict["xpos"][idx]
+                ).lower() for idx in noun_group])
+                joined_raw_form = " ".join([label_dict["tokens"][idx] for idx in noun_group])
+                grp_start_idx = idx
+            if joined_base_form is not None:
+                # Map each idx to group and joined form
+                idx_to_noun_group[idx] = list(range(grp_start_idx, grp_stop_idx))
+                idx_to_noun_joined_base_form[idx] = joined_base_form
+                idx_to_noun_joined_raw_form[idx] = joined_raw_form
+            else:
+                # Map this idx to this token's base form
+                idx_to_noun_group[idx] = [idx]
+                idx_to_noun_joined_base_form[idx] = get_noun_base_form(
+                    label_dict["tokens"][idx], label_dict["xpos"][idx]).lower()
+                idx_to_noun_joined_raw_form[idx] = label_dict["tokens"][idx]
+    # Iterate through noun groups and determine if they have an associated determiner or possessive word
+    idx_to_noun_det_or_pos = {}
+    logger.info(f"idx_to_noun_group: {idx_to_noun_group}")
+    for noun_group in idx_to_noun_group.values():
+        dt_or_pos_idx = find_first_from_right(
+            label_dict["xpos"][:noun_group[0]], {"DT", "POS", "PRP$"})
+        if dt_or_pos_idx == -1 and noun_group[-1] < token_cnt - 2:
+            next_idx = noun_group[-1] + 1
+            if label_dict["xpos"][next_idx] in {"IN"}:
+                dt_or_pos_idx = find_first_from_left(
+                    label_dict["xpos"][next_idx + 1:], {"NN", "NNS", "NNP", "NNPS", "PRP$"})
+        logger.info(f"noun: det_or_pos={dt_or_pos_idx} noun_group={noun_group} "
+                    f"word_or_phrase='{idx_to_noun_joined_base_form[noun_group[0]]}'")
+
+
+def find_first_from_left(labels: list[str], target_labels: set[str]):
+    """
+    Returns the index of the first label (from the left) in 'labels' that is also in 'target_labels'.
+    If no label matches, returns -1.
+    """
+    for i, label in enumerate(labels):
+        if label in target_labels:
+            return i
+    return -1
+
+
+def find_first_from_right(labels, target_labels):
+    """
+    Returns the index of the first label (from the right) in 'labels' that is also in 'target_labels'.
+    If no label matches, returns -1.
+    """
+    for i in range(len(labels) - 1, -1, -1):
+        if labels[i] in target_labels:
+            return i
+    return -1
+
+
 async def get_pos_labels(texts: list[str]):
     async with aiohttp.ClientSession() as session:
         async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/classification/ud",
                                 json={"texts": texts}) as response:
             return await response.json()
+
+
+def get_noun_base_form(token: str, pos_label):
+    if pos_label.endswith("S"):
+        noun_base_form = infect_eng.singular_noun(token)
+        if noun_base_form is False:
+            noun_base_form = token
+    else:
+        noun_base_form = token
+    return noun_base_form
 
 
 async def get_text_embedding(texts: list[str], prompt: str = "query: "):
@@ -181,6 +303,15 @@ def index_embedding(index_func, embedding, row_id: int):
     vector = np.array([embedding], dtype=np.float32)
     faiss.normalize_L2(vector)
     index_func(vector, np.array([row_id], dtype=np.int64))
+
+
+def is_plausible_noun_phrase(deprel_labels):
+    # Dependency relationship labels that should not appear together in same phrase.
+    search_set = {'nsubj', 'nsubj:pass', 'obj', 'iobj', 'csubj', 'ccomp', 'xcomp'}
+    # Intersection of input deprel_labels with the search set to find common elements
+    found_elements = set(deprel_labels).intersection(search_set)
+    return not (len(found_elements) > 1)
+
 
 def search_faiss_index(index: faiss.IndexIDMap, embedding, id2result: dict[int, str],
                        num_results: int = 3, min_sim_score: float = 0.75):
