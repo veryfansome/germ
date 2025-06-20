@@ -92,6 +92,7 @@ topic_anchors = [
     "careers",
     "chemistry",
     "children",
+    "cloud computing",
     "color",
     "computers",
     "courtship",

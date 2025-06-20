@@ -48,6 +48,58 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.sig_to_conversation_id: dict[str, set] = {}
         self.sig_to_message_meta: dict[str, MessageMeta] = {}
 
+    async def extract_noun_groups(self, label_dict: dict[str, str | list[str]]):
+        token_cnt = len(label_dict["tokens"])
+        idx_to_noun_group = {}
+        idx_to_noun_joined_base_form = {}
+        idx_to_noun_joined_raw_form = {}
+        # Extract consecutive NN* groups and split further if needed.
+        for noun_group in extract_label_groups(label_dict["xpos"], target_labels={"NN", "NNS", "NNP", "NNPS"}):
+            grp_stop_idx = noun_group[-1] + 1
+            grp_start_idx = None
+            joined_base_form = None
+            joined_raw_form = None
+            for idx in noun_group:
+                if (joined_base_form is None
+                        and is_plausible_noun_phrase(label_dict["deprel"][idx:grp_stop_idx])):
+                    # Look for joined base form from this idx to end of group
+                    joined_base_form = " ".join([get_noun_base_form(
+                        label_dict["tokens"][idx], label_dict["xpos"][idx]
+                    ).lower() for idx in noun_group])
+                    joined_raw_form = " ".join([label_dict["tokens"][idx] for idx in noun_group])
+                    grp_start_idx = idx
+                if joined_base_form is not None:
+                    # Map each idx to group and joined form
+                    idx_to_noun_group[idx] = list(range(grp_start_idx, grp_stop_idx))
+                    idx_to_noun_joined_base_form[idx] = joined_base_form
+                    idx_to_noun_joined_raw_form[idx] = joined_raw_form
+                else:
+                    # Map this idx to this token's base form
+                    idx_to_noun_group[idx] = [idx]
+                    idx_to_noun_joined_base_form[idx] = get_noun_base_form(
+                        label_dict["tokens"][idx], label_dict["xpos"][idx]).lower()
+                    idx_to_noun_joined_raw_form[idx] = label_dict["tokens"][idx]
+        # Iterate through noun groups and determine if they have an associated determiner or possessive word
+        idx_to_noun_det_or_pos = {}
+        logger.info(f"idx_to_noun_group: {idx_to_noun_group}")
+        for noun_group in idx_to_noun_group.values():
+            lemma = idx_to_noun_joined_base_form[noun_group[0]]
+            results = await self.knowledge_graph.match_synset_definition(lemma, "n")
+            logger.info(f"{lemma} => results: {[r['syndef']['text'] for r in results]}")
+
+            # dt_or_pos_idx = find_first_from_right(
+            #    label_dict["xpos"][:noun_group[0]], {"DT", "POS", "PRP$"})
+            # if dt_or_pos_idx == -1 and noun_group[-1] < token_cnt - 2:
+            #    next_idx = noun_group[-1] + 1
+            #    if label_dict["xpos"][next_idx] in {"IN"}:
+            #        dt_or_pos_idx = find_first_from_left(
+            #            label_dict["xpos"][next_idx + 1:], {"NN", "NNS", "NNP", "NNPS", "PRP$"})
+            # logger.info(f"noun: det_or_pos={dt_or_pos_idx} noun_group={noun_group} "
+            #            f"word_or_phrase=('{idx_to_noun_joined_base_form[noun_group[0]]}', "
+            #            f"'{idx_to_noun_joined_raw_form[noun_group[0]]}')")
+            # for idx in noun_group:
+            #    idx_to_noun_det_or_pos[idx] = dt_or_pos_idx
+
     async def on_disconnect(self, conversation_id: int):
         pass
 
@@ -132,9 +184,8 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 logger.info(f"Embeddings topic signals: {topic_labels}")
 
                 log_pos_labels(pos)
-                extract_noun_groups(pos)
+                await self.extract_noun_groups(pos)
                 #await self.knowledge_graph.match_synset(tokens=meta.pos[sentence_idx]["tokens"])
-                #
             all_hydrated_elements.append((hydrated_headings, hydrated_element))
         # Send to LLM
         await self.delegate.on_receive(user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender)
@@ -199,52 +250,6 @@ def extract_label_groups(labels: list[str], target_labels: set[str] = None):
     if current_group:
         groups.append(current_group)
     return groups
-
-
-def extract_noun_groups(label_dict: dict[str, list[str]]):
-    token_cnt = len(label_dict["tokens"])
-    idx_to_noun_group = {}
-    idx_to_noun_joined_base_form = {}
-    idx_to_noun_joined_raw_form = {}
-    # Extract consecutive NN* groups and split further if needed.
-    for noun_group in extract_label_groups(label_dict["xpos"], target_labels={"NN", "NNS", "NNP", "NNPS"}):
-        grp_stop_idx = noun_group[-1] + 1
-        grp_start_idx = None
-        joined_base_form = None
-        joined_raw_form = None
-        for idx in noun_group:
-            if (joined_base_form is None
-                    and is_plausible_noun_phrase(label_dict["deprel"][idx:grp_stop_idx])):
-                # Look for joined base form from this idx to end of group
-                joined_base_form = " ".join([get_noun_base_form(
-                    label_dict["tokens"][idx], label_dict["xpos"][idx]
-                ).lower() for idx in noun_group])
-                joined_raw_form = " ".join([label_dict["tokens"][idx] for idx in noun_group])
-                grp_start_idx = idx
-            if joined_base_form is not None:
-                # Map each idx to group and joined form
-                idx_to_noun_group[idx] = list(range(grp_start_idx, grp_stop_idx))
-                idx_to_noun_joined_base_form[idx] = joined_base_form
-                idx_to_noun_joined_raw_form[idx] = joined_raw_form
-            else:
-                # Map this idx to this token's base form
-                idx_to_noun_group[idx] = [idx]
-                idx_to_noun_joined_base_form[idx] = get_noun_base_form(
-                    label_dict["tokens"][idx], label_dict["xpos"][idx]).lower()
-                idx_to_noun_joined_raw_form[idx] = label_dict["tokens"][idx]
-    # Iterate through noun groups and determine if they have an associated determiner or possessive word
-    idx_to_noun_det_or_pos = {}
-    logger.info(f"idx_to_noun_group: {idx_to_noun_group}")
-    for noun_group in idx_to_noun_group.values():
-        dt_or_pos_idx = find_first_from_right(
-            label_dict["xpos"][:noun_group[0]], {"DT", "POS", "PRP$"})
-        if dt_or_pos_idx == -1 and noun_group[-1] < token_cnt - 2:
-            next_idx = noun_group[-1] + 1
-            if label_dict["xpos"][next_idx] in {"IN"}:
-                dt_or_pos_idx = find_first_from_left(
-                    label_dict["xpos"][next_idx + 1:], {"NN", "NNS", "NNP", "NNPS", "PRP$"})
-        logger.info(f"noun: det_or_pos={dt_or_pos_idx} noun_group={noun_group} "
-                    f"word_or_phrase='{idx_to_noun_joined_base_form[noun_group[0]]}'")
 
 
 def find_first_from_left(labels: list[str], target_labels: set[str]):
