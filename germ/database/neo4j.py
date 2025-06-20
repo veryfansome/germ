@@ -60,12 +60,11 @@ async def _link_chat_user_to_conversation(tx, user_id: int, conversation_id: int
     return await tx.run(query, user_id=user_id, conversation_id=conversation_id)
 
 
-async def _match_synset(tx, lemma: str, pos: str):
+async def _match_synset_n_hop_neighbors(tx, lemma: str, pos: str):
     query = """
-    MATCH (n1 {pos: $pos})-[r1]-(m1)
-    WHERE $lemma IN n1.lemmas
-    MATCH (n2)-[r2:DEFINES]-(m1)
-    RETURN n2,r2,m1
+    MATCH (target {pos: $pos})-[rel:ALSO_SEE|IS_A*1]-(neighbor {pos: $pos})
+    WHERE $lemma IN target.lemmas
+    RETURN DISTINCT neighbor
     """
     results = []
     async for record in await tx.run(query, lemma=lemma, pos=pos):
@@ -73,15 +72,14 @@ async def _match_synset(tx, lemma: str, pos: str):
     return results
 
 
-async def _match_synset_with_unwind(tx, tokens):
+async def _match_synset_definition(tx, lemma: str, pos: str):
     query = """
-    UNWIND $tokens AS token
-    MATCH (s1:Synset {lemma: token})-[r1]-(s2)
-    MATCH (s3)-[r2]-(s4:Synset {lemma: token})
-    RETURN s1, r1, s2, s3, r2, s4
+    MATCH (syndef)-[rel:DEFINES]-(syn {pos: $pos})
+    WHERE $lemma IN syn.lemmas
+    RETURN syndef,rel,syn
     """
     results = []
-    async for record in await tx.run(query, tokens=tokens):
+    async for record in await tx.run(query, lemma=lemma, pos=pos):
         results.append(record)
     return results
 
@@ -149,9 +147,9 @@ class KnowledgeGraph:
                             f"(user:ChatUser {{user_id: {user_id}}})")
             return results
 
-    async def match_synset(self, lemma: str, pos: str):
+    async def match_synset_definition(self, lemma: str, pos: str):
         async with self.driver.session() as session:
-            return await session.execute_read(_match_synset, lemma=lemma, pos=pos)
+            return await session.execute_read(_match_synset_definition, lemma=lemma, pos=pos)
 
     async def shutdown(self):
         if self.driver:
