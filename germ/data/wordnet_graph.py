@@ -23,8 +23,10 @@ async def main():
     driver = new_async_driver()
     reader = WordNetCorpusReader(OEWN_PATH, omw_reader=None)
     all_synsets = [s for s in reader.all_synsets()]
+    all_synsets_len = len(all_synsets)
+    batch_size = 50_000
 
-    logger.info(f"Processing {len(all_synsets)} synsets")
+    logger.info(f"Processing {all_synsets_len} synsets")
     processors = [
         process_synset_and_definition_batch,
         process_also_see_batch,
@@ -47,7 +49,9 @@ async def main():
     ]
     for processor in processors:
         async with driver.session() as session:
-            await session.execute_write(processor, all_synsets)
+            for idx in range(0, all_synsets_len, batch_size):
+                batch = all_synsets[idx:idx + batch_size]
+                await session.execute_write(processor, batch)
 
 
 async def _process_also_see_batch(tx, in_struct):
@@ -71,7 +75,8 @@ async def process_also_see_batch(tx, synsets):
                 "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
                 "relation_lemma": relation_lemma, "relation_pos": relation_pos, "relation_sense": relation_sense,
             })
-    await _process_also_see_batch(tx, in_struct)
+    if in_struct:
+        await _process_also_see_batch(tx, in_struct)
 
 
 async def process_antonym_batch(tx, synsets):
@@ -94,8 +99,9 @@ async def process_antonym_batch(tx, synsets):
                     "pair": " <> ".join(sorted([f"{synset_pos}." + lemma.name().replace('_', ' '),
                                                 f"{antonym_pos}." + antonym.name().replace('_', ' ')])),
                 })
-    logger.info(f"Merging {len(in_struct)} antonym relationships")
-    await tx.run(query, in_struct=in_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} antonym relationships")
+        await tx.run(query, in_struct=in_struct)
 
 
 async def process_attribute_batch(tx, synsets):
@@ -119,8 +125,9 @@ async def process_attribute_batch(tx, synsets):
                     "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
                     "attribute_lemma": attribute_lemma, "attribute_pos": attribute_pos, "attribute_sense": attribute_sense,
                 })
-    logger.info(f"Merging {len(in_struct)} attribute relationships")
-    await tx.run(query, in_struct=in_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} attribute relationships")
+        await tx.run(query, in_struct=in_struct)
 
 
 async def process_cause_batch(tx, synsets):
@@ -139,8 +146,9 @@ async def process_cause_batch(tx, synsets):
                 "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
                 "effect_lemma": effect_lemma, "effect_pos": effect_pos, "effect_sense": effect_sense,
             })
-    logger.info(f"Merging {len(in_struct)} cause relationships")
-    await tx.run(query, in_struct=in_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} cause relationships")
+        await tx.run(query, in_struct=in_struct)
 
 
 async def process_derived_from_batch(tx, synsets):
@@ -177,9 +185,12 @@ async def process_derived_from_batch(tx, synsets):
                         "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
                         "relation_lemma": derived_lemma, "relation_pos": derived_pos, "relation_sense": derived_sense,
                     })
-    logger.info(f"Merging {len(in_struct)} derived from and {len(also_see_struct)} also-see relationships")
-    await tx.run(query, in_struct=in_struct)
-    await _process_also_see_batch(tx, also_see_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} derived from relationships")
+        await tx.run(query, in_struct=in_struct)
+    if also_see_struct:
+        logger.info(f"Merging {len(also_see_struct)} also-see relationships")
+        await _process_also_see_batch(tx, also_see_struct)
 
 
 async def process_entailment_batch(tx, synsets):
@@ -198,8 +209,9 @@ async def process_entailment_batch(tx, synsets):
                 "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
                 "imp_lemma": implication_lemma, "imp_pos": implication_pos, "imp_sense": implication_sense,
             })
-    logger.info(f"Merging {len(in_struct)} entailment relationships")
-    await tx.run(query, in_struct=in_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} entailment relationships")
+        await tx.run(query, in_struct=in_struct)
 
 
 async def process_hypernym_batch(tx, synsets):
@@ -218,8 +230,9 @@ async def process_hypernym_batch(tx, synsets):
                 "hypernym_lemma": hypernym_lemma, "hypernym_pos": hypernym_pos, "hypernym_sense": hypernym_sense,
                 "hyponym_lemma": synset_lemma, "hyponym_pos": synset_pos, "hyponym_sense": synset_sense,
             })
-    logger.info(f"Merging {len(in_struct)} hypernym relationships")
-    await tx.run(query, in_struct=in_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} hypernym relationships")
+        await tx.run(query, in_struct=in_struct)
 
 
 async def process_instance_hypernym_batch(tx, synsets):
@@ -238,8 +251,9 @@ async def process_instance_hypernym_batch(tx, synsets):
                 "hypernym_lemma": hypernym_lemma, "hypernym_pos": hypernym_pos, "hypernym_sense": hypernym_sense,
                 "hyponym_lemma": synset_lemma, "hyponym_pos": synset_pos, "hyponym_sense": synset_sense,
             })
-    logger.info(f"Merging {len(in_struct)} instance hypernym relationships")
-    await tx.run(query, in_struct=in_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} instance hypernym relationships")
+        await tx.run(query, in_struct=in_struct)
 
 
 async def process_member_meronym_batch(tx, synsets):
@@ -258,8 +272,9 @@ async def process_member_meronym_batch(tx, synsets):
                 "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
                 "member_lemma": member_lemma, "member_pos": member_pos, "member_sense": member_sense,
             })
-    logger.info(f"Merging {len(in_struct)} member meronym relationships")
-    await tx.run(query, in_struct=in_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} member meronym relationships")
+        await tx.run(query, in_struct=in_struct)
 
 
 async def process_part_meronym_batch(tx, synsets):
@@ -278,8 +293,9 @@ async def process_part_meronym_batch(tx, synsets):
                 "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
                 "part_lemma": part_lemma, "part_pos": part_pos, "part_sense": part_sense,
             })
-    logger.info(f"Merging {len(in_struct)} part meronym relationships")
-    await tx.run(query, in_struct=in_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} part meronym relationships")
+        await tx.run(query, in_struct=in_struct)
 
 
 async def process_pertainym_batch(tx, synsets):
@@ -313,9 +329,12 @@ async def process_pertainym_batch(tx, synsets):
                         "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
                         "relation_lemma": pertainym_lemma, "relation_pos": pertainym_pos, "relation_sense": pertainym_sense,
                     })
-    logger.info(f"Merging {len(in_struct)} pertainym and {len(also_see_struct)} also-see relationships")
-    await tx.run(query, in_struct=in_struct)
-    await _process_also_see_batch(tx, also_see_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} pertainym relationships")
+        await tx.run(query, in_struct=in_struct)
+    if also_see_struct:
+        logger.info(f"Merging {len(also_see_struct)} also-see relationships")
+        await _process_also_see_batch(tx, also_see_struct)
 
 
 async def process_region_domain_batch(tx, synsets):
@@ -334,8 +353,9 @@ async def process_region_domain_batch(tx, synsets):
                 "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
                 "domain_lemma": domain_lemma, "domain_pos": domain_pos, "domain_sense": domain_sense,
             })
-    logger.info(f"Merging {len(in_struct)} region domain relationships")
-    await tx.run(query, in_struct=in_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} region domain relationships")
+        await tx.run(query, in_struct=in_struct)
 
 
 async def process_root_hypernym_batch(tx, synsets):
@@ -355,8 +375,9 @@ async def process_root_hypernym_batch(tx, synsets):
                     "hypernym_lemma": hypernym_lemma, "hypernym_pos": hypernym_pos, "hypernym_sense": hypernym_sense,
                     "hyponym_lemma": synset_lemma, "hyponym_pos": synset_pos, "hyponym_sense": synset_sense,
                 })
-    logger.info(f"Merging {len(in_struct)} root hypernym relationships")
-    await tx.run(query, in_struct=in_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} root hypernym relationships")
+        await tx.run(query, in_struct=in_struct)
 
 
 async def process_substance_meronym_batch(tx, synsets):
@@ -375,19 +396,23 @@ async def process_substance_meronym_batch(tx, synsets):
                 "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
                 "sub_lemma": substance_lemma, "sub_pos": substance_pos, "sub_sense": substance_sense,
             })
-    logger.info(f"Merging {len(in_struct)} substance meronym relationships")
-    await tx.run(query, in_struct=in_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} substance meronym relationships")
+        await tx.run(query, in_struct=in_struct)
 
 
 async def process_synset_and_definition_batch(tx, synsets):
     query = """
     UNWIND $in_struct AS in_struct
     MERGE (s:Synset {lemma: in_struct.lemma, pos: in_struct.pos, sense: in_struct.sense})
-    WITH in_struct, s
     SET s.lemmas = in_struct.lemmas
     WITH in_struct, s
     MERGE (d:SynsetDefinition {text: in_struct.definition})
     MERGE (d)-[:DEFINES]->(s)
+    WITH in_struct, s
+    UNWIND in_struct.examples AS example
+    MERGE (e:SynsetExample {text: example})
+    MERGE (s)-[:HAS_EXAMPLE]->(e)
     """
     in_struct = [
         {
@@ -396,6 +421,7 @@ async def process_synset_and_definition_batch(tx, synsets):
             "pos": pair[0][1],
             "sense": pair[0][2],
             "definition": pair[1].definition(),
+            "examples": pair[1].examples(),
         }
         for pair in [(tokenize_synset_name(s.name()), s) for s in synsets]
     ]
@@ -419,8 +445,9 @@ async def process_topic_domain_batch(tx, synsets):
                 "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
                 "domain_lemma": domain_lemma, "domain_pos": domain_pos, "domain_sense": domain_sense,
             })
-    logger.info(f"Merging {len(in_struct)} topic domain relationships")
-    await tx.run(query, in_struct=in_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} topic domain relationships")
+        await tx.run(query, in_struct=in_struct)
 
 
 async def process_usage_domain_batch(tx, synsets):
@@ -440,8 +467,9 @@ async def process_usage_domain_batch(tx, synsets):
                 "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
                 "domain_lemma": domain_lemma, "domain_pos": domain_pos, "domain_sense": domain_sense,
             })
-    logger.info(f"Merging {len(in_struct)} usage domain relationships")
-    await tx.run(query, in_struct=in_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} usage domain relationships")
+        await tx.run(query, in_struct=in_struct)
 
 
 async def process_verb_group_batch(tx, synsets):
@@ -460,14 +488,15 @@ async def process_verb_group_batch(tx, synsets):
                 "lemma": synset_lemma, "pos": synset_pos, "sense": synset_sense,
                 "peer_lemma": peer_lemma, "peer_pos": peer_pos, "peer_sense": peer_sense,
             })
-    logger.info(f"Merging {len(in_struct)} verb group relationships")
-    await tx.run(query, in_struct=in_struct)
+    if in_struct:
+        logger.info(f"Merging {len(in_struct)} verb group relationships")
+        await tx.run(query, in_struct=in_struct)
 
 
 def similar_char_ratio(a: str, b: str, *, threshold: float = 0.5) -> bool:
     """
     Returns True if *either* string contains a run of consecutive characters
-    that covers more than `threshold` · min(len(a), len(b)).
+    that covers more than `threshold` · max(len(a), len(b)).
     """
     # Longest common *consecutive* substring length
     longest = SequenceMatcher(None, a, b, autojunk=False).find_longest_match(
