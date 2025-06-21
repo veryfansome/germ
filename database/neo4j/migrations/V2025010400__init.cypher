@@ -13,3 +13,6 @@ CREATE INDEX synsetLemmasIndex          FOR (s:Synset)              ON (s.lemmas
 //
 CREATE CONSTRAINT                       FOR (d:SynsetDefinition)    REQUIRE d.text                              IS UNIQUE;
 CREATE FULLTEXT INDEX synsetDefText     FOR (d:SynsetDefinition)    ON EACH [d.text];
+//
+CREATE CONSTRAINT                       FOR (e:SynsetExample)       REQUIRE e.text                              IS UNIQUE;
+CREATE FULLTEXT INDEX synsetExpText     FOR (e:SynsetExample)       ON EACH [e.text];
