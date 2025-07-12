@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -44,7 +45,7 @@ class RotaryEmbedding(nn.Module):
         rot_even = x_even * cos - x_odd * sin
         rot_odd  = x_even * sin + x_odd * cos
 
-        # interleave even/odd dimensions → original ordering
+        # Interleave even/odd dimensions → original ordering
         rot = torch.stack((rot_even, rot_odd), dim=-1).flatten(-2)
         return rot
 
@@ -82,25 +83,23 @@ class SelfAttention(nn.Module):
 
         # Decide masking strategy
         if pad_mask is None:  # Fast path when no padding
-            attn_mask = None
-            is_causal = True
+            attn = F.scaled_dot_product_attention(
+                q, k, v,
+                dropout_p=self.dropout.p if self.training else 0.0,
+                is_causal=True,
+            )  # [B, H, L, D]
         else:  # Slow-path: need explicit mask
             key_mask = pad_mask[:, None, None, :]  # (B,1,1,L)
             # Causal part, shared by every batch/head
             causal = torch.triu(
                 torch.ones(L, L, dtype=torch.bool, device=x.device), 1
             ).unsqueeze(0).unsqueeze(0)  # (1,1,L,L)
-
-            attn_mask = causal | key_mask  # (B,1,L,L)  True = MASK
-            is_causal = False  # causal already in mask
-
-        # Fused attention
-        attn = F.scaled_dot_product_attention(
-            q, k, v,
-            attn_mask=attn_mask,  # may be None
-            dropout_p=self.dropout.p if self.training else 0.0,
-            is_causal=is_causal,
-        )  # [B, H, L, D]
+            attn = F.scaled_dot_product_attention(
+                q, k, v,
+                attn_mask=causal | key_mask,  # (B,1,L,L)  True = MASK
+                dropout_p=self.dropout.p if self.training else 0.0,
+                is_causal=False,   # Must be False when attn_mask is given
+            )  # [B, H, L, D]
 
         attn = attn.transpose(1, 2).reshape(B, L, E)
         return self.out_proj(attn)
@@ -116,8 +115,10 @@ class FeedForward(nn.Module):
         self.drop = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        a, b = self.w12(x).chunk(2, dim=-1)  # gate
-        x = self.w3(F.silu(a) * b)  # projection
+        gate, value = self.w12(x).chunk(2, dim=-1)
+        # From https://arxiv.org/pdf/2002.05202 (Shazeer 2020)
+        # SwiGLU(x) = Swish(xW) ⊗ (xV)
+        x = self.w3(F.silu(gate) * value)
         return self.drop(x)  # dropout
 
 
@@ -130,9 +131,36 @@ class DecoderLayer(nn.Module):
         self.ff = FeedForward(d_model, dim_ff, dropout)
         self.drop = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor, key_padding_mask: torch.Tensor | None = None):
-        x = x + self.drop(self.attn(self.norm1(x), key_padding_mask))
-        x = x + self.ff(self.norm2(x))
+    def forward(
+            self,
+            x: torch.Tensor,
+            key_padding_mask: torch.Tensor | None = None,
+    ):
+        # Pre-compute broadcast mask once
+        if key_padding_mask is not None:
+            pad = key_padding_mask.unsqueeze(-1)  # [B, L, 1]
+        else:
+            pad = None
+
+        # Attention block
+        x_res = x
+        x_norm = self.norm1(x)
+        if pad is not None:
+            x_norm = x_norm.masked_fill(pad, 0.0)  # zero-out pad queries
+        #x = x_res + self.drop(self.attn(x_norm, key_padding_mask))
+        x = x_res + self.attn(x_norm, key_padding_mask)
+
+        # Feed-forward block
+        x_res = x
+        x_norm = self.norm2(x)
+        if pad is not None:
+            x_norm = x_norm.masked_fill(pad, 0.0)
+        x = x_res + self.ff(x_norm)
+
+        # Ensure next layer starts with clean PAD rows
+        if pad is not None:
+            x = x.masked_fill(pad, 0.0)
+
         return x
 
 
@@ -159,6 +187,7 @@ class DecoderModel(nn.Module):
         self.token_emb = nn.Embedding(
             vocab_size, d_model, padding_idx=pad_token_id
         )
+        self.token_emb_scale = math.sqrt(d_model)
         self.layers = nn.ModuleList(
             [
                 DecoderLayer(d_model, n_heads, dim_ff, dropout, max_seq_len=max_seq_len)
@@ -167,26 +196,36 @@ class DecoderModel(nn.Module):
         )
         self.norm_out = nn.LayerNorm(d_model)
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
-        del self.lm_head.weight  # Drop the original parameter
         self.lm_head.weight = self.token_emb.weight  # Weight tying
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         """`input_ids`shape [B, L] → returns logits [B, L, vocab]."""
         key_padding_mask = input_ids.eq(self.pad_token_id)  # [B, L]
-        x = self.token_emb(input_ids)  # [B, L, E]
+        x = self.token_emb(input_ids) * self.token_emb_scale  # [B, L, E]
         for layer in self.layers:
             x = layer(x, key_padding_mask)
         x = self.norm_out(x)
         return self.lm_head(x)
 
 
+def _init_weights(module):
+    if isinstance(module, nn.Linear):
+        nn.init.trunc_normal_(module.weight, mean=0.0, std=0.02)
+        if module.bias is not None:
+            nn.init.zeros_(module.bias)
+
+
 if __name__ == "__main__":
     torch.manual_seed(0)
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
-    model = DecoderModel(vocab_size=10_000, max_seq_len=4096).to(device)
+    dtype = torch.float16  # torch.bfloat16 once MPS supports it stably
+    device = torch.device("mps")
+    model = DecoderModel(
+        vocab_size=10_000, max_seq_len=4096
+    ).to(device, dtype)
+    model.apply(_init_weights)
     #model = torch.compile(model, mode="reduce-overhead")
-    dummy_input = torch.randint(0, 10_000, (2, 128), device=device)
 
+    dummy_input = torch.randint(0, 10_000, (2, 128), device=device)
     logits = model(dummy_input)
     print("logits.shape =", logits.shape)  # -> [2, 128, 10000]
