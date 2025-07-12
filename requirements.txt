@@ -32,6 +32,7 @@ opentelemetry-instrumentation-httpx
 opentelemetry-instrumentation-redis
 opentelemetry-instrumentation-sqlalchemy
 opentelemetry-sdk
+peft
 prometheus_client
 psycopg2-binary
 pydantic
