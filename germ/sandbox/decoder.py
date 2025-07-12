@@ -2,25 +2,39 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from functools import lru_cache
 
 
-def build_staggered_local_causal_mask(seq_len: int, local_window_size: int, n_heads: int):
+@lru_cache(maxsize=None)
+def build_staggered_local_causal_mask(
+        seq_len: int,
+        local_window_size: int,
+        n_heads: int,
+        *,
+        dtype: torch.dtype = torch.float32,
+        device: torch.device | str = "cpu",
+) -> torch.Tensor:
     """
-    Create an [n_heads x seq_len x seq_len] mask so that:
-      - Each head h can attend to up to (h+1)*local_window_size past tokens,
-        while still respecting causal masking.
-      - For example, head #1 sees local_window_size tokens,
-        head #2 sees 2*local_window_size, etc.
+    Returns a tensor of shape [n_heads, seq_len, seq_len] with
+    0.0 on visible positions and -∞ on masked positions.
+
+    Visibility for head h (0-based):
+        token i can attend to j  ⇔  0 ≤ i-j < (h+1)*local_window_size
     """
-    mask = torch.zeros(n_heads, seq_len, seq_len)
-    for h in range(n_heads):
-        window_size = (h + 1) * local_window_size
-        for i in range(seq_len):
-            # Enforce causal masking (disallow future positions)
-            mask[h, i, i+1:] = float('-inf')
-            # Restrict earlier tokens so that only the last window_size are visible
-            start_idx = max(0, i - window_size)
-            mask[h, i, :start_idx] = float('-inf')
+    device = torch.device(device)  # hash-stable key
+    idx     = torch.arange(seq_len, device=device)  # [T]
+    rel     = idx[None] - idx[:, None]  # [T, T] (i−j)
+
+    window  = torch.arange(1, n_heads + 1, device=device) * local_window_size
+    window  = window[:, None, None]  # broadcast ready
+
+    valid   = (rel >= 0).unsqueeze(0) & (rel.unsqueeze(0) < window)   # [H,T,T]
+
+    # torch.finfo gives the proper minimal finite value for fp16/fp32/bf16
+    minus_inf = torch.finfo(dtype).min
+    mask = torch.where(valid,
+                       torch.zeros((), dtype=dtype, device=device),
+                       torch.full((), minus_inf, dtype=dtype, device=device))
     return mask
 
 
@@ -45,23 +59,27 @@ class DecoderLayer(nn.Module):
     """
     def __init__(self, d_model: int, n_heads: int, dim_feedforward: int, dropout: float = 0.1):
         super().__init__()
-        self.self_attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout, batch_first=True)
-        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.self_attn = nn.MultiheadAttention(d_model, n_heads,
+                                               dropout=dropout, batch_first=True)
+        self.linear1 = nn.Linear(d_model, dim_feedforward * 2)  # 2× for gate
+
         self.dropout = nn.Dropout(dropout)
         self.linear2 = nn.Linear(dim_feedforward, d_model)
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
+        self.norm1   = nn.LayerNorm(d_model)
+        self.norm2   = nn.LayerNorm(d_model)
+
+    def _feed_forward(self, x):
+        # SwiGLU
+        a, b = self.linear1(x).chunk(2, dim=-1)
+        return self.linear2(self.dropout(a * F.silu(b)))
 
     def forward(self, x, attn_mask=None):
         # Self-attention (decoder-only, causal)
         attn_output, _ = self.self_attn(x, x, x, attn_mask=attn_mask)
-        x = x + self.dropout(attn_output)
-        x = self.norm1(x)
+        x = self.norm1(x + self.dropout(attn_output))
 
         # Feedforward network
-        ff_output = self.linear2(self.dropout(F.relu(self.linear1(x))))
-        x = x + self.dropout(ff_output)
-        x = self.norm2(x)
+        x = self.norm2(x + self._feed_forward(x))
         return x
 
 
@@ -108,18 +126,24 @@ class DecoderModel(nn.Module):
         """
         bsz, seq_len = input_ids.size()
 
+        runtime_dtype = self.token_embedding.weight.dtype  # safe & always set
+
         # Build staggered mask:
         base_mask = build_staggered_local_causal_mask(
             seq_len,
             self.local_window_size,
-            self.n_heads
-        ).to(input_ids.device)  # shape [n_heads, seq_len, seq_len]
+            self.n_heads,
+            dtype=runtime_dtype,
+            device=input_ids.device,
+        )  # [n_heads, seq_len, seq_len]
 
         # Broadcast to [bsz*n_heads, seq_len, seq_len] so each head in each batch has a separate view
-        attn_mask = (base_mask
-                     .unsqueeze(0)  # [1, n_heads, seq_len, seq_len]
-                     .expand(bsz, -1, -1, -1)  # [bsz, n_heads, seq_len, seq_len]
-                     .reshape(bsz * self.n_heads, seq_len, seq_len))  # [bsz*n_heads, seq_len, seq_len]
+        attn_mask = (
+            base_mask
+            .unsqueeze(0)  # [1, n_heads, seq_len, seq_len]
+            .expand(bsz, -1, -1, -1)  # [bsz, n_heads, seq_len, seq_len]
+            .reshape(bsz * self.n_heads, seq_len, seq_len)
+        )  # [bsz*n_heads, seq_len, seq_len]
 
         # Create a mask for padded positions so we don't want to attend to them
         pad_positions = (input_ids == pad_token_id)  # shape: [bsz, seq_len]
@@ -131,11 +155,11 @@ class DecoderModel(nn.Module):
             .expand(-1, self.n_heads, -1, -1)  # [bsz, n_heads, seq_len, seq_len]
             .reshape(bsz * self.n_heads, seq_len, seq_len)
         )
-        attn_mask = attn_mask.masked_fill(pad_mask, float('-inf'))
+        attn_mask = attn_mask.masked_fill(pad_mask, torch.finfo(runtime_dtype).min)
 
         # Token + positional embeddings
         token_embeddings = self.token_embedding(input_ids)  # [bsz, seq_len, d_model]
-        pos_embeddings = self.positional_encoding[:seq_len, :].unsqueeze(0)  # Shape [1, seq_len, d_model]
+        pos_embeddings = self.positional_encoding[:seq_len].to(token_embeddings)
         x = token_embeddings + pos_embeddings
 
         # Pass through all decoder layers
