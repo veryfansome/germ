@@ -67,7 +67,7 @@ class SelfAttention(nn.Module):
 
         self.qkv_proj = nn.Linear(d_model, 3 * d_model, bias=True)
         self.out_proj = nn.Linear(d_model, d_model, bias=True)
-        self.dropout = nn.Dropout(dropout)
+        self.drop = nn.Dropout(dropout)
         self.rope = RotaryEmbedding(self.head_dim, max_seq_len=max_seq_len)
 
     def forward(self, x: torch.Tensor, pad_mask: torch.Tensor | None = None) -> torch.Tensor:
@@ -82,24 +82,40 @@ class SelfAttention(nn.Module):
         k = self.rope(k, L)
 
         # Decide masking strategy
-        if pad_mask is None:  # Fast path when no padding
+        if pad_mask is None or not pad_mask.any():  # Fast path when no padding
             attn = F.scaled_dot_product_attention(
                 q, k, v,
-                dropout_p=self.dropout.p if self.training else 0.0,
+                dropout_p=self.drop.p if self.training else 0.0,
                 is_causal=True,
             )  # [B, H, L, D]
         else:  # Slow-path: need explicit mask
-            key_mask = pad_mask[:, None, None, :]  # (B,1,1,L)
-            # Causal part, shared by every batch/head
+            # pad_mask: [B, L]  (True = PAD)
             causal = torch.triu(
                 torch.ones(L, L, dtype=torch.bool, device=x.device), 1
-            ).unsqueeze(0).unsqueeze(0)  # (1,1,L,L)
+            )  # [L, L]
+
+            key_mask = pad_mask[:, None, None, :]  # [B, 1, 1, L]
+            bool_mask = causal[None, None] | key_mask  # [B, 1, L, L]
+
+            # Float mask: 0 for keep, -inf for mask  (FP32 is fine for all dtypes)
+            attn_mask = torch.zeros_like(bool_mask, dtype=torch.float32)
+            attn_mask = attn_mask.masked_fill(bool_mask, float("-inf"))  # [B, 1, L, L]
+
+            # Expand over heads and flatten to (B*H, L, L)
+            attn_mask = attn_mask.expand(B, self.n_heads, L, L) \
+                .reshape(B * self.n_heads, L, L)
+
+            # Flatten q/k/v the same way
+            q_ = q.reshape(B * self.n_heads, L, self.head_dim)
+            k_ = k.reshape_as(q_)
+            v_ = v.reshape_as(q_)
+
             attn = F.scaled_dot_product_attention(
-                q, k, v,
-                attn_mask=causal | key_mask,  # (B,1,L,L)  True = MASK
-                dropout_p=self.dropout.p if self.training else 0.0,
-                is_causal=False,   # Must be False when attn_mask is given
-            )  # [B, H, L, D]
+                q_, k_, v_,
+                attn_mask=attn_mask,
+                dropout_p=self.drop.p if self.training else 0.0,
+                # is_causal must stay False when an explicit mask is given
+            ).view(B, self.n_heads, L, self.head_dim)
 
         attn = attn.transpose(1, 2).reshape(B, L, E)
         return self.out_proj(attn)
@@ -147,8 +163,9 @@ class DecoderLayer(nn.Module):
         x_norm = self.norm1(x)
         if pad is not None:
             x_norm = x_norm.masked_fill(pad, 0.0)  # zero-out pad queries
-        #x = x_res + self.drop(self.attn(x_norm, key_padding_mask))
-        x = x_res + self.attn(x_norm, key_padding_mask)
+        # From https://aclanthology.org/2024.sigul-1.35.pdf
+        # Apply residual dropout after the out-proj, before addition
+        x = x_res + self.drop(self.attn(x_norm, key_padding_mask))
 
         # Feed-forward block
         x_res = x
@@ -218,14 +235,80 @@ def _init_weights(module):
 if __name__ == "__main__":
     torch.manual_seed(0)
 
-    dtype = torch.float16  # torch.bfloat16 once MPS supports it stably
-    device = torch.device("mps")
-    model = DecoderModel(
-        vocab_size=10_000, max_seq_len=4096
-    ).to(device, dtype)
-    model.apply(_init_weights)
+    VOCAB = 10_000
+    PAD_ID = 0
+
+    DTYPE = torch.float16  # torch.bfloat16 once MPS supports it stably
+    DEVICE = torch.device("mps")
+    MODEL = DecoderModel(
+        vocab_size=VOCAB,
+        max_seq_len=4096,
+        pad_token_id=PAD_ID,
+    ).to(DEVICE, DTYPE)
+    MODEL.apply(_init_weights)
     #model = torch.compile(model, mode="reduce-overhead")
 
-    dummy_input = torch.randint(0, 10_000, (2, 128), device=device)
-    logits = model(dummy_input)
-    print("logits.shape =", logits.shape)  # -> [2, 128, 10000]
+    MODEL.eval()
+
+
+    def rand_batch(batch, seqlen, pad_prob=0.3):
+        """Return (input_ids, tgt_ids) with random padding."""
+        inp = torch.randint(1, VOCAB, (batch, seqlen), device=DEVICE)
+        if pad_prob:
+            mask = torch.rand_like(inp.float()) < pad_prob
+            inp = inp.masked_fill(mask, PAD_ID)
+        # Next-token prediction target (shifted left)
+        tgt = inp.roll(-1, dims=1)
+        tgt[:, -1] = PAD_ID  # last token unused
+        return inp, tgt
+
+
+    def test_forward_backward():
+        """Forward + loss + backward in train mode."""
+        MODEL.train()
+        optim = torch.optim.AdamW(MODEL.parameters(), lr=0.01)
+        for B, L in [(2, 128), (4, 257)]:  # Include odd length
+            inp, tgt = rand_batch(B, L, pad_prob=0.4)
+            logits = MODEL(inp)
+            loss = torch.nn.functional.cross_entropy(
+                logits.view(-1, VOCAB),
+                tgt.view(-1),
+                ignore_index=PAD_ID
+            )
+            loss.backward()
+            assert not torch.isnan(loss), "NaN loss"
+            # Simple grad sanity: some grad norms must be non-zero
+            gnorm = math.sqrt(sum(p.grad.pow(2).sum().item()
+                                  for p in MODEL.parameters() if p.grad is not None))
+            assert gnorm > 0, "no gradients propagated"
+            optim.zero_grad()
+        MODEL.eval()
+
+
+    @torch.inference_mode()
+    def test_causality():
+        """Changing future tokens must not alter past logits."""
+        B, L = 1, 64
+        base, _ = rand_batch(B, L, pad_prob=0.0)
+        mod = base.clone()
+        # Alter tokens in the *future* half
+        mod[:, L // 2:] = torch.randint(1, VOCAB, (B, L // 2), device=DEVICE)
+        out_base = MODEL(base)[:, :L // 2]
+        out_mod = MODEL(mod)[:, :L // 2]
+        torch.testing.assert_close(
+            out_base, out_mod, rtol=0, atol=1e-3,
+            msg="future context leaked into past logits"
+        )
+
+
+    def test_compile():
+        """Ensure model is torch.compile-able on the selected device."""
+        compiled = torch.compile(MODEL, mode="reduce-overhead")
+        inp, _ = rand_batch(2, 128, pad_prob=0.2)
+        _ = compiled(inp)   # just a dry run
+
+
+    with torch.autocast(device_type=DEVICE.type, dtype=DTYPE):
+        for fn in (test_forward_backward, test_causality, test_compile):
+            fn()
+    print("✓ all sanity tests passed.")
