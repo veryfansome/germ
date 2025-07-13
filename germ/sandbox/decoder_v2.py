@@ -82,14 +82,7 @@ class SelfAttention(nn.Module):
         k = self.rope(k, L)
 
         # Decide masking strategy
-        if (
-                (pad_mask is None or not pad_mask.any())  # Fast path when no padding
-
-                # https://github.com/pytorch/pytorch/issues/147443
-                # RuntimeError: Placeholder tensor is empty!
-                # Avoid fast path on MPS until this is resolved
-                and x.device.type != "mps"
-        ):
+        if pad_mask is None or not pad_mask.any():  # Fast path when no padding
             attn = F.scaled_dot_product_attention(
                 q, k, v,
                 dropout_p=self.drop.p if self.training else 0.0,
@@ -251,7 +244,9 @@ if __name__ == "__main__":
         vocab_size=VOCAB,
         max_seq_len=4096,
         pad_token_id=PAD_ID,
-    ).to(DEVICE, DTYPE)
+    )
+    MODEL.apply(init_weights)
+    MODEL.to(DEVICE, DTYPE)
     MODEL.eval()
 
 
