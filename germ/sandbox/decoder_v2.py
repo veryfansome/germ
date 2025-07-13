@@ -82,7 +82,14 @@ class SelfAttention(nn.Module):
         k = self.rope(k, L)
 
         # Decide masking strategy
-        if pad_mask is None or not pad_mask.any():  # Fast path when no padding
+        if (
+                (pad_mask is None or not pad_mask.any())  # Fast path when no padding
+
+                # https://github.com/pytorch/pytorch/issues/147443
+                # RuntimeError: Placeholder tensor is empty!
+                # Avoid fast path on MPS until this is resolved
+                and x.device.type != "mps"
+        ):
             attn = F.scaled_dot_product_attention(
                 q, k, v,
                 dropout_p=self.drop.p if self.training else 0.0,
@@ -115,7 +122,7 @@ class SelfAttention(nn.Module):
                 attn_mask=attn_mask,
                 dropout_p=self.drop.p if self.training else 0.0,
                 # is_causal must stay False when an explicit mask is given
-            ).view(B, self.n_heads, L, self.head_dim)
+            ).view(B, self.n_heads, L, self.head_dim)  # [B, H, L, D]
 
         attn = attn.transpose(1, 2).reshape(B, L, E)
         return self.out_proj(attn)
@@ -225,7 +232,7 @@ class DecoderModel(nn.Module):
         return self.lm_head(x)
 
 
-def _init_weights(module):
+def init_weights(module):
     if isinstance(module, nn.Linear):
         nn.init.trunc_normal_(module.weight, mean=0.0, std=0.02)
         if module.bias is not None:
@@ -245,9 +252,6 @@ if __name__ == "__main__":
         max_seq_len=4096,
         pad_token_id=PAD_ID,
     ).to(DEVICE, DTYPE)
-    MODEL.apply(_init_weights)
-    #model = torch.compile(model, mode="reduce-overhead")
-
     MODEL.eval()
 
 
