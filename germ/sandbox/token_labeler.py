@@ -139,7 +139,6 @@ if __name__ == "__main__":
     examples = list(examples)
     examples.sort()
     print(len(examples))
-    print(examples[66999:][:100])  # Print first 10 examples for visual inspection
+    print(examples[:100])  # Print first 10 examples for visual inspection
 
-    #asyncio.run(main(examples))
-    #asyncio.run(main(examples[67000:]))
+    asyncio.run(main(examples))
