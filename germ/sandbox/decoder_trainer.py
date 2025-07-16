@@ -19,7 +19,7 @@ LOSS_SCALE      = 64.0  # Static loss-scaling factor, lack of GradScaler support
 ADAM_EPS        = 6.1e-5  # Minimum normal fp16 number
 CLIP_NORM       = 1.0
 LR              = 3e-4
-EPOCHS          = 3
+EPOCHS          = 1
 WARMUP_FRAC     = 0.1
 N_BUCKETS       = 100
 SEED            = 42
@@ -53,6 +53,20 @@ def dataloader_worker_init(worker_id):
     np.random.seed(seed)
     random.seed(seed)
     torch.manual_seed(seed)
+
+
+def dedupe(ds_train, ds_val):
+    # Hash all validation stories
+    val_hashes = set()
+    for rec in ds_val:
+        val_hashes.add(hash(rec["text"].strip()))
+
+    # Drop any training story with the same hash
+    ds_train = ds_train.filter(
+        lambda x: hash(x["text"].strip()) not in val_hashes,
+        num_proc=8
+    )
+    return ds_train, ds_val
 
 
 def encode(example):
@@ -93,9 +107,15 @@ def prepare_dataset(dataset):
 
 
 class Trainer:
-    def __init__(self, loss_scale = LOSS_SCALE):
-        self.bad_batches = 0
+    def __init__(self, optimizer, num_steps, loss_fn, loss_scale = LOSS_SCALE):
+        self.loss_fn = loss_fn
         self.loss_scale = loss_scale
+        self.optimizer = optimizer
+        self.scheduler = get_cosine_schedule_with_warmup(
+            optimizer, int(num_steps * WARMUP_FRAC), num_steps
+        )
+
+        self.bad_batches = 0
         self.window_loss = 0.0
         self.window_toks = 0
 
@@ -113,7 +133,7 @@ class Trainer:
 
             with torch.autocast(device_type=DEVICE.type, dtype=DTYPE):
                 logits = model(inp)
-                base_loss = loss_fn(
+                base_loss = self.loss_fn(
                     logits.view(-1, TOK.vocab_size).to(torch.float32),  # Compute loss in fp32
                     tgt.view(-1)
                 )
@@ -135,8 +155,8 @@ class Trainer:
                 if has_inf:
                     self.bad_batches += 1
                     self.loss_scale = max(1.0, self.loss_scale / 2)
-                    optimizer.zero_grad(set_to_none=True)
-                    sched.step()
+                    self.optimizer.zero_grad(set_to_none=True)
+                    self.scheduler.step()
                     continue  # skip this mini-batch
 
                 # If good batch, un-scale gradients, clip, and step
@@ -145,9 +165,9 @@ class Trainer:
                         p.grad.div_(self.loss_scale)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), CLIP_NORM)
 
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-                sched.step()
+                self.optimizer.step()
+                self.optimizer.zero_grad(set_to_none=True)
+                self.scheduler.step()
 
             n_tok = (tgt != TOK.pad_token_id).sum().item()
             tot_loss += base_loss.item() * n_tok
@@ -193,9 +213,10 @@ if __name__ == "__main__":
     os.environ["VECLIB_MAXIMUM_THREADS"] = "1"  # Apple Accelerate
 
     ds = load_dataset("roneneldan/TinyStories", split="train", streaming=False)
-    ds = prepare_dataset(ds)
-
     val_ds = load_dataset("roneneldan/TinyStories", split="validation")
+    ds, val_ds = dedupe(ds, val_ds)
+
+    ds = prepare_dataset(ds)
     val_ds = prepare_dataset(val_ds)
 
     lengths = ds["len"]
@@ -228,39 +249,38 @@ if __name__ == "__main__":
     ).to(DEVICE, DTYPE)
     model.apply(lambda m: init_weights(m) if isinstance(m, (nn.Linear,)) else None)  # if not already called
 
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=LR,
-        betas=(0.9, 0.95),
-        eps=ADAM_EPS,
-        fused=False,
-        amsgrad=True,
+    trainer = Trainer(
+        optimizer=torch.optim.AdamW(
+            model.parameters(),
+            lr=LR,
+            betas=(0.9, 0.95),
+            eps=ADAM_EPS,
+            fused=False,
+            amsgrad=True,
+        ),
+        num_steps=EPOCHS * len(train_loader),
+        loss_fn=nn.CrossEntropyLoss(ignore_index=TOK.pad_token_id),
     )
-    num_steps = EPOCHS * len(train_loader)
-    sched = get_cosine_schedule_with_warmup(optimizer,
-                                            int(num_steps * WARMUP_FRAC),
-                                            num_steps)
+    #best_val = float("inf")
+    #for ep in range(1, EPOCHS+1):
+    #    print(f"--- epoch {ep}/{EPOCHS} ---")
+    #    trainer.run_epoch(train_loader, train=True)
+    #    val_ppl = trainer.run_epoch(val_loader, train=False)
 
-    loss_fn = nn.CrossEntropyLoss(ignore_index=TOK.pad_token_id)
+    #    if val_ppl < best_val:
+    #        best_val = val_ppl
+    #        ckpt = f"decoder_ep{ep}_ppl{val_ppl:.2f}.pt"
+    #        ckpt_path = os.path.join(CHECKPOINT_DIR, ckpt)
+    #        torch.save({
+    #            "model":   model.state_dict(),
+    #            "optim":   optimizer.state_dict(),
+    #            "sched":   sched.state_dict(),
+    #            "epoch":   ep,
+    #            "val_ppl": val_ppl,
+    #        }, ckpt_path)
+    #        print(f"✓ saved checkpoint to {ckpt_path}")
 
-    trainer = Trainer()
-    best_val = float("inf")
-    for ep in range(1, EPOCHS+1):
-        print(f"--- epoch {ep}/{EPOCHS} ---")
-        trainer.run_epoch(train_loader, train=True)
-        val_ppl = trainer.run_epoch(val_loader, train=False)
-
-        if val_ppl < best_val:
-            best_val = val_ppl
-            ckpt = f"decoder_ep{ep}_ppl{val_ppl:.2f}.pt"
-            ckpt_path = os.path.join(CHECKPOINT_DIR, ckpt)
-            torch.save({
-                "model":   model.state_dict(),
-                "optim":   optimizer.state_dict(),
-                "sched":   sched.state_dict(),
-                "epoch":   ep,
-                "val_ppl": val_ppl,
-            }, ckpt_path)
-            print(f"✓ saved checkpoint to {ckpt_path}")
+    model.load_state_dict(torch.load("data/decoder/decoder_ep1_ppl4.24.pt")["model"])
+    trainer.run_epoch(val_loader, train=False)
 
     print("done.")
