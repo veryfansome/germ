@@ -1,3 +1,5 @@
+import faiss
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from opentelemetry import trace
@@ -6,7 +8,6 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from sentence_transformers import SentenceTransformer
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
-import os
 
 from germ.api.models import EmbeddingRequestPayload, TextListPayload
 from germ.observability.logging import logging, setup_logging
@@ -32,6 +33,8 @@ text_embedding_model = SentenceTransformer('intfloat/e5-base-v2')
 text_embedding_model_dim = text_embedding_model.get_sentence_embedding_dimension()
 ud_token_multi_classifier = MultiHeadPredictor(
     "veryfansome/multi-classifier", subfolder="models/ud_ewt_gum_pud_20250611")
+
+faiss_enwiki_pages = faiss.IndexIDMap(faiss.IndexFlatIP(text_embedding_model_dim))
 
 
 @asynccontextmanager

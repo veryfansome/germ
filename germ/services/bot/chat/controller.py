@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from germ.api.models import ChatRequest, ChatResponse
-from germ.data.vector_anchors import emotion_anchors, intent_anchors
+from germ.data.vector_anchors import emotion_anchors, intent_anchors, topic_anchors
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
 from germ.services.bot.websocket import (WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
@@ -45,7 +45,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.faiss_topic: faiss.IndexIDMap | None = None
         self.id_to_emotion: dict[int, str] = {i: k for i, k in enumerate(emotion_anchors)}
         self.id_to_intent: dict[int, str] = {i: k for i, k in enumerate(intent_anchors)}
-        self.id_to_topic: dict[int, str] = {}
+        self.id_to_topic: dict[int, str] = {i: k for i, k in enumerate(topic_anchors)}
         self.sig_to_conversation_id: dict[str, set] = {}
         self.sig_to_message_meta: dict[str, MessageMeta] = {}
 
@@ -103,6 +103,24 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
     async def on_disconnect(self, conversation_id: int):
         pass
+
+    async def on_load(self):
+        embedding_info = await get_text_embedding_info()
+        faiss_emotion = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
+        faiss_intent = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
+        faiss_topic = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
+
+        for index, anchors in [
+            (faiss_emotion, emotion_anchors),
+            (faiss_intent, intent_anchors),
+            (faiss_topic, topic_anchors),
+        ]:
+            for idx, emb in enumerate((await get_text_embedding(anchors, prompt="passage: "))):
+                await run_in_threadpool(index_embedding, index.add_with_ids, emb, idx)
+
+        self.faiss_emotion = faiss_emotion
+        self.faiss_intent = faiss_intent
+        self.faiss_topic = faiss_topic
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
@@ -188,29 +206,6 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
     async def on_send(self, conversation_id: int, dt_created: datetime, text_sig: str,
                       chat_response: ChatResponse, received_message_dt_created: datetime = None):
         pass
-
-    async def on_load(self):
-        # TODO: periodically rerun?
-        topic_results = await self.knowledge_graph.match_all_topic_definitions()
-        topic_anchors = [f"topic: {r['t']['lemma']}: {r['d']['text']}" for r in topic_results]
-        self.id_to_topic: dict[int, str] = {i: k for i, k in enumerate(topic_anchors)}
-
-        embedding_info = await get_text_embedding_info()
-        faiss_emotion = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
-        faiss_intent = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
-        faiss_topic = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
-
-        for index, anchors in [
-            (faiss_emotion, emotion_anchors),
-            (faiss_intent, intent_anchors),
-            (faiss_topic, topic_anchors),
-        ]:
-            for idx, emb in enumerate((await get_text_embedding(anchors, prompt="passage: "))):
-                await run_in_threadpool(index_embedding, index.add_with_ids, emb, idx)
-
-        self.faiss_emotion = faiss_emotion
-        self.faiss_intent = faiss_intent
-        self.faiss_topic = faiss_topic
 
     async def on_tick(self, conversation_id: int, ws_sender: WebSocketSender):
         if conversation_id not in self.conversations:
@@ -336,7 +331,7 @@ def is_plausible_noun_phrase(deprel_labels):
 
 
 def search_faiss_index(index: faiss.IndexIDMap | None, embedding, id2result: dict[int, str],
-                       num_results: int = 3, min_sim_score: float = 0.75):
+                       num_results: int = 1, min_sim_score: float = 0.50):
     results = []
     if index is None:  # Be load completion
         return results
