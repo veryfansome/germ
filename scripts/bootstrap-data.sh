@@ -12,4 +12,4 @@ fi
 source germ_venv/bin/activate
 
 mkdir -p /var/log/germ
-python -m germ.data.wordnet_graph
+#python -m germ.data.wordnet_graph

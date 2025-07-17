@@ -60,14 +60,14 @@ async def _link_chat_user_to_conversation(tx, user_id: int, conversation_id: int
     return await tx.run(query, user_id=user_id, conversation_id=conversation_id)
 
 
-async def _match_synset_n_hop_neighbors(tx, lemma: str, pos: str):
+async def _match_all_topic_definitions(tx):
     query = """
-    MATCH (target {pos: $pos})-[rel:ALSO_SEE|IS_A*1]-(neighbor {pos: $pos})
-    WHERE $lemma IN target.lemmas
-    RETURN DISTINCT neighbor
+    MATCH (n)-[:OF_TOPIC]->(t)
+    MATCH (d)-[r:DEFINES]->(t)
+    RETURN DISTINCT(d),r,t
     """
     results = []
-    async for record in await tx.run(query, lemma=lemma, pos=pos):
+    async for record in await tx.run(query):
         results.append(record)
     return results
 
@@ -146,6 +146,10 @@ class KnowledgeGraph:
                             f"(conversation:Conversation {{conversation_id: {conversation_id}}})-[rel:WITH]->"
                             f"(user:ChatUser {{user_id: {user_id}}})")
             return results
+
+    async def match_all_topic_definitions(self):
+        async with self.driver.session() as session:
+            return await session.execute_read(_match_all_topic_definitions)
 
     async def match_synset_definition(self, lemma: str, pos: str):
         async with self.driver.session() as session:

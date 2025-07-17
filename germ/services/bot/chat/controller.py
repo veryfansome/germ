@@ -4,12 +4,13 @@ import faiss
 import inflect
 import logging
 import numpy as np
+import time
 from datetime import datetime
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from germ.api.models import ChatRequest, ChatResponse
-from germ.data.vector_anchors import emotion_anchors, intent_anchors, topic_anchors
+from germ.data.vector_anchors import emotion_anchors, intent_anchors
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
 from germ.services.bot.websocket import (WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
@@ -44,7 +45,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.faiss_topic: faiss.IndexIDMap | None = None
         self.id_to_emotion: dict[int, str] = {i: k for i, k in enumerate(emotion_anchors)}
         self.id_to_intent: dict[int, str] = {i: k for i, k in enumerate(intent_anchors)}
-        self.id_to_topic: dict[int, str] = {i: k for i, k in enumerate(topic_anchors)}
+        self.id_to_topic: dict[int, str] = {}
         self.sig_to_conversation_id: dict[str, set] = {}
         self.sig_to_message_meta: dict[str, MessageMeta] = {}
 
@@ -82,11 +83,10 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         # Iterate through noun groups and determine if they have an associated determiner or possessive word
         idx_to_noun_det_or_pos = {}
         logger.info(f"idx_to_noun_group: {idx_to_noun_group}")
+        logger.info(f"idx_to_noun_joined_base_form: {[
+            idx_to_noun_joined_base_form[g[0]] for g in idx_to_noun_group.values()
+        ]}")
         for noun_group in idx_to_noun_group.values():
-            lemma = idx_to_noun_joined_base_form[noun_group[0]]
-            results = await self.knowledge_graph.match_synset_definition(lemma, "n")
-            logger.info(f"{lemma} => results: {[r['syndef']['text'] for r in results]}")
-
             # dt_or_pos_idx = find_first_from_right(
             #    label_dict["xpos"][:noun_group[0]], {"DT", "POS", "PRP$"})
             # if dt_or_pos_idx == -1 and noun_group[-1] < token_cnt - 2:
@@ -99,6 +99,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             #            f"'{idx_to_noun_joined_raw_form[noun_group[0]]}')")
             # for idx in noun_group:
             #    idx_to_noun_det_or_pos[idx] = dt_or_pos_idx
+            pass
 
     async def on_disconnect(self, conversation_id: int):
         pass
@@ -129,14 +130,15 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             ])
             # Cache results
             self.sig_to_message_meta[text_sig] = meta = MessageMeta(
-                doc=parsed_message, pos=pos, text_embs=text_embs["embeddings"]
+                doc=parsed_message, pos=pos, text_embs=text_embs
             )
         else:
             meta = self.sig_to_message_meta[text_sig]
 
         # Walk through each doc element
-        all_hydrated_elements = []
-        message_len = len(meta.doc.scaffold)
+        # TODO:
+        #   - What should happen in the foreground vs background?
+        #   - Match to Wikipedia articles?
         for element_idx, scaffold_element in enumerate(meta.doc.scaffold):
             hydrated_headings = {}
             for level, heading in scaffold_element.headings.items():
@@ -157,14 +159,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                         meta.text_embs[text_idx], meta.pos[text_idx]
                     ))
 
-            # Goals:
-            # - Look for intent
-            # - Look for patterns and decide response
-            #   - Updates to knowledge graph
-            #   - Learn new patterns to react to
-            #   - Learn new reactions to existing patterns
-            # - Instinctive vs learned behavior?
             for emb, pos in hydrated_element:
+                #log_pos_labels(pos)
+
                 is_exclamatory = "!" in pos["tokens"] and pos["pos"][pos["tokens"].index("!")] == "PUNCT"
                 is_imperative = "Imp" in pos["Mood"]
                 is_indicative = "Ind" in pos["Mood"]
@@ -179,14 +176,12 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                     run_in_threadpool(search_faiss_index, self.faiss_intent, emb, self.id_to_intent),
                     run_in_threadpool(search_faiss_index, self.faiss_topic, emb, self.id_to_topic),
                 ])
-                logger.info(f"Embeddings emotion signals: {emotion_labels}")
-                logger.info(f"Embeddings intent signals: {intent_labels}")
-                logger.info(f"Embeddings topic signals: {topic_labels}")
+                logger.info(f"Embedding emotion signals: {emotion_labels}")
+                logger.info(f"Embedding intent signals: {intent_labels}")
+                logger.info(f"Embedding topic signals: {topic_labels}")
 
-                log_pos_labels(pos)
                 await self.extract_noun_groups(pos)
-                #await self.knowledge_graph.match_synset(tokens=meta.pos[sentence_idx]["tokens"])
-            all_hydrated_elements.append((hydrated_headings, hydrated_element))
+
         # Send to LLM
         await self.delegate.on_receive(user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender)
 
@@ -194,22 +189,39 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                       chat_response: ChatResponse, received_message_dt_created: datetime = None):
         pass
 
-    async def on_start(self):
+    async def on_load(self):
+        # TODO: periodically rerun?
+        topic_results = await self.knowledge_graph.match_all_topic_definitions()
+        topic_anchors = [f"topic: {r['t']['lemma']}: {r['d']['text']}" for r in topic_results]
+        self.id_to_topic: dict[int, str] = {i: k for i, k in enumerate(topic_anchors)}
+
         embedding_info = await get_text_embedding_info()
-        self.faiss_emotion = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
-        self.faiss_intent = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
-        self.faiss_topic = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
+        faiss_emotion = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
+        faiss_intent = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
+        faiss_topic = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
 
         for index, anchors in [
-            (self.faiss_emotion, emotion_anchors),
-            (self.faiss_intent, intent_anchors),
-            (self.faiss_topic, topic_anchors)
+            (faiss_emotion, emotion_anchors),
+            (faiss_intent, intent_anchors),
+            (faiss_topic, topic_anchors),
         ]:
-            for idx, emb in enumerate((await get_text_embedding(anchors, prompt="passage: "))["embeddings"]):
+            for idx, emb in enumerate((await get_text_embedding(anchors, prompt="passage: "))):
                 await run_in_threadpool(index_embedding, index.add_with_ids, emb, idx)
 
+        self.faiss_emotion = faiss_emotion
+        self.faiss_intent = faiss_intent
+        self.faiss_topic = faiss_topic
+
     async def on_tick(self, conversation_id: int, ws_sender: WebSocketSender):
-        logger.info(f"conversation {conversation_id} is still active")
+        if conversation_id not in self.conversations:
+            logger.info(f"conversation {conversation_id} is still active")
+            # TODO: Handle continued conversations
+            return
+
+        timestamps = list(self.conversations[conversation_id]["messages"].keys())
+        timestamps.sort()
+        last_message_age_secs = int(time.time()) - timestamps.pop()
+        logger.info(f"{last_message_age_secs} seconds since last message on conversation {conversation_id}")
 
 
 def extract_label_groups(labels: list[str], target_labels: set[str] = None):
@@ -291,11 +303,16 @@ def get_noun_base_form(token: str, pos_label):
     return noun_base_form
 
 
-async def get_text_embedding(texts: list[str], prompt: str = "query: "):
+async def get_text_embedding(texts: list[str], batch_size: int = 1000, prompt: str = "query: "):
+    texts_len = len(texts)
+    embeddings = []
     async with aiohttp.ClientSession() as session:
-        async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/embedding",
-                                json={"texts": texts, "prompt": prompt}) as response:
-            return await response.json()
+        for idx in range(0, texts_len, batch_size):
+            logger.info(f"getting text embedding for {texts_len} texts")
+            async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/embedding",
+                                    json={"texts": texts[idx:idx + batch_size], "prompt": prompt}) as response:
+                embeddings.extend((await response.json())["embeddings"])
+        return embeddings
 
 
 async def get_text_embedding_info():
@@ -318,12 +335,15 @@ def is_plausible_noun_phrase(deprel_labels):
     return not (len(found_elements) > 1)
 
 
-def search_faiss_index(index: faiss.IndexIDMap, embedding, id2result: dict[int, str],
+def search_faiss_index(index: faiss.IndexIDMap | None, embedding, id2result: dict[int, str],
                        num_results: int = 3, min_sim_score: float = 0.75):
+    results = []
+    if index is None:  # Be load completion
+        return results
+
     vector = np.array([embedding], dtype=np.float32)
     faiss.normalize_L2(vector)
 
-    results = []
     sim_scores, neighbors = index.search(vector, num_results)
     for vector_id, sim_score in zip(neighbors[0], sim_scores[0]):
         if vector_id != -1 and sim_score > min_sim_score:  # -1 means no match
