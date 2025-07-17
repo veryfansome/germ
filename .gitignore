@@ -13,6 +13,7 @@ germ/services/bot/static/*.html
 germ/services/bot/static/tests/*
 data/e5_*
 data/oewn*
+data/*.sql.gz
 germ_venv/
 
 google_application_credentials.json
