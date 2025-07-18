@@ -35,6 +35,8 @@ services:
       OPENAI_MINI_MODEL: ${OPENAI_MINI_MODEL}
       OPENAI_REASONING_MODEL: ${OPENAI_REASONING_MODEL}
       PG_HOST: &pg-host germ-pg
+      MYSQL_PASSWORD: &mariadb-password ${POSTGRES_PASSWORD:-g01ngV1r6l}
+      MYSQL_USER: &mariadb-user ${POSTGRES_USER:-germ}
       POSTGRES_PASSWORD: &pg-password ${POSTGRES_PASSWORD:-bacteria4life}
       POSTGRES_USER: &pg-user ${POSTGRES_USER:-germ}
     command: [ "scripts/app-start.sh", "germ.services.bot.main:bot_service", "8000" ]
@@ -69,9 +71,11 @@ services:
     networks: [bots]
     container_name: germ-db-migrate
     depends_on:
-      pg-init:
+      mariadb-init:
         condition: service_completed_successfully
       neo4j-init:
+        condition: service_completed_successfully
+      pg-init:
         condition: service_completed_successfully
     image: "germ-db-migrate:latest"
     build:
@@ -123,6 +127,31 @@ services:
     environment:
       WAIT_FOR_HOST: *jaeger-host
       WAIT_FOR_PORT: 4317
+    command: [ "scripts/wait-for-port-up.sh" ]
+
+  mariadb:
+    networks: [bots]
+    image: mariadb:11.8
+    container_name: &mariadb-host germ-mariadb
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: Un71m1t6dP0w6r
+      MYSQL_DATABASE: germ
+      MYSQL_PASSWORD: *mariadb-password
+      MYSQL_USER: *mariadb-user
+
+  mariadb-init:
+    networks: [bots]
+    container_name: germ-mariadb-init
+    image: "germ:latest"
+    volumes:
+      - ./:/src
+    working_dir: /src
+    environment:
+      <<: *local-dev
+      WAIT_FOR_HOST: *mariadb-host
+      WAIT_FOR_PORT: 3306
     command: [ "scripts/wait-for-port-up.sh" ]
 
   models:
