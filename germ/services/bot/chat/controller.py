@@ -29,6 +29,7 @@ class MessageMeta(BaseModel):
     classification: ChatRequestClassification | None = None
     doc: ParsedDoc
     pos: list[dict[str, str | list[str]]]
+    reconstructed_message: str
     text_embs: list[list[float]]
 
 
@@ -153,36 +154,73 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             parsed_message = await run_in_threadpool(
                 parse_markdown_doc, chat_request.messages[-1].content
             )
-            # Get embeddings and POS labels for text blobs in one go.
-            # TODO: Get embeddings for code blocks as well.
-            text_embs, pos = await asyncio.gather(*[
-                get_text_embedding(parsed_message.text),
-                get_pos_labels(parsed_message.text)
-            ])
-            # Rebuild the message's text with placeholders for code blocks so we can get embeddings for the complete
-            # message, minus code that we can handle with a separate model.
-            reconstructed_message_text = ""
-            for element_idx, scaffold_element in enumerate(parsed_message.scaffold):
-                hydrated_headings = {}
-                for level, heading in scaffold_element.headings.items():
-                    hydrated_headings[level] = [(text_embs[idx], pos[idx]) for idx in heading.text]
 
-                hydrated_element = []
+            # Rebuild the message's text with placeholders for code blocks.
+            heading_context = {}
+            reconstructed_message = []
+            for element_idx, scaffold_element in enumerate(parsed_message.scaffold):
+                for level, heading in scaffold_element.headings.items():
+                    heading_text = " ".join([parsed_message.text[idx] for idx in heading.text])
+                    if level not in heading_context or heading_context[level] != heading_text:
+                        heading_context[level] = heading_text
+                        reconstructed_message.append(f"{'#' * level} {heading_text}")
+
                 if scaffold_element.type == DocElementType.CODE_BLOCK:
-                    pass  # TODO
+                    # TODO: Get embeddings for code blocks as well.
+                    reconstructed_message.append("\n[CODE_SNIPPET]\n")
                 elif scaffold_element.type == DocElementType.LIST:
                     for item_idx, item in enumerate(scaffold_element.items):
+                        reconstructed_message.append("- " + (
+                            " ".join([parsed_message.text[idx] for idx in item.text])
+                        ))
+                elif scaffold_element.type == DocElementType.PARAGRAPH:
+                    reconstructed_message.append(
+                        " ".join([parsed_message.text[idx] for idx in scaffold_element.text])
+                    )
+
+            # Get embeddings and POS labels for text blobs in one go.
+            reconstructed_message = "\n".join(reconstructed_message)
+            text_embs, pos = await asyncio.gather(*[
+                get_text_embedding([reconstructed_message]),
+                get_pos_labels(parsed_message.text)
+            ])
+
+            # Embeddings-based recall
+            emotion_labels, intent_labels, topic_labels = await asyncio.gather(*[
+                run_in_threadpool(
+                    search_faiss_index, self.faiss_emotion, text_embs[0], self.id_to_emotion,
+                    num_results=3, min_sim_score=0.5
+                ),
+                run_in_threadpool(
+                    search_faiss_index, self.faiss_intent, text_embs[0], self.id_to_intent,
+                    num_results=3, min_sim_score=0.5
+                ),
+                run_in_threadpool(
+                    search_faiss_index, self.faiss_topic, text_embs[0], self.id_to_topic,
+                    num_results=3, min_sim_score=0.5
+                ),
+            ])
+            logger.info(f"Embedding emotion signals: {emotion_labels}")
+            logger.info(f"Embedding intent signals: {intent_labels}")
+            logger.info(f"Embedding topic signals: {topic_labels}")
+
+            # Process POS labels
+            for element_idx, scaffold_element in enumerate(parsed_message.scaffold):
+                heading_pos = {}
+                for level, heading in scaffold_element.headings.items():
+                    heading_pos[level] = [pos[idx] for idx in heading.text]
+
+                element_pos = []
+                if scaffold_element.type == DocElementType.LIST:
+                    for item_idx, item in enumerate(scaffold_element.items):
                         for text_idx in item.text:
-                            hydrated_element.append((
-                                text_embs[text_idx], pos[text_idx]
-                            ))
+                            element_pos.append(pos[text_idx])
                 elif scaffold_element.type == DocElementType.PARAGRAPH:
                     for text_idx in scaffold_element.text:
-                        hydrated_element.append((
-                            text_embs[text_idx], pos[text_idx]
-                        ))
+                        element_pos.append(pos[text_idx])
 
-                for sentence_emb, sentence_pos in hydrated_element:
+                # TODO: Need to consider heading POS
+                for sentence_pos in element_pos:
                     #log_pos_labels(sentence_pos)
                     is_exclamatory = (
                             "!" in sentence_pos["tokens"]
@@ -197,31 +235,13 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                     logger.info(f"Grammatical intent signals: Exc:{is_exclamatory} Imp:{is_imperative}, "
                                 f"Ind:{is_indicative}, Int:{is_interrogative}")
 
-                    emotion_labels, intent_labels, topic_labels = await asyncio.gather(*[
-                        run_in_threadpool(
-                            search_faiss_index, self.faiss_emotion, sentence_emb, self.id_to_emotion,
-                            num_results=3, min_sim_score=0.5
-                        ),
-                        run_in_threadpool(
-                            search_faiss_index, self.faiss_intent, sentence_emb, self.id_to_intent,
-                            num_results=3, min_sim_score=0.5
-                        ),
-                        run_in_threadpool(
-                            search_faiss_index, self.faiss_topic, sentence_emb, self.id_to_topic,
-                            num_results=3, min_sim_score=0.5
-                        ),
-                    ])
-                    logger.info(f"Embedding emotion signals: {emotion_labels}")
-                    logger.info(f"Embedding intent signals: {intent_labels}")
-                    logger.info(f"Embedding topic signals: {topic_labels}")
-
                     await self.extract_noun_groups(sentence_pos)
-
             # Cache results
             self.sig_to_message_meta[text_sig] = meta = MessageMeta(
                 classification = await classification_task,
                 doc=parsed_message,
                 pos=pos,
+                reconstructed_message=reconstructed_message,
                 text_embs=text_embs
             )
         else:
