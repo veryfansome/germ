@@ -26,19 +26,24 @@ services:
       - nltk-data:/root/nltk_data
     working_dir: /src
     environment: &local-dev
-      HF_HOME: &hf-home ${HF_HOME:-/src/data/huggingface}
+      HF_HOME: ${HF_HOME:-/src/data/huggingface}
+      MKL_NUM_THREADS: "1"
+      MYSQL_PASSWORD: &mariadb-password ${POSTGRES_PASSWORD:-g01ngV1r6l}
+      MYSQL_USER: &mariadb-user ${POSTGRES_USER:-germ}
       NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
       NEO4J_HOST: &neo4j-host germ-neo4j
+      NUMBA_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL}
       OPENAI_IMAGE_MODEL: ${OPENAI_IMAGE_MODEL}
       OPENAI_MINI_MODEL: ${OPENAI_MINI_MODEL}
       OPENAI_REASONING_MODEL: ${OPENAI_REASONING_MODEL}
+      OPENBLAS_NUM_THREADS: "1"
       PG_HOST: &pg-host germ-pg
-      MYSQL_PASSWORD: &mariadb-password ${POSTGRES_PASSWORD:-g01ngV1r6l}
-      MYSQL_USER: &mariadb-user ${POSTGRES_USER:-germ}
       POSTGRES_PASSWORD: &pg-password ${POSTGRES_PASSWORD:-bacteria4life}
       POSTGRES_USER: &pg-user ${POSTGRES_USER:-germ}
+      PYTHONDONTWRITEBYTECODE: "1"
     command: [ "scripts/app-start.sh", "germ.services.bot.main:bot_service", "8000" ]
     healthcheck:
       test: [ "CMD", "curl", "-s", "localhost:8000/healthz" ]
@@ -170,8 +175,7 @@ services:
     volumes:
       - ./:/src:rw
     working_dir: /src
-    environment:
-      HF_HOME: *hf-home
+    environment: *local-dev
     command: [ "scripts/app-start.sh", "germ.services.models.main:model_service", "9000" ]
     healthcheck:
       test: [ "CMD", "curl", "-s", "localhost:9000/healthz" ]

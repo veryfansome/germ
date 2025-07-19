@@ -198,24 +198,23 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
             tools[m] = ImageModelEventHandler(m)
         for tool in tools.values():
             self.tools[tool.get_function_name()] = tool
-            logger.info(f"added {tool.get_function_name()} => {tool}")
+            logger.info(f"Added {tool.get_function_name()} => {tool}")
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         if chat_request.uploaded_filenames:
-            logger.info(f"uploaded file: {chat_request.uploaded_filenames}")
+            logger.info(f"Uploaded file: {chat_request.uploaded_filenames}")
             await self.assistant_helper.handle_in_a_thread(
                 conversation_id, dt_created, chat_request, ws_sender
             )
         else:
             completion = await self.do_chat_completion(chat_request)
+            error = False
             if completion is None:
-                await ws_sender.send_reply(
-                    dt_created,
-                    ChatResponse(complete=True, content="Sorry, I'm unable to access my language model.")
+                await ws_sender.send_message(
+                    ChatResponse(complete=True, content="Sorry, I'm unable to access my language model.", error=True)
                 )
-                return
             elif completion.choices[0].message.content is None:
                 if completion.choices[0].message.tool_calls is not None:
                     tool_response_tasks = []
@@ -230,19 +229,22 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                         )
                     # Let user know you're delegating
                     tool_names = [f"`{t.function.name}`" for t in completion.choices[0].message.tool_calls]
-                    await ws_sender.send_reply(
-                        dt_created,
+                    await ws_sender.send_message(
                         ChatResponse(complete=False, content=f"One moment, using tools: {''.join(tool_names)}.")
                     )
+                    # TODO: Tools calls may not mean responded going forward
                     await asyncio.gather(*tool_response_tasks)
                     return
                 else:
-                    logger.error("completion content and tool_calls are both missing", completion)
-                    completion.choices[0].message.content = "Strange... I don't have a response"
+                    logger.error("Completion content and tool_calls are both missing.", completion)
+                    completion.choices[0].message.content = "Something went wrong. I don't have a response."
+                    completion.model = "none"
+                    error = True
             # Return completed response
             await ws_sender.send_reply(
                 dt_created,
-                ChatResponse(complete=True, content=completion.choices[0].message.content, model=completion.model)
+                ChatResponse(complete=True, content=completion.choices[0].message.content,
+                             error=error, model=completion.model)
             )
 
     async def do_chat_completion(self, chat_request: ChatRequest) -> Optional[ChatCompletion]:

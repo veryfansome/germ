@@ -13,6 +13,7 @@ from germ.api.models import ChatRequest, ChatResponse
 from germ.data.vector_anchors import emotion_anchors, intent_anchors, topic_anchors
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
+from germ.services.bot.chat.classifier import ChatRequestClassification, ChatRequestClassifier
 from germ.services.bot.websocket import (WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                                          WebSocketSendEventHandler, WebSocketSender, WebSocketSessionMonitor)
 from germ.services.models.predict.multi_predict import log_pos_labels
@@ -25,6 +26,7 @@ infect_eng = inflect.engine()
 
 
 class MessageMeta(BaseModel):
+    classification: ChatRequestClassification | None = None
     doc: ParsedDoc
     pos: list[dict[str, str | list[str]]]
     text_embs: list[list[float]]
@@ -136,6 +138,8 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.sig_to_conversation_id.get(text_sig, set()).add(conversation_id)
 
         if text_sig not in self.sig_to_message_meta:
+            classification_task = asyncio.create_task(ChatRequestClassifier.classify(chat_request))
+
             # Parse message into a ParsedMarkdownPage, which includes a document scaffold (with idx pointers to text),
             # list of text blobs, and list of code blobs.
             parsed_message = await run_in_threadpool(
@@ -146,59 +150,66 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 get_text_embedding(parsed_message.text),
                 get_pos_labels(parsed_message.text)
             ])
+            # Walk through each parsed element. An element can be a code block, list, or paragraph. With each list or
+            # paragraph, there are sentences that each have their own POS labels and embeddings.
+            for element_idx, scaffold_element in enumerate(parsed_message.scaffold):
+                hydrated_headings = {}
+                for level, heading in scaffold_element.headings.items():
+                    hydrated_headings[level] = [(text_embs[idx], pos[idx]) for idx in heading.text]
+
+                hydrated_element = []
+                if scaffold_element.type == DocElementType.CODE_BLOCK:
+                    pass  # TODO
+                elif scaffold_element.type == DocElementType.LIST:
+                    for item_idx, item in enumerate(scaffold_element.items):
+                        for text_idx in item.text:
+                            hydrated_element.append((
+                                text_embs[text_idx], pos[text_idx]
+                            ))
+                elif scaffold_element.type == DocElementType.PARAGRAPH:
+                    for text_idx in scaffold_element.text:
+                        hydrated_element.append((
+                            text_embs[text_idx], pos[text_idx]
+                        ))
+
+                for sentence_emb, sentence_pos in hydrated_element:
+                    #log_pos_labels(sentence_pos)
+                    is_exclamatory = (
+                            "!" in sentence_pos["tokens"]
+                            and sentence_pos["pos"][sentence_pos["tokens"].index("!")] == "PUNCT"
+                    )
+                    is_imperative = "Imp" in sentence_pos["Mood"]
+                    is_indicative = "Ind" in sentence_pos["Mood"]
+                    is_interrogative = "Int" in sentence_pos["Mood"] or (
+                            "?" in sentence_pos["tokens"]
+                            and sentence_pos["pos"][sentence_pos["tokens"].index("?")] == "PUNCT"
+                    )
+                    logger.info(f"Grammatical intent signals: Exc:{is_exclamatory} Imp:{is_imperative}, "
+                                f"Ind:{is_indicative}, Int:{is_interrogative}")
+
+                    emotion_labels, intent_labels, topic_labels = await asyncio.gather(*[
+                        run_in_threadpool(search_faiss_index,
+                                          self.faiss_emotion, sentence_emb, self.id_to_emotion),
+                        run_in_threadpool(search_faiss_index,
+                                          self.faiss_intent, sentence_emb, self.id_to_intent),
+                        run_in_threadpool(search_faiss_index,
+                                          self.faiss_topic, sentence_emb, self.id_to_topic),
+                    ])
+                    logger.info(f"Embedding emotion signals: {emotion_labels}")
+                    logger.info(f"Embedding intent signals: {intent_labels}")
+                    logger.info(f"Embedding topic signals: {topic_labels}")
+
+                    await self.extract_noun_groups(sentence_pos)
+
             # Cache results
             self.sig_to_message_meta[text_sig] = meta = MessageMeta(
-                doc=parsed_message, pos=pos, text_embs=text_embs
+                classification = await classification_task,
+                doc=parsed_message,
+                pos=pos,
+                text_embs=text_embs
             )
         else:
             meta = self.sig_to_message_meta[text_sig]
-
-        # Walk through each doc element
-        # TODO:
-        #   - What should happen in the foreground vs background?
-        #   - Match to Wikipedia articles?
-        for element_idx, scaffold_element in enumerate(meta.doc.scaffold):
-            hydrated_headings = {}
-            for level, heading in scaffold_element.headings.items():
-                hydrated_headings[level] = [(meta.text_embs[idx], meta.pos[idx]) for idx in heading.text]
-
-            hydrated_element = []
-            if scaffold_element.type == DocElementType.CODE_BLOCK:
-                pass  # TODO
-            elif scaffold_element.type == DocElementType.LIST:
-                for item_idx, item in enumerate(scaffold_element.items):
-                    for text_idx in item.text:
-                        hydrated_element.append((
-                            meta.text_embs[text_idx], meta.pos[text_idx]
-                        ))
-            elif scaffold_element.type == DocElementType.PARAGRAPH:
-                for text_idx in scaffold_element.text:
-                    hydrated_element.append((
-                        meta.text_embs[text_idx], meta.pos[text_idx]
-                    ))
-
-            for emb, pos in hydrated_element:
-                #log_pos_labels(pos)
-
-                is_exclamatory = "!" in pos["tokens"] and pos["pos"][pos["tokens"].index("!")] == "PUNCT"
-                is_imperative = "Imp" in pos["Mood"]
-                is_indicative = "Ind" in pos["Mood"]
-                is_interrogative = "Int" in pos["Mood"] or (
-                        "?" in pos["tokens"] and pos["pos"][pos["tokens"].index("?")] == "PUNCT"
-                )
-                logger.info(f"Grammatical intent signals: Exc:{is_exclamatory} Imp:{is_imperative}, "
-                            f"Ind:{is_indicative}, Int:{is_interrogative}")
-
-                emotion_labels, intent_labels, topic_labels = await asyncio.gather(*[
-                    run_in_threadpool(search_faiss_index, self.faiss_emotion, emb, self.id_to_emotion),
-                    run_in_threadpool(search_faiss_index, self.faiss_intent, emb, self.id_to_intent),
-                    run_in_threadpool(search_faiss_index, self.faiss_topic, emb, self.id_to_topic),
-                ])
-                logger.info(f"Embedding emotion signals: {emotion_labels}")
-                logger.info(f"Embedding intent signals: {intent_labels}")
-                logger.info(f"Embedding topic signals: {topic_labels}")
-
-                await self.extract_noun_groups(pos)
 
         # Send to LLM
         await self.delegate.on_receive(user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender)

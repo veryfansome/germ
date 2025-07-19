@@ -23,7 +23,6 @@ import aiofiles
 import asyncio
 import os
 
-from germ.api.models import ChatResponse
 from germ.database.neo4j import KnowledgeGraph
 from germ.database.pg import DATABASE_URL, TableHelper
 from germ.observability.logging import logging, setup_logging
@@ -306,21 +305,15 @@ async def websocket_chat(ws: WebSocket):
     if not session or "user_id" not in session:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION)
         return
-
     user_id = session["user_id"]
     if "conversation_ident" in ws.url.query:
         query_params = dict(map(lambda s: s.split('='), ws.url.query.split('&')))
         conversation_id = await websocket_manager.connect(
             user_id, ws, conversation_ident=query_params["conversation_ident"]
         )
-        await websocket_manager.new_ws_sender(conversation_id, ws).send_message(
-            ChatResponse(complete=True, content="Reconnected!")
-        )
-        logger.info(f"Resuming conversation {conversation_id} with user {user_id}")
+        if conversation_id is None:
+            await ws.close(code=status.WS_1003_UNSUPPORTED_DATA)
+            return
     else:
         conversation_id = await websocket_manager.connect(user_id, ws)
-        await websocket_manager.new_ws_sender(conversation_id, ws).send_message(
-            ChatResponse(complete=True, content="Connected!")
-        )
-        logger.info(f"Starting conversation {conversation_id} with user {user_id}")
     await websocket_manager.wait_for_receive(user_id, conversation_id)

@@ -160,8 +160,7 @@ class ThreadEventHandler(AsyncAssistantEventHandler):
 
     @override
     async def on_tool_call_created(self, tool_call):
-        await self.ws_sender.send_reply(
-            self.dt_created,
+        await self.ws_sender.send_message(
             ChatResponse(complete=False, content=f"One moment, using tool: `{tool_call.type}`.")
         )
         await super().on_tool_call_created(tool_call)

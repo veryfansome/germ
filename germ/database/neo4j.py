@@ -41,6 +41,15 @@ async def _link_chat_message_received_to_chat_user(tx, conversation_id: int, dt_
     return await tx.run(query, conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
 
 
+async def _link_chat_message_received_to_conversation(tx, conversation_id: int, dt_created: datetime, user_id: int):
+    query = """
+    MATCH (message:ChatMessage {conversation_id: $conversation_id, dt_created: $dt_created}), (conversation:Conversation {conversation_id: $conversation_id})
+    MERGE (message)-[rel:PART_OF]->(conversation)
+    RETURN rel
+    """
+    return await tx.run(query, conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
+
+
 async def _link_chat_message_sent_to_chat_message_received(
         tx, received_dt_created: datetime, sent_dt_created: datetime, conversation_id: int):
     query = """
@@ -121,6 +130,17 @@ class KnowledgeGraph:
                 logger.info("MERGE "
                             f"(user:ChatUser {{user_id: {user_id}}})-[rel:SENT]->"
                             f"(message:ChatMessage {{conversation_id: {conversation_id}, dt_created: {dt_created}}})")
+            return results
+
+    async def link_chat_message_received_to_conversation(self, conversation_id: int, dt_created: datetime, user_id: int):
+        async with self.driver.session() as session:
+            results = await session.execute_write(
+                _link_chat_message_received_to_conversation,
+                conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
+            if results:
+                logger.info("MERGE "
+                            f"((message:ChatMessage {{conversation_id: {conversation_id}, dt_created: {dt_created}}})-[rel:PART_OF]->"
+                            f"(conversation:Conversation {{conversation_id: {conversation_id})")
             return results
 
     async def link_chat_message_sent_to_chat_message_received(
