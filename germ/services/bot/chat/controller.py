@@ -137,21 +137,31 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         }
         self.sig_to_conversation_id.get(text_sig, set()).add(conversation_id)
 
+        # TODO: Ideas
+        #   - Use text embedding signals to decide intent, topics and when to incorporate wikipedia content
+        #       - Combine several embedding signals and check similarity
+        #   - Use code embedding signals to decide what languages, libraries, or technologies are in play
+        #   - Use POS labels to determine if the message is a question, exclamation, or statement
+        #   - Use POS labels to determine if we should ask LLM to generate search queries
+        #   - Train a small classifier to best combo of responses
+
         if text_sig not in self.sig_to_message_meta:
             classification_task = asyncio.create_task(ChatRequestClassifier.classify(chat_request))
 
-            # Parse message into a ParsedMarkdownPage, which includes a document scaffold (with idx pointers to text),
+            # Parse the message into a ParsedDoc, which includes a document scaffold (with idx pointers to text),
             # list of text blobs, and list of code blobs.
             parsed_message = await run_in_threadpool(
                 parse_markdown_doc, chat_request.messages[-1].content
             )
-            # Get embeddings and POS labels
+            # Get embeddings and POS labels for text blobs in one go.
+            # TODO: Get embeddings for code blocks as well.
             text_embs, pos = await asyncio.gather(*[
                 get_text_embedding(parsed_message.text),
                 get_pos_labels(parsed_message.text)
             ])
-            # Walk through each parsed element. An element can be a code block, list, or paragraph. With each list or
-            # paragraph, there are sentences that each have their own POS labels and embeddings.
+            # Rebuild the message's text with placeholders for code blocks so we can get embeddings for the complete
+            # message, minus code that we can handle with a separate model.
+            reconstructed_message_text = ""
             for element_idx, scaffold_element in enumerate(parsed_message.scaffold):
                 hydrated_headings = {}
                 for level, heading in scaffold_element.headings.items():
@@ -188,12 +198,18 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                                 f"Ind:{is_indicative}, Int:{is_interrogative}")
 
                     emotion_labels, intent_labels, topic_labels = await asyncio.gather(*[
-                        run_in_threadpool(search_faiss_index,
-                                          self.faiss_emotion, sentence_emb, self.id_to_emotion),
-                        run_in_threadpool(search_faiss_index,
-                                          self.faiss_intent, sentence_emb, self.id_to_intent),
-                        run_in_threadpool(search_faiss_index,
-                                          self.faiss_topic, sentence_emb, self.id_to_topic),
+                        run_in_threadpool(
+                            search_faiss_index, self.faiss_emotion, sentence_emb, self.id_to_emotion,
+                            num_results=3, min_sim_score=0.5
+                        ),
+                        run_in_threadpool(
+                            search_faiss_index, self.faiss_intent, sentence_emb, self.id_to_intent,
+                            num_results=3, min_sim_score=0.5
+                        ),
+                        run_in_threadpool(
+                            search_faiss_index, self.faiss_topic, sentence_emb, self.id_to_topic,
+                            num_results=3, min_sim_score=0.5
+                        ),
                     ])
                     logger.info(f"Embedding emotion signals: {emotion_labels}")
                     logger.info(f"Embedding intent signals: {intent_labels}")
@@ -342,7 +358,7 @@ def is_plausible_noun_phrase(deprel_labels):
 
 
 def search_faiss_index(index: faiss.IndexIDMap | None, embedding, id2result: dict[int, str],
-                       num_results: int = 1, min_sim_score: float = 0.50):
+                       num_results: int = 1, min_sim_score: float = 0.5):
     results = []
     if index is None:  # Be load completion
         return results
