@@ -167,6 +167,9 @@
         const responseRole = data['role'];
         const responseContent = data['content'];
 
+        if (responseComplete) {
+            loadingIndicator.remove();
+        }
         if (responseModel === "none") {
             if (responseError) {
                 showErrorPopup(responseContent)
@@ -174,8 +177,6 @@
                 showInfoPopup(responseContent)
             }
             return
-        } else if (responseComplete) {
-            loadingIndicator.remove(); // Stop showing loading indicator
         }
 
         chatCompletionMessageList.push({ role: responseRole, content: responseContent });
