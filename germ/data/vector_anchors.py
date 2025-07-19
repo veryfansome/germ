@@ -60,11 +60,11 @@ emotion_anchors = [
 ]
 
 intent_anchors = [
-    "intent: to analyze numeric data",
-    "intent: to analyze textual data",
+    "intent: to analyze provided numeric or textual data",
     "intent: to be amused or entertained",
     "intent: to brainstorm ideas",
     "intent: to come up with a plan or strategy",
+    "intent: to compose a document or communication",
     "intent: to debug a code snippet",
     "intent: to engage in a casual conversation",
     "intent: to get emotional support",
@@ -74,14 +74,13 @@ intent_anchors = [
     "intent: to solve an interpersonal problem",
     "intent: to summarize some text",
     "intent: to translate some text",
-    "intent: to understand a literary concept",
-    "intent: to understand a scientific concept",
-    "intent: to understand a social or historical concept",
-    "intent: to understand a technical concept",
-    "intent: to understand an artistic concept",
-    "intent: to understand the meaning of a word or phrase",
+    "intent: to ask about a literary concept",
+    "intent: to ask about a scientific concept",
+    "intent: to ask about a social or historical concept",
+    "intent: to ask about a technical concept",
+    "intent: to ask about an artistic concept",
+    "intent: to ask about the meaning of a word or phrase",
     "intent: to write a snippet of code",
-    "intent: to write an article, email, essay, blog post, or other document",
 ]
 
 topic_anchors = [

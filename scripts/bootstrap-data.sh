@@ -21,6 +21,9 @@ for TBL in page page_props; do
         pigz -d -p 8 "data/$TBL_DUMP_FILE"
     fi
     #mysql --user="$MYSQL_USER" --password="$MYSQL_PASSWORD" -h germ-mariadb -D germ < "data/$TBL_DUMP_FILE"
+    mysql --user="$MYSQL_USER" --password="$MYSQL_PASSWORD" -h germ-mariadb -D germ < database/sql/wiki_dump.sql \
+        > data/enwiki-latest-fa-ga-titles.tsv
+
 done
 
 set +x

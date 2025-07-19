@@ -140,7 +140,8 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         # TODO: Ideas
         #   - Use text embedding signals to decide intent, topics and when to incorporate wikipedia content
-        #       - Combine several embedding signals and check similarity
+        #       - Recombine several embedding signals and check similarity with original message?
+        #   - Use code embedding signals to decide when to use a text browser
         #   - Use code embedding signals to decide what languages, libraries, or technologies are in play
         #   - Use POS labels to determine if the message is a question, exclamation, or statement
         #   - Use POS labels to determine if we should ask LLM to generate search queries
@@ -236,6 +237,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                                 f"Ind:{is_indicative}, Int:{is_interrogative}")
 
                     await self.extract_noun_groups(sentence_pos)
+
             # Cache results
             self.sig_to_message_meta[text_sig] = meta = MessageMeta(
                 classification = await classification_task,
