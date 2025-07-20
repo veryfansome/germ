@@ -1,3 +1,4 @@
+
 accelerate
 aiofiles
 aiohttp
@@ -10,8 +11,8 @@ cryptography
 datasets
 dnspython
 einops
-fastapi
 faiss-cpu
+fastapi
 gunicorn
 httpx
 huggingface_hub[hf_xet]
@@ -33,6 +34,7 @@ opentelemetry-instrumentation-redis
 opentelemetry-instrumentation-sqlalchemy
 opentelemetry-sdk
 peft
+polars
 prometheus_client
 psycopg2-binary
 pydantic
@@ -48,7 +50,7 @@ sentence-transformers
 sqlalchemy[asyncio]
 starlette
 starsessions[redis]
-torch
 tiktoken
+torch
 transformers
 uvicorn[standard]

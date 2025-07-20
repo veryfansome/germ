@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -ex
+set -e
 
 if [ ! -d data/oewn2024 ]; then
     curl -L \
@@ -9,21 +9,24 @@ if [ ! -d data/oewn2024 ]; then
     rm data/english-wordnet-2024.zip
 fi
 
-for TBL in page page_props; do
-    TBL_DUMP_FILE="enwiki-latest-${TBL}.sql"
-    TBL_GZIP_FILE="${TBL_DUMP_FILE}.gz"
-    if [ ! -f "data/${TBL_DUMP_FILE}" ]; then
-        if [ ! -f "data/${TBL_GZIP_FILE}" ]; then
-            curl -L \
-                -o "data/$TBL_GZIP_FILE" \
-                "https://dumps.wikimedia.org/enwiki/latest/${TBL_GZIP_FILE}"
+if [ ! -f data/enwiki-latest-fa-ga-titles.tsv ]; then
+    MYSQL_CMD=(mysql --user="$MYSQL_USER" --password="$MYSQL_PASSWORD" -h germ-mariadb -D germ)
+    for TBL in page page_props; do
+        TBL_DUMP_FILE="enwiki-latest-${TBL}.sql"
+        TBL_GZIP_FILE="${TBL_DUMP_FILE}.gz"
+        if [ ! -f "data/${TBL_DUMP_FILE}" ]; then
+            if [ ! -f "data/${TBL_GZIP_FILE}" ]; then
+                curl -L \
+                    -o "data/$TBL_GZIP_FILE" \
+                    "https://dumps.wikimedia.org/enwiki/latest/${TBL_GZIP_FILE}"
+            fi
+            pigz -d -p 8 "data/$TBL_DUMP_FILE"
         fi
-        pigz -d -p 8 "data/$TBL_DUMP_FILE"
-    fi
-    #mysql --user="$MYSQL_USER" --password="$MYSQL_PASSWORD" -h germ-mariadb -D germ < "data/$TBL_DUMP_FILE"
-done
+        "${MYSQL_CMD[@]}" <<< "SHOW TABLES;" | grep "^${TBL}$" || "${MYSQL_CMD[@]}" < "data/$TBL_DUMP_FILE"
+    done
+    "${MYSQL_CMD[@]}" < database/sql/wiki_dump.sql > data/enwiki-latest-fa-ga-titles.tsv
+fi
 
-set +x
 source germ_venv/bin/activate
 
 mkdir -p /var/log/germ

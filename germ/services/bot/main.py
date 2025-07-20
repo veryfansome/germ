@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI):
 
     router = ChatRoutingEventHandler(assistant_helper=assistant_helper)
     chat_controller = ChatController(knowledge_graph, router)
-    await chat_controller.on_load()
+    asyncio.create_task(chat_controller.on_load())
 
     websocket_manager.add_conversation_monitor(chat_controller)
     websocket_manager.add_receive_event_handler(chat_controller)

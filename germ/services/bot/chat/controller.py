@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from germ.api.models import ChatRequest, ChatResponse
-from germ.data.vector_anchors import emotion_anchors, intent_anchors, topic_anchors
+from germ.data.vector_anchors import emotion_anchors, intent_anchors, topic_anchors, wiki_anchors
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
 from germ.services.bot.chat.classifier import ChatRequestClassification, ChatRequestClassifier
@@ -46,9 +46,11 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.faiss_emotion: faiss.IndexIDMap | None = None
         self.faiss_intent: faiss.IndexIDMap | None = None
         self.faiss_topic: faiss.IndexIDMap | None = None
+        self.faiss_wiki: faiss.IndexIDMap | None = None
         self.id_to_emotion: dict[int, str] = {i: k for i, k in enumerate(emotion_anchors)}
         self.id_to_intent: dict[int, str] = {i: k for i, k in enumerate(intent_anchors)}
         self.id_to_topic: dict[int, str] = {i: k for i, k in enumerate(topic_anchors)}
+        self.id_to_wiki: dict[int, str] = {i: k for i, k in enumerate(wiki_anchors)}
         self.sig_to_conversation_id: dict[str, set] = {}
         self.sig_to_message_meta: dict[str, MessageMeta] = {}
 
@@ -109,21 +111,28 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
     async def on_load(self):
         embedding_info = await get_text_embedding_info()
-        faiss_emotion = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
-        faiss_intent = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
-        faiss_topic = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
+        self.faiss_emotion = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
+        self.faiss_intent = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
+        self.faiss_topic = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
+        self.faiss_wiki = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
 
-        for index, anchors in [
-            (faiss_emotion, emotion_anchors),
-            (faiss_intent, intent_anchors),
-            (faiss_topic, topic_anchors),
+        for index, anchors, prefix in [
+            (self.faiss_emotion, emotion_anchors, "emotion: "),
+            (self.faiss_intent, intent_anchors, "intent: "),
+            (self.faiss_topic, topic_anchors, "about: "),
+            (self.faiss_wiki, wiki_anchors, "about: "),
         ]:
-            for idx, emb in enumerate((await get_text_embedding(anchors, prompt="passage: "))):
-                await run_in_threadpool(index_embedding, index.add_with_ids, emb, idx)
-
-        self.faiss_emotion = faiss_emotion
-        self.faiss_intent = faiss_intent
-        self.faiss_topic = faiss_topic
+            anchors_len = len(anchors)
+            batch_size = 1000
+            for idx in range(0, anchors_len, batch_size):
+                logger.info(f"getting text embedding for {min(anchors_len, batch_size)} anchors")
+                embs = await get_text_embedding([prefix + a for a in anchors[idx:idx + batch_size]], prompt="passage: ")
+                for emb_idx, emb in enumerate(embs):
+                    await run_in_threadpool(index_embedding, index.add_with_ids, emb, idx + emb_idx)
+            #for idx, emb in enumerate((
+            #        await get_text_embedding([prefix + a for a in anchors], prompt="passage: ")
+            #)):
+            #    await run_in_threadpool(index_embedding, index.add_with_ids, emb, idx)
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
@@ -140,7 +149,8 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         # TODO: Ideas
         #   - Use text embedding signals to decide intent, topics and when to incorporate wikipedia content
-        #       - Combine several embedding signals and check similarity
+        #       - Recombine several embedding signals and check similarity with original message?
+        #   - Use code embedding signals to decide when to use a text browser
         #   - Use code embedding signals to decide what languages, libraries, or technologies are in play
         #   - Use POS labels to determine if the message is a question, exclamation, or statement
         #   - Use POS labels to determine if we should ask LLM to generate search queries
@@ -185,57 +195,6 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 get_pos_labels(parsed_message.text)
             ])
 
-            # Embeddings-based recall
-            emotion_labels, intent_labels, topic_labels = await asyncio.gather(*[
-                run_in_threadpool(
-                    search_faiss_index, self.faiss_emotion, text_embs[0], self.id_to_emotion,
-                    num_results=3, min_sim_score=0.5
-                ),
-                run_in_threadpool(
-                    search_faiss_index, self.faiss_intent, text_embs[0], self.id_to_intent,
-                    num_results=3, min_sim_score=0.5
-                ),
-                run_in_threadpool(
-                    search_faiss_index, self.faiss_topic, text_embs[0], self.id_to_topic,
-                    num_results=3, min_sim_score=0.5
-                ),
-            ])
-            logger.info(f"Embedding emotion signals: {emotion_labels}")
-            logger.info(f"Embedding intent signals: {intent_labels}")
-            logger.info(f"Embedding topic signals: {topic_labels}")
-
-            # Process POS labels
-            for element_idx, scaffold_element in enumerate(parsed_message.scaffold):
-                heading_pos = {}
-                for level, heading in scaffold_element.headings.items():
-                    heading_pos[level] = [pos[idx] for idx in heading.text]
-
-                element_pos = []
-                if scaffold_element.type == DocElementType.LIST:
-                    for item_idx, item in enumerate(scaffold_element.items):
-                        for text_idx in item.text:
-                            element_pos.append(pos[text_idx])
-                elif scaffold_element.type == DocElementType.PARAGRAPH:
-                    for text_idx in scaffold_element.text:
-                        element_pos.append(pos[text_idx])
-
-                # TODO: Need to consider heading POS
-                for sentence_pos in element_pos:
-                    #log_pos_labels(sentence_pos)
-                    is_exclamatory = (
-                            "!" in sentence_pos["tokens"]
-                            and sentence_pos["pos"][sentence_pos["tokens"].index("!")] == "PUNCT"
-                    )
-                    is_imperative = "Imp" in sentence_pos["Mood"]
-                    is_indicative = "Ind" in sentence_pos["Mood"]
-                    is_interrogative = "Int" in sentence_pos["Mood"] or (
-                            "?" in sentence_pos["tokens"]
-                            and sentence_pos["pos"][sentence_pos["tokens"].index("?")] == "PUNCT"
-                    )
-                    logger.info(f"Grammatical intent signals: Exc:{is_exclamatory} Imp:{is_imperative}, "
-                                f"Ind:{is_indicative}, Int:{is_interrogative}")
-
-                    await self.extract_noun_groups(sentence_pos)
             # Cache results
             self.sig_to_message_meta[text_sig] = meta = MessageMeta(
                 classification = await classification_task,
@@ -246,6 +205,63 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             )
         else:
             meta = self.sig_to_message_meta[text_sig]
+
+        # Embeddings-based recall
+        emotion_labels, intent_labels, topic_labels, wiki_labels = await asyncio.gather(*[
+            run_in_threadpool(
+                search_faiss_index, self.faiss_emotion, meta.text_embs[0], self.id_to_emotion,
+                num_results=3, min_sim_score=0.5
+            ),
+            run_in_threadpool(
+                search_faiss_index, self.faiss_intent, meta.text_embs[0], self.id_to_intent,
+                num_results=3, min_sim_score=0.5
+            ),
+            run_in_threadpool(
+                search_faiss_index, self.faiss_topic, meta.text_embs[0], self.id_to_topic,
+                num_results=3, min_sim_score=0.5
+            ),
+            run_in_threadpool(
+                search_faiss_index, self.faiss_wiki, meta.text_embs[0], self.id_to_wiki,
+                num_results=25, min_sim_score=0.5
+            ),
+        ])
+        logger.info(f"Embedding emotion signals: {emotion_labels}")
+        logger.info(f"Embedding intent signals: {intent_labels}")
+        logger.info(f"Embedding topic signals: {topic_labels}")
+        logger.info(f"Embedding wiki signals: {wiki_labels}")
+
+        # Process POS labels
+        for element_idx, scaffold_element in enumerate(meta.doc.scaffold):
+            heading_pos = {}
+            for level, heading in scaffold_element.headings.items():
+                heading_pos[level] = [meta.pos[idx] for idx in heading.text]
+
+            element_pos = []
+            if scaffold_element.type == DocElementType.LIST:
+                for item_idx, item in enumerate(scaffold_element.items):
+                    for text_idx in item.text:
+                        element_pos.append(meta.pos[text_idx])
+            elif scaffold_element.type == DocElementType.PARAGRAPH:
+                for text_idx in scaffold_element.text:
+                    element_pos.append(meta.pos[text_idx])
+
+            # TODO: Need to consider heading POS
+            for sentence_pos in element_pos:
+                #log_pos_labels(sentence_pos)
+                is_exclamatory = (
+                        "!" in sentence_pos["tokens"]
+                        and sentence_pos["pos"][sentence_pos["tokens"].index("!")] == "PUNCT"
+                )
+                is_imperative = "Imp" in sentence_pos["Mood"]
+                is_indicative = "Ind" in sentence_pos["Mood"]
+                is_interrogative = "Int" in sentence_pos["Mood"] or (
+                        "?" in sentence_pos["tokens"]
+                        and sentence_pos["pos"][sentence_pos["tokens"].index("?")] == "PUNCT"
+                )
+                logger.info(f"Grammatical intent signals: Exc:{is_exclamatory} Imp:{is_imperative}, "
+                            f"Ind:{is_indicative}, Int:{is_interrogative}")
+
+                await self.extract_noun_groups(sentence_pos)
 
         # Send to LLM
         await self.delegate.on_receive(user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender)
@@ -345,16 +361,11 @@ def get_noun_base_form(token: str, pos_label):
     return noun_base_form
 
 
-async def get_text_embedding(texts: list[str], batch_size: int = 1000, prompt: str = "query: "):
-    texts_len = len(texts)
-    embeddings = []
+async def get_text_embedding(texts: list[str], prompt: str = "query: "):
     async with aiohttp.ClientSession() as session:
-        for idx in range(0, texts_len, batch_size):
-            logger.info(f"getting text embedding for {texts_len} texts")
-            async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/embedding",
-                                    json={"texts": texts[idx:idx + batch_size], "prompt": prompt}) as response:
-                embeddings.extend((await response.json())["embeddings"])
-        return embeddings
+        async with session.post(f"http://{germ_settings.MODEL_SERVICE_ENDPOINT}/text/embedding",
+                                json={"texts": texts, "prompt": prompt}) as response:
+            return (await response.json())["embeddings"]
 
 
 async def get_text_embedding_info():

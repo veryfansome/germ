@@ -1,4 +1,4 @@
-import faiss
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -34,7 +34,7 @@ text_embedding_model_dim = text_embedding_model.get_sentence_embedding_dimension
 ud_token_multi_classifier = MultiHeadPredictor(
     "veryfansome/multi-classifier", subfolder="models/ud_ewt_gum_pud_20250611")
 
-faiss_enwiki_pages = faiss.IndexIDMap(faiss.IndexFlatIP(text_embedding_model_dim))
+max_encoding_threads = max(2, os.cpu_count() - 2)
 
 
 @asynccontextmanager
@@ -99,6 +99,16 @@ async def post_text_classification_ud(payload: TextListPayload):
 
 @model_service.post("/text/embedding")
 async def post_text_embedding(payload: EmbeddingRequestPayload):
-    embeddings = await run_in_threadpool(text_embedding_model.encode, payload.texts,
-                                         prompt=payload.prompt, normalize_embeddings=False, show_progress_bar=False)
-    return {"embeddings": embeddings.tolist()}
+    embs = []
+    tasks = []
+    texts_len = len(payload.texts)
+    partition_len = max(1, texts_len // max_encoding_threads)
+    for idx in range(0, texts_len, partition_len):
+        stop_idx = idx + partition_len
+        tasks.append(asyncio.create_task(run_in_threadpool(
+            text_embedding_model.encode, payload.texts[idx:stop_idx],
+            prompt=payload.prompt, normalize_embeddings=False, show_progress_bar=False,
+        )))
+    for batch_embs in await asyncio.gather(*tasks):
+        embs.extend(batch_embs.tolist())
+    return {"embeddings": embs}
