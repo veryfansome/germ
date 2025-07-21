@@ -29,7 +29,7 @@ tracer = trace.get_tracer(__name__)
 ##
 # App
 
-text_embedding_model = SentenceTransformer('intfloat/e5-base-v2')
+text_embedding_model = SentenceTransformer('Snowflake/snowflake-arctic-embed-l-v2.0')
 text_embedding_model_dim = text_embedding_model.get_sentence_embedding_dimension()
 ud_token_multi_classifier = MultiHeadPredictor(
     "veryfansome/multi-classifier", subfolder="models/ud_ewt_gum_pud_20250611")
@@ -107,7 +107,8 @@ async def post_text_embedding(payload: EmbeddingRequestPayload):
         stop_idx = idx + partition_len
         tasks.append(asyncio.create_task(run_in_threadpool(
             text_embedding_model.encode, payload.texts[idx:stop_idx],
-            prompt=payload.prompt, normalize_embeddings=False, show_progress_bar=False,
+            prompt_name="query" if payload.prompt == "query: " else None,
+            normalize_embeddings=False, show_progress_bar=False,
         )))
     for batch_embs in await asyncio.gather(*tasks):
         embs.extend(batch_embs.tolist())
