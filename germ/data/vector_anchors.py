@@ -191,4 +191,5 @@ ga_wiki_anchors = (wiki_df
                    .drop_nulls()
                    .to_series()
                    .to_list())
-wiki_anchors = fa_wiki_anchors + ga_wiki_anchors  # Start with higher quality pages
+#wiki_anchors = fa_wiki_anchors + ga_wiki_anchors  # Start with higher quality pages
+wiki_anchors = []
