@@ -124,20 +124,23 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.faiss_wiki = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
 
         for index, anchors, prefix in [
-            (self.faiss_emotion, emotion_anchors, "emotionality: "),
+            (self.faiss_emotion, emotion_anchors, "emotion: "),
             (self.faiss_intent, intent_anchors, "intent: "),
-            (self.faiss_location, location_anchors, "locality: "),
-            (self.faiss_temporal, temporal_anchors, "temporality: "),
+            (self.faiss_location, location_anchors, "locality: took place in "),
+            (self.faiss_temporal, temporal_anchors, "temporality: occurred during "),
             (self.faiss_topic, topic_anchors, "about: "),
             (self.faiss_wiki, wiki_anchors, "about: "),
         ]:
             anchors_len = len(anchors)
             batch_size = 1000
+            batch_num = 1
             for idx in range(0, anchors_len, batch_size):
-                logger.info(f"getting text embedding for {min(anchors_len, batch_size)} anchors")
+                logger.info(f"getting text embedding for {min(min(anchors_len, batch_size) * batch_num, anchors_len)}"
+                            f"/{anchors_len} anchors")
                 embs = await get_text_embedding([prefix + a for a in anchors[idx:idx + batch_size]], prompt="passage: ")
                 for emb_idx, emb in enumerate(embs):
                     await run_in_threadpool(index_embedding, index.add_with_ids, emb, idx + emb_idx)
+                batch_num += 1
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
@@ -225,7 +228,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             ),
             run_in_threadpool(
                 search_faiss_index, self.faiss_location, meta.text_embs[0], self.id_to_location,
-                num_results=3, min_sim_score=0.0
+                num_results=3, min_sim_score=0.15
             ),
             run_in_threadpool(
                 search_faiss_index, self.faiss_temporal, meta.text_embs[0], self.id_to_temporal,
