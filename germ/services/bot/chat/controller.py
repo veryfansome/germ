@@ -124,10 +124,10 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.faiss_wiki = faiss.IndexIDMap(faiss.IndexFlatIP(embedding_info["dim"]))
 
         for index, anchors, prefix in [
-            (self.faiss_emotion, emotion_anchors, "emotion: "),
-            (self.faiss_intent, intent_anchors, "intent: "),
-            (self.faiss_location, location_anchors, "locality: took place in "),
-            (self.faiss_temporal, temporal_anchors, "temporality: occurred during "),
+            (self.faiss_emotion, emotion_anchors, "expressed emotion: "),
+            (self.faiss_intent, intent_anchors, "expressed intent: "),
+            (self.faiss_location, location_anchors, "associated country or region: "),
+            (self.faiss_temporal, temporal_anchors, "associated year: "),
             (self.faiss_topic, topic_anchors, "about: "),
             (self.faiss_wiki, wiki_anchors, "about: "),
         ]:
@@ -228,7 +228,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             ),
             run_in_threadpool(
                 search_faiss_index, self.faiss_location, meta.text_embs[0], self.id_to_location,
-                num_results=3, min_sim_score=0.15
+                num_results=3, min_sim_score=0.22
             ),
             run_in_threadpool(
                 search_faiss_index, self.faiss_temporal, meta.text_embs[0], self.id_to_temporal,

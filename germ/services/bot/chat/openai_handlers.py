@@ -203,6 +203,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
+        error_message = "Something went wrong. I don't have a response."
         if chat_request.uploaded_filenames:
             logger.info(f"Uploaded file: {chat_request.uploaded_filenames}")
             await self.assistant_helper.handle_in_a_thread(
@@ -210,12 +211,14 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
             )
         else:
             completion = await self.do_chat_completion(chat_request)
-            error = False
             if completion is None:
                 await ws_sender.send_message(
-                    ChatResponse(complete=True, content="Sorry, I'm unable to access my language model.", error=True)
+                    ChatResponse(complete=True, content=error_message, error=True)
                 )
-            elif completion.choices[0].message.content is None:
+                return
+
+            error = False
+            if completion.choices[0].message.content is None:
                 if completion.choices[0].message.tool_calls is not None:
                     tool_response_tasks = []
                     for tool_call in completion.choices[0].message.tool_calls:
@@ -237,7 +240,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                     return
                 else:
                     logger.error("Completion content and tool_calls are both missing.", completion)
-                    completion.choices[0].message.content = "Something went wrong. I don't have a response."
+                    completion.choices[0].message.content = error_message
                     completion.model = "none"
                     error = True
             # Return completed response
