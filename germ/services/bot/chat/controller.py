@@ -139,7 +139,8 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                             f"/{anchors_len} anchors")
                 embs = await get_text_embedding([prefix + a for a in anchors[idx:idx + batch_size]], prompt="passage: ")
                 for emb_idx, emb in enumerate(embs):
-                    await run_in_threadpool(index_embedding, index.add_with_ids, emb, idx + emb_idx)
+                    vec = await run_in_threadpool(normalize_embedding, emb)
+                    await run_in_threadpool(index.add_with_ids, vec, np.array([idx + emb_idx], dtype=np.int64))
                 batch_num += 1
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
@@ -215,31 +216,32 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             meta = self.sig_to_message_meta[text_sig]
 
         # Embeddings-based recall
+        norm_vector = await run_in_threadpool(normalize_embedding, meta.text_embs[0])
         (
             emotion_labels, intent_labels, location_labels, temporal_labels, topic_labels, wiki_labels
         ) = await asyncio.gather(*[
             run_in_threadpool(
-                search_faiss_index, self.faiss_emotion, meta.text_embs[0], self.id_to_emotion,
+                search_faiss_index, self.faiss_emotion, norm_vector, self.id_to_emotion,
                 num_results=3, min_sim_score=0.0
             ),
             run_in_threadpool(
-                search_faiss_index, self.faiss_intent, meta.text_embs[0], self.id_to_intent,
+                search_faiss_index, self.faiss_intent, norm_vector, self.id_to_intent,
                 num_results=3, min_sim_score=0.0
             ),
             run_in_threadpool(
-                search_faiss_index, self.faiss_location, meta.text_embs[0], self.id_to_location,
-                num_results=3, min_sim_score=0.22
+                search_faiss_index, self.faiss_location, norm_vector, self.id_to_location,
+                num_results=3, min_sim_score=0.1  #0.22
             ),
             run_in_threadpool(
-                search_faiss_index, self.faiss_temporal, meta.text_embs[0], self.id_to_temporal,
-                num_results=3, min_sim_score=0.15
+                search_faiss_index, self.faiss_temporal, norm_vector, self.id_to_temporal,
+                num_results=3, min_sim_score=0.1  #0.15
             ),
             run_in_threadpool(
-                search_faiss_index, self.faiss_topic, meta.text_embs[0], self.id_to_topic,
+                search_faiss_index, self.faiss_topic, norm_vector, self.id_to_topic,
                 num_results=3, min_sim_score=0.0
             ),
             run_in_threadpool(
-                search_faiss_index, self.faiss_wiki, meta.text_embs[0], self.id_to_wiki,
+                search_faiss_index, self.faiss_wiki, norm_vector, self.id_to_wiki,
                 num_results=25, min_sim_score=0.0
             ),
         ])
@@ -394,12 +396,6 @@ async def get_text_embedding_info():
             return await response.json()
 
 
-def index_embedding(index_func, embedding, row_id: int):
-    vector = np.array([embedding], dtype=np.float32)
-    faiss.normalize_L2(vector)
-    index_func(vector, np.array([row_id], dtype=np.int64))
-
-
 def is_plausible_noun_phrase(deprel_labels):
     # Dependency relationship labels that should not appear together in same phrase.
     search_set = {'nsubj', 'nsubj:pass', 'obj', 'iobj', 'csubj', 'ccomp', 'xcomp'}
@@ -408,16 +404,19 @@ def is_plausible_noun_phrase(deprel_labels):
     return not (len(found_elements) > 1)
 
 
-def search_faiss_index(index: faiss.IndexIDMap | None, embedding, id2result: dict[int, str],
+def normalize_embedding(emb: list[float]):
+    vector = np.array([emb], dtype=np.float32)
+    faiss.normalize_L2(vector)
+    return vector
+
+
+def search_faiss_index(index: faiss.IndexIDMap | None, vec, id2result: dict[int, str],
                        num_results: int = 1, min_sim_score: float = 0.0):
     results = []
     if index is None:  # Be load completion
         return results
 
-    vector = np.array([embedding], dtype=np.float32)
-    faiss.normalize_L2(vector)
-
-    sim_scores, neighbors = index.search(vector, num_results)
+    sim_scores, neighbors = index.search(vec, num_results)
     for vector_id, sim_score in zip(neighbors[0], sim_scores[0]):
         if vector_id != -1 and sim_score > min_sim_score:  # -1 means no match
             results.append((id2result[vector_id], sim_score))
