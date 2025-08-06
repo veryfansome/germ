@@ -20,42 +20,36 @@ logger = logging.getLogger(__name__)
 iana_data = IanaTLDCacher()
 
 
-class TextElement(BaseModel):
-    text: list[int | str]
-    elements: list[Any] | None
-
-
-class DocElement(BaseModel):
-    type: int
-    headings: dict[int, TextElement] | None
-
-
 class DocElementType(Enum):
     CODE_BLOCK = 1
     LIST = 2
     PARAGRAPH = 3
 
 
+class TextElement(BaseModel):
+    text: list[int | str]
+    elements: list[Any] | None
+
+
+class DocElement(BaseModel):
+    type: DocElementType
+    headings: dict[int, TextElement] | None
+
+
 class CodeElement(DocElement):
-    type: int = DocElementType.CODE_BLOCK
+    type: DocElement = DocElementType.CODE_BLOCK
     text: list[int | str]
     language: str | None
 
 
 class ListElement(DocElement):
-    type: int = DocElementType.LIST
+    type: DocElement = DocElementType.LIST
     ordered: bool
     items: list[TextElement]
 
 
 class ParagraphElement(DocElement, TextElement):
-    type: int = DocElementType.PARAGRAPH
-
-
-class ParsedDoc(BaseModel):
-    scaffold: list[CodeElement | ListElement | ParagraphElement] = []
-    code: list[str] = []
-    text: list[str] = []
+    type: DocElement = DocElementType.PARAGRAPH
 
 
 class MarkdownDocExtractor(mistune.HTMLRenderer):
@@ -109,6 +103,66 @@ class MarkdownDocExtractor(mistune.HTMLRenderer):
             headings=copy(self._headings_context),
         ))
         return super().paragraph(text)
+
+
+class ParsedDoc(BaseModel):
+    scaffold: list[CodeElement | ListElement | ParagraphElement] = []
+    code: list[str] = []
+    text: list[str] = []
+
+    @classmethod
+    def from_text(cls, doc_text: str) -> ("ParsedDoc", str):
+        extractor = MarkdownDocExtractor()
+        mistune.create_markdown(renderer=extractor)(doc_text)
+
+        doc = ParsedDoc()
+        for element_idx, element in enumerate(extractor.elements):
+            element_copy = element.model_copy(deep=True)
+            for level, heading in element.headings.items():
+                for blob_idx, blob in enumerate(heading.text):
+                    if blob not in doc.text:
+                        doc.text.append(blob)
+                    element_copy.headings[level].text[blob_idx] = doc.text.index(blob)
+            if element.type == DocElementType.CODE_BLOCK:
+                for chunk_idx, chunk in enumerate(element.text):
+                    if chunk not in doc.code:
+                        doc.code.append(chunk)
+                    element_copy.text[chunk_idx] = doc.code.index(chunk)
+            elif element.type == DocElementType.LIST:
+                for item_idx, item in enumerate(element.items):
+                    for sentence_idx, sentence in enumerate(item.text):
+                        if sentence not in doc.text:
+                            doc.text.append(sentence)
+                        element_copy.items[item_idx].text[sentence_idx] = doc.text.index(sentence)
+            elif element.type == DocElementType.PARAGRAPH:
+                for sentence_idx, sentence in enumerate(element.text):
+                    if sentence not in doc.text:
+                        doc.text.append(sentence)
+                    element_copy.text[sentence_idx] = doc.text.index(sentence)
+            doc.scaffold.append(element_copy)
+
+        # Rebuild the message's text with placeholders for code blocks.
+        heading_context = {}
+        sanitized_text = []
+        for element_idx, scaffold_element in enumerate(doc.scaffold):
+            for level, heading in scaffold_element.headings.items():
+                heading_text = " ".join([doc.text[idx] for idx in heading.text])
+                if level not in heading_context or heading_context[level] != heading_text:
+                    heading_context[level] = heading_text
+                    sanitized_text.append(f"{'#' * level} {heading_text}")
+
+            if scaffold_element.type == DocElementType.CODE_BLOCK:
+                sanitized_text.append("\n[CODE_SNIPPET]\n")
+            elif scaffold_element.type == DocElementType.LIST:
+                for item_idx, item in enumerate(scaffold_element.items):
+                    sanitized_text.append("- " + (
+                        " ".join([doc.text[idx] for idx in item.text])
+                    ))
+            elif scaffold_element.type == DocElementType.PARAGRAPH:
+                sanitized_text.append(
+                    " ".join([doc.text[idx] for idx in scaffold_element.text])
+                )
+        return doc, "\n".join(sanitized_text)
 
 
 def extract_href_features(href: str):
@@ -237,38 +291,6 @@ def extract_href_features(href: str):
     return artifacts
 
 
-def parse_markdown_doc(text: str) -> ParsedDoc:
-    extractor = MarkdownDocExtractor()
-    mistune.create_markdown(renderer=extractor)(text)
-
-    doc = ParsedDoc()
-    for element_idx, element in enumerate(extractor.elements):
-        element_copy = element.model_copy(deep=True)
-        for level, heading in element.headings.items():
-            for blob_idx, blob in enumerate(heading.text):
-                if blob not in doc.text:
-                    doc.text.append(blob)
-                element_copy.headings[level].text[blob_idx] = doc.text.index(blob)
-        if element.type == DocElementType.CODE_BLOCK:
-            for chunk_idx, chunk in enumerate(element.text):
-                if chunk not in doc.code:
-                    doc.code.append(chunk)
-                element_copy.text[chunk_idx] = doc.code.index(chunk)
-        elif element.type == DocElementType.LIST:
-            for item_idx, item in enumerate(element.items):
-                for sentence_idx, sentence in enumerate(item.text):
-                    if sentence not in doc.text:
-                        doc.text.append(sentence)
-                    element_copy.items[item_idx].text[sentence_idx] = doc.text.index(sentence)
-        elif element.type == DocElementType.PARAGRAPH:
-            for sentence_idx, sentence in enumerate(element.text):
-                if sentence not in doc.text:
-                    doc.text.append(sentence)
-                element_copy.text[sentence_idx] = doc.text.index(sentence)
-        doc.scaffold.append(element_copy)
-    return doc
-
-
 def fqdn_to_proper_noun(fqdn: str):
     """
     Converts FQDNs to something that looks like a single proper noun. For example, converts www.google.com to
@@ -320,7 +342,11 @@ def split_sentences(p_text: str) -> list[str]:
     return sentences
 
 
-def strip_html_elements(soup: BeautifulSoup | PageElement, tag: str = None) -> (str, PageElement):
+def strip_html_elements(
+        soup: BeautifulSoup | PageElement,
+        tag: str = None,
+        parent: str = None
+) -> (str, PageElement):
     text_elements = []
     html_elements = {}
     for idx, element in enumerate(soup.find_all() if tag is None else soup.find(tag)):
@@ -334,13 +360,18 @@ def strip_html_elements(soup: BeautifulSoup | PageElement, tag: str = None) -> (
     for idx, element in html_elements.items():
         if element.find():  # Has inner elements
             logger.info(f"found <{element.name}>, with inner elements: {element}")
-            inner_string, inner_artifacts = strip_html_elements(element)
+            inner_string, inner_artifacts = strip_html_elements(element, parent=element.name)
             if inner_artifacts:
                 element_artifacts += inner_artifacts
         else:  # Doesn't have inner elements
             logger.info(f"stripped <{element.name}>, kept inner string: {element.string}")
-            if element.name == "code":  # Translate back to backticks, which the token classifier knows
-                element.string = f"`{element.string}`"
+            if element.name == "code":
+                if parent == "pre":
+                    # Skip code blocks in pre tags because they are already handled by the Markdown parser
+                    continue
+                else:
+                    # Translate back to backticks, which the token classifier knows
+                    element.string = f"`{element.string}`"
         text_elements[idx] = element.string if element.string else ""
     return ''.join(text_elements), element_artifacts
 
