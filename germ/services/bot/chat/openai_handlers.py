@@ -62,7 +62,7 @@ class ChatModelEventHandler(RoutableChatEventHandler):
         return self.function_settings
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await self.do_chat_completion(chat_request)
         await ws_sender.send_reply(
@@ -106,7 +106,7 @@ class ImageModelEventHandler(RoutableChatEventHandler):
         return self.function_settings
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         markdown_image = await self.generate_markdown_image(chat_request)
         _ = asyncio.create_task(
@@ -163,7 +163,7 @@ class ReasoningChatModelEventHandler(RoutableChatEventHandler):
         return self.function_settings
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         completion = await self.do_chat_completion(chat_request)
         await ws_sender.send_reply(
@@ -201,7 +201,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
             logger.info(f"Added {tool.get_function_name()} => {tool}")
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime, text_sig: str,
+    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         error_message = "Something went wrong. I don't have a response."
         if chat_request.uploaded_filenames:
@@ -226,7 +226,7 @@ class ChatRoutingEventHandler(ChatModelEventHandler):
                         tool_response_tasks.append(
                             asyncio.create_task(
                                 self.tools[tool_call.function.name].on_receive(
-                                    user_id, conversation_id, dt_created, text_sig, chat_request, ws_sender
+                                    user_id, conversation_id, dt_created, chat_request, ws_sender
                                 )
                             )
                         )

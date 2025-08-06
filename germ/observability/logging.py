@@ -9,7 +9,9 @@ console_only_logger_config = {
 }
 
 
-def setup_logging(global_level: str = germ_settings.LOG_LEVEL, log_dir: str = germ_settings.LOG_DIR):
+def setup_logging(global_level: str = germ_settings.LOG_LEVEL,
+                  log_dir: str = germ_settings.LOG_DIR,
+                  message_log_filename: str = germ_settings.MESSAGE_LOG_FILENAME):
     logging.config.dictConfig({
         "version": 1,
         "disable_existing_loggers": False,
@@ -27,7 +29,7 @@ def setup_logging(global_level: str = germ_settings.LOG_LEVEL, log_dir: str = ge
                 "formatter": "default",
             },
             "message": {
-                "filename": f"{log_dir}/message.log",
+                "filename": f"{log_dir}/{message_log_filename}",
                 "class": "logging.handlers.TimedRotatingFileHandler",
                 "formatter": "message_only",
                 # Daily rotation with 7 + 1 days of history

@@ -1,3 +1,6 @@
+import aiofiles
+import asyncio
+import os
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, status
@@ -19,15 +22,13 @@ from starsessions import SessionMiddleware, load_session
 from starsessions.stores.redis import RedisStore
 from typing import List
 from urllib.parse import urlencode
-import aiofiles
-import asyncio
-import os
 
 from germ.database.neo4j import KnowledgeGraph
 from germ.database.pg import DATABASE_URL, TableHelper
 from germ.observability.logging import logging, setup_logging
 from germ.observability.tracing import setup_tracing
 from germ.services.bot.auth import MAX_COOKIE_AGE, SESSION_COOKIE_NAME, AuthHelper, verify_password
+from germ.services.bot.chat.classifier import ChatRequestClassifier
 from germ.services.bot.chat.controller import ChatController
 from germ.services.bot.chat.openai_beta import AssistantHelper
 from germ.services.bot.chat.openai_handlers import ChatRoutingEventHandler
@@ -72,6 +73,7 @@ knowledge_graph = KnowledgeGraph()
 websocket_manager = WebSocketConnectionManager(
     pg_table_helper.conversation_table,
     pg_table_helper.conversation_state_table,
+    pg_table_helper.struct_type_table,
     knowledge_graph,
     pg_session_maker,
 )
@@ -94,9 +96,11 @@ async def lifespan(app: FastAPI):
     scheduler.scheduled_job(assistant_helper.refresh_files, "interval", minutes=5)
 
     router = ChatRoutingEventHandler(assistant_helper=assistant_helper)
-    chat_controller = ChatController(knowledge_graph, router)
-    asyncio.create_task(chat_controller.on_load())
 
+    request_classifier = ChatRequestClassifier(knowledge_graph)
+    asyncio.create_task(request_classifier.load())
+
+    chat_controller = ChatController(request_classifier, router)
     websocket_manager.add_conversation_monitor(chat_controller)
     websocket_manager.add_receive_event_handler(chat_controller)
     websocket_manager.add_send_event_handler(chat_controller)
