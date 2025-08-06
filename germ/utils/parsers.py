@@ -69,7 +69,7 @@ class MarkdownDocExtractor(mistune.HTMLRenderer):
 
     def heading(self, text, level, **attrs):
         p_soup = get_html_soup(f"<p>{text}</p>")
-        p_text, p_elements = strip_html_elements(p_soup, "p")
+        p_text, p_elements = strip_html_elements(p_soup, tag="p")
         self._headings_context[level] = TextElement(
             text=split_sentences(p_text),
             elements=p_elements,
@@ -87,7 +87,7 @@ class MarkdownDocExtractor(mistune.HTMLRenderer):
 
     def list_item(self, text):
         p_soup = get_html_soup(f"<p>{text}</p>")
-        p_text, p_elements = strip_html_elements(p_soup, "p")
+        p_text, p_elements = strip_html_elements(p_soup, tag="p")
         self._list_items.append(TextElement(
             text=split_sentences(p_text),
             elements=p_elements,
@@ -96,7 +96,7 @@ class MarkdownDocExtractor(mistune.HTMLRenderer):
 
     def paragraph(self, text):
         p_soup = get_html_soup(f"<p>{text}</p>")
-        p_text, p_elements = strip_html_elements(p_soup, "p")
+        p_text, p_elements = strip_html_elements(p_soup, tag="p")
         self.elements.append(ParagraphElement(
             text=split_sentences(p_text),
             elements=p_elements,
@@ -355,24 +355,43 @@ def strip_html_elements(
         else:
             text_elements.append("[oops]")  # Placeholder
             html_elements[idx] = element
+    logger.info(html_elements)
     # Iterate through elements to write over the placeholders
-    element_artifacts = list(html_elements.values())
-    for idx, element in html_elements.items():
-        if element.find():  # Has inner elements
-            logger.info(f"found <{element.name}>, with inner elements: {element}")
-            inner_string, inner_artifacts = strip_html_elements(element, parent=element.name)
-            if inner_artifacts:
-                element_artifacts += inner_artifacts
-        else:  # Doesn't have inner elements
-            logger.info(f"stripped <{element.name}>, kept inner string: {element.string}")
-            if element.name == "code":
-                if parent == "pre":
-                    # Skip code blocks in pre tags because they are already handled by the Markdown parser
-                    continue
-                else:
-                    # Translate back to backticks, which the token classifier knows
-                    element.string = f"`{element.string}`"
-        text_elements[idx] = element.string if element.string else ""
+    #element_artifacts = list(html_elements.values())
+    element_artifacts = []
+    #for idx, element in html_elements.items():
+    #    logger.info(f"found <{element.name}> (parent:{parent}), with inner elements: {element.find()}")
+    #    if element.name == "code":
+    #        if parent == "pre":
+    #            text_elements[idx] = ""
+    #        else:
+    #            text_elements[idx] = f"`{element.string}`"
+    #    else:
+    #        inner_string, inner_artifacts = strip_html_elements(element, parent=parent)
+    #        text_elements[idx] = inner_string
+    #        element_artifacts.extend(inner_artifacts)
+
+    #    if element.find():  # Has inner elements
+    #        logger.info(f"stripped <{element.name}> (parent:{parent}), with inner elements: {element}")
+    #        inner_string, inner_artifacts = strip_html_elements(element, parent=element.name)
+    #        element.string = inner_string
+    #        #element_artifacts.extend(inner_artifacts)
+    #        #if inner_artifacts:
+    #        #    element_artifacts += inner_artifacts
+    #    else:  # Doesn't have inner elements
+    #        if element.name == "code":
+    #            if parent == "pre":
+    #                # Skip code blocks in pre tags because they are already handled by the Markdown parser
+    #                element.string = ""
+    #            else:
+    #                # Translate back to backticks, which the token classifier knows
+    #                element.string = f"`{element.string}`"
+    #        if element.string:
+    #            logger.info(f"stripped <{element.name}> (parent:{parent}), kept inner string: {element.string}")
+    #    text_elements[idx] = element.string if element.string else ""
+    foo = ''.join(text_elements)
+    if foo:
+        logger.info(f"foo: {foo}")
     return ''.join(text_elements), element_artifacts
 
 

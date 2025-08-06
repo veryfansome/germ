@@ -284,7 +284,7 @@ def extract_noun_blobs(label_dict: dict[str, str | list[str]]):
         #            label_dict["xpos"][next_idx + 1:], {"NN", "NNS", "NNP", "NNPS", "PRP$"})
         #if found_idx != -1:
         #    noun_blob.determiner = label_dict["tokens"][found_idx]
-    logger.info(f"noun_blobs: {[r.model_dump(exclude_none=True) for r in results]}")
+    logger.info(f"noun_blobs: {[r.model_dump(exclude_none=True) for r in results]} -- {label_dict['text']}")
 
 
 def extract_pos_label_groups(labels: list[str], target_labels: set[str] = None):
