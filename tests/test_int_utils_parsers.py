@@ -1,6 +1,6 @@
 import logging
 
-from germ.utils.parsers import extract_href_features, fqdn_to_proper_noun, resolve_fqdn
+from germ.utils.parsers import ParsedDoc, extract_href_features, fqdn_to_proper_noun, resolve_fqdn
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +196,15 @@ def test_fqdn_to_proper_noun():
     assert word == "GoogleDOTcom", word
 
 
+def test_markdown_document_parsing():
+    with open("tests/data/markdown_docs/cloud_storage_object_access.md") as fd:
+        markdown_text = fd.read()
+
+        doc = ParsedDoc.from_text(markdown_text)
+        code_block_cnt = len(doc.code_blocks)
+        assert code_block_cnt == 5, code_block_cnt
+
+
 def test_resolve_fqdn():
     answer, err, timed_out = resolve_fqdn('www.google.com')
     assert answer is not None, f"err:{err}, timed_out={timed_out}"
@@ -211,3 +220,6 @@ def test_resolve_fqdn():
     assert answer is None, f"err:{err}, timed_out={timed_out}"
     assert err is False, f"err:{err}, timed_out={timed_out}"
     assert timed_out is True, f"err:{err}, timed_out={timed_out}"
+
+if __name__ == '__main__':
+    test_markdown_document_parsing()

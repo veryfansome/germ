@@ -20,7 +20,7 @@ itsdangerous
 jinja2
 jinja2-cli
 lxml
-mistune
+markdown-it-py
 neo4j
 nltk
 numpy

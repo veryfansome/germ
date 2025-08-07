@@ -2,15 +2,11 @@ import dns.exception
 import dns.resolver
 import logging
 import mimetypes
-import mistune
 import os
 import re
 from bs4 import BeautifulSoup
-from bs4.element import PageElement
-from copy import copy
-from enum import Enum
+from markdown_it import MarkdownIt
 from pydantic import BaseModel
-from typing import Any
 
 from germ.data.iana import IanaTLDCacher
 from germ.utils.patterns import ipv4_addr_pattern, ipv6_addr_pattern, naive_sentence_end_pattern
@@ -19,150 +15,48 @@ logger = logging.getLogger(__name__)
 
 iana_data = IanaTLDCacher()
 
-
-class DocElementType(Enum):
-    CODE_BLOCK = 1
-    LIST = 2
-    PARAGRAPH = 3
-
-
-class TextElement(BaseModel):
-    text: list[int | str]
-    elements: list[Any] | None
-
-
-class DocElement(BaseModel):
-    type: DocElementType
-    headings: dict[int, TextElement] | None
-
-
-class CodeElement(DocElement):
-    type: DocElement = DocElementType.CODE_BLOCK
-    text: list[int | str]
-    language: str | None
-
-
-class ListElement(DocElement):
-    type: DocElement = DocElementType.LIST
-    ordered: bool
-    items: list[TextElement]
-
-
-class ParagraphElement(DocElement, TextElement):
-    type: DocElement = DocElementType.PARAGRAPH
-
-
-class MarkdownDocExtractor(mistune.HTMLRenderer):
-    def __init__(self):
-        super().__init__()
-        self._headings_context: dict[int, TextElement] = {}
-        self._list_items: list[TextElement] = []
-        self.elements: list[CodeElement | ListElement | ParagraphElement] = []
-
-    def block_code(self, code, info=None):
-        self.elements.append(CodeElement(
-            language=info,
-            text=[code],
-            headings=copy(self._headings_context),
-        ))
-        return super().block_code(code, info)
-
-    def heading(self, text, level, **attrs):
-        p_soup = get_html_soup(f"<p>{text}</p>")
-        p_text, p_elements = strip_html_elements(p_soup, "p")
-        self._headings_context[level] = TextElement(
-            text=split_sentences(p_text),
-            elements=p_elements,
-        )
-        return super().heading(text, level, **attrs)
-
-    def list(self, text: str, ordered: bool, **attrs: Any) -> str:
-        self.elements.append(ListElement(
-            ordered=ordered,
-            items=copy(self._list_items),
-            headings=copy(self._headings_context),
-        ))
-        self._list_items = []
-        return super().list(text, ordered, **attrs)
-
-    def list_item(self, text):
-        p_soup = get_html_soup(f"<p>{text}</p>")
-        p_text, p_elements = strip_html_elements(p_soup, "p")
-        self._list_items.append(TextElement(
-            text=split_sentences(p_text),
-            elements=p_elements,
-        ))
-        return super().list_item(text)
-
-    def paragraph(self, text):
-        p_soup = get_html_soup(f"<p>{text}</p>")
-        p_text, p_elements = strip_html_elements(p_soup, "p")
-        self.elements.append(ParagraphElement(
-            text=split_sentences(p_text),
-            elements=p_elements,
-            headings=copy(self._headings_context),
-        ))
-        return super().paragraph(text)
+# # Markdown parsing
+end_of_line_pattern = re.compile(r'(\r\n|\r|\n)$')
+leading_whitespace_pattern = re.compile(r'^[ \t]*')
+md_parser = MarkdownIt()
 
 
 class ParsedDoc(BaseModel):
-    scaffold: list[CodeElement | ListElement | ParagraphElement] = []
-    code: list[str] = []
-    text: list[str] = []
+    code_blocks: list[str]
+    text: str
 
     @classmethod
     def from_text(cls, doc_text: str) -> ("ParsedDoc", str):
-        extractor = MarkdownDocExtractor()
-        mistune.create_markdown(renderer=extractor)(doc_text)
+        tokens = md_parser.parse(doc_text)
+        ranges: list[tuple[int, int]] = []
+        blocks: list[str] = []
+        for tok in tokens:
+            if tok.type in {"fence", "code_block"}:
+                start, end = tok.map  # end is *exclusive*
+                ranges.append((start, end))
+                blocks.append(tok.content)  # body only; fences stripped
 
-        doc = ParsedDoc()
-        for element_idx, element in enumerate(extractor.elements):
-            element_copy = element.model_copy(deep=True)
-            for level, heading in element.headings.items():
-                for blob_idx, blob in enumerate(heading.text):
-                    if blob not in doc.text:
-                        doc.text.append(blob)
-                    element_copy.headings[level].text[blob_idx] = doc.text.index(blob)
-            if element.type == DocElementType.CODE_BLOCK:
-                for chunk_idx, chunk in enumerate(element.text):
-                    if chunk not in doc.code:
-                        doc.code.append(chunk)
-                    element_copy.text[chunk_idx] = doc.code.index(chunk)
-            elif element.type == DocElementType.LIST:
-                for item_idx, item in enumerate(element.items):
-                    for sentence_idx, sentence in enumerate(item.text):
-                        if sentence not in doc.text:
-                            doc.text.append(sentence)
-                        element_copy.items[item_idx].text[sentence_idx] = doc.text.index(sentence)
-            elif element.type == DocElementType.PARAGRAPH:
-                for sentence_idx, sentence in enumerate(element.text):
-                    if sentence not in doc.text:
-                        doc.text.append(sentence)
-                    element_copy.text[sentence_idx] = doc.text.index(sentence)
-            doc.scaffold.append(element_copy)
+        if not ranges:  # fast-path: no blocks at all
+            return cls(code_blocks=blocks, text=doc_text)
 
-        # Rebuild the message's text with placeholders for code blocks.
-        heading_context = {}
-        sanitized_text = []
-        for element_idx, scaffold_element in enumerate(doc.scaffold):
-            for level, heading in scaffold_element.headings.items():
-                heading_text = " ".join([doc.text[idx] for idx in heading.text])
-                if level not in heading_context or heading_context[level] != heading_text:
-                    heading_context[level] = heading_text
-                    sanitized_text.append(f"{'#' * level} {heading_text}")
+        # Build sanitized text by stitching original segments + placeholders.
+        lines = doc_text.splitlines(keepends=True)
+        sanitized_parts: list[str] = []
+        last = 0
+        for idx, (start, end) in enumerate(ranges, 1):
+            # Unchanged part before this block
+            sanitized_parts.append("".join(lines[last:start]))
 
-            if scaffold_element.type == DocElementType.CODE_BLOCK:
-                sanitized_text.append("\n[CODE_SNIPPET]\n")
-            elif scaffold_element.type == DocElementType.LIST:
-                for item_idx, item in enumerate(scaffold_element.items):
-                    sanitized_text.append("- " + (
-                        " ".join([doc.text[idx] for idx in item.text])
-                    ))
-            elif scaffold_element.type == DocElementType.PARAGRAPH:
-                sanitized_text.append(
-                    " ".join([doc.text[idx] for idx in scaffold_element.text])
-                )
-        return doc, "\n".join(sanitized_text)
+            # Derive indentation + EOL from original fences
+            open_line = lines[start]  # first line with the fence
+            indent = leading_whitespace_pattern.match(open_line).group(0)
+            eol_match = end_of_line_pattern.search(lines[end - 1])  # closing fence line
+            eol_chars = eol_match.group(0) if eol_match else ""
+
+            sanitized_parts.append(f"{indent}[CODE_BLOCK:{idx}]{eol_chars}")
+            last = end  # skip over the whole block
+        sanitized_parts.append("".join(lines[last:]))  # remainder of the doc
+        return cls(code_blocks=blocks, text="".join(sanitized_parts))
 
 
 def extract_href_features(href: str):
@@ -340,40 +234,6 @@ def split_sentences(p_text: str) -> list[str]:
            sentences.append(p_text.strip())
            p_text = ""
     return sentences
-
-
-def strip_html_elements(
-        soup: BeautifulSoup | PageElement,
-        tag: str = None,
-        parent: str = None
-) -> (str, PageElement):
-    text_elements = []
-    html_elements = {}
-    for idx, element in enumerate(soup.find_all() if tag is None else soup.find(tag)):
-        if element.name is None:  # This is just text
-            text_elements.append(element.string)
-        else:
-            text_elements.append("[oops]")  # Placeholder
-            html_elements[idx] = element
-    # Iterate through elements to write over the placeholders
-    element_artifacts = list(html_elements.values())
-    for idx, element in html_elements.items():
-        if element.find():  # Has inner elements
-            logger.info(f"found <{element.name}>, with inner elements: {element}")
-            inner_string, inner_artifacts = strip_html_elements(element, parent=element.name)
-            if inner_artifacts:
-                element_artifacts += inner_artifacts
-        else:  # Doesn't have inner elements
-            logger.info(f"stripped <{element.name}>, kept inner string: {element.string}")
-            if element.name == "code":
-                if parent == "pre":
-                    # Skip code blocks in pre tags because they are already handled by the Markdown parser
-                    continue
-                else:
-                    # Translate back to backticks, which the token classifier knows
-                    element.string = f"`{element.string}`"
-        text_elements[idx] = element.string if element.string else ""
-    return ''.join(text_elements), element_artifacts
 
 
 if __name__ == "__main__":
