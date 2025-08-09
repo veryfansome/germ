@@ -1,6 +1,3 @@
-import polars as pl
-import pycountry
-from datetime import datetime
 
 emotion_labels = [
     # Labels from google-research-datasets/go_emotions, minus "neutral"
@@ -75,25 +72,6 @@ intent_labels = [
     "to solve a logical or mathematical problem",
     "to summarize or translate some text",
 ]
-
-#location_labels = ([f"{country.name}" for country in pycountry.countries]
-#                   + [f"{subdivision.name}, {subdivision.country.name}" for subdivision in pycountry.subdivisions])
-location_labels = []
-
-now_year = datetime.now().year
-
-#temporal_labels = ([f"the {era} Era" for era in ("Paleozoic", "Mesozoic", "Cenozoic")]
-#                   + [f"the {period} Period" for period in ("Cambrian", "Ordovician", "Silurian", "Devonian",
-#                                                            "Carboniferous", "Permian", "Triassic", "Jurassic",
-#                                                            "Cretaceous", "Paleogene", "Neogene", "Quaternary")]
-#                   + [f"the {epoch} Epoch" for epoch in ("Paleocene", "Eocene", "Oligocene", "Miocene",
-#                                                         "Pliocene", "Pleistocene", "Holocene")]
-#                   + [f"{millennia + 1000}-{millennia} BC" for millennia in list(range(3000, 10000, 1000))]
-#                   + [f"{century + 100}-{century} BC" for century in list(range(0, 3000, 100))]
-#                   + [f"{century}-{century + 100} AD" for century in list(range(0, 1800, 100))]
-#                   + [f"AD {decade}s" for decade in list(range(1000, now_year, 10))]
-#                   + [f"AD {yr}" for yr in list(range(1000, now_year))])
-temporal_labels = []
 
 topic_labels = [
     "abilities",
@@ -179,19 +157,3 @@ topic_labels = [
     "war",
     "work",
 ]
-
-#wiki_df = pl.read_csv("data/enwiki-latest-fa-ga-titles.tsv", separator="\t", quote_char=None)
-#fa_wiki_labels = (wiki_df
-#                  .filter(pl.col("quality") == 'FA')
-#                  .select(pl.concat_str(['url_title', 'short_description'], separator=": "))
-#                  .drop_nulls()
-#                  .to_series()
-#                  .to_list())
-#ga_wiki_labels = (wiki_df
-#                  .filter(pl.col("quality") == 'GA')
-#                  .select(pl.concat_str(['url_title', 'short_description'], separator=": "))
-#                  .drop_nulls()
-#                  .to_series()
-#                  .to_list())
-#wiki_labels = fa_wiki_labels + ga_wiki_labels  # Start with higher quality pages
-wiki_labels = []
