@@ -100,17 +100,3 @@ CREATE TABLE conversation_state (
 ;
 SELECT update_dt_modified_column('conversation_state');
 COMMENT ON TABLE conversation_state IS 'This table stores conversation_state records';
-
-
-DROP TABLE IF EXISTS top_level_domain CASCADE;
-CREATE TABLE top_level_domain (
-      top_level_domain_id                                       SMALLINT                            NOT NULL GENERATED ALWAYS AS IDENTITY
-    , dt_created                                                TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , dt_last_verified                                          TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , dt_modified                                               TIMESTAMPTZ                         NOT NULL DEFAULT CURRENT_TIMESTAMP
-    , domain_name                                               TEXT                                NOT NULL
-    , PRIMARY KEY (top_level_domain_id)
-)
-;
-CREATE UNIQUE INDEX idx_top_level_domain_name                   ON top_level_domain                 USING btree (domain_name);
-SELECT update_dt_modified_column('top_level_domain');

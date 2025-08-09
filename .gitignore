@@ -11,10 +11,6 @@ __pycache__/
 
 germ/services/bot/static/*.html
 germ/services/bot/static/tests/*
-data/e5_*
-data/oewn*
-data/enwiki-*.sql
-data/enwiki-*.sql.gz
 germ_venv/
 
 google_application_credentials.json

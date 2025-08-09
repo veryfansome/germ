@@ -15,5 +15,4 @@ class TableHelper:
         self.conversation_state_table = Table('conversation_state', MetaData(), autoload_with=engine)
         self.conversation_table = Table('conversation', MetaData(), autoload_with=engine)
         self.struct_type_table = Table('struct_type', MetaData(), autoload_with=engine)
-        self.top_level_domain_table = Table('top_level_domain', MetaData(), autoload_with=engine)
         self.engine = engine

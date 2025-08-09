@@ -28,7 +28,6 @@ from germ.database.pg import DATABASE_URL, TableHelper
 from germ.observability.logging import logging, setup_logging
 from germ.observability.tracing import setup_tracing
 from germ.services.bot.auth import MAX_COOKIE_AGE, SESSION_COOKIE_NAME, AuthHelper, verify_password
-from germ.services.bot.chat.classifier import ChatRequestClassifier
 from germ.services.bot.chat.controller import ChatController
 from germ.services.bot.chat.openai_beta import AssistantHelper
 from germ.services.bot.chat.openai_handlers import ChatRoutingEventHandler
@@ -97,10 +96,7 @@ async def lifespan(app: FastAPI):
 
     router = ChatRoutingEventHandler(assistant_helper=assistant_helper)
 
-    request_classifier = ChatRequestClassifier(knowledge_graph)
-    asyncio.create_task(request_classifier.load())
-
-    chat_controller = ChatController(request_classifier, router)
+    chat_controller = ChatController(knowledge_graph, router)
     websocket_manager.add_conversation_monitor(chat_controller)
     websocket_manager.add_receive_event_handler(chat_controller)
     websocket_manager.add_send_event_handler(chat_controller)

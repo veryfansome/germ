@@ -13,7 +13,7 @@ async def _add_chat_message(tx, conversation_id: int, dt_created: datetime):
     MERGE (message:ChatMessage {conversation_id: $conversation_id, dt_created: $dt_created})
     RETURN message
     """
-    return await tx.run(query, conversation_id=conversation_id, dt_created=dt_created)
+    await tx.run(query, conversation_id=conversation_id, dt_created=dt_created)
 
 
 async def _add_conversation(tx, conversation_id: int, dt_created: datetime):
@@ -21,7 +21,7 @@ async def _add_conversation(tx, conversation_id: int, dt_created: datetime):
     MERGE (conversation:Conversation {conversation_id: $conversation_id, dt_created: $dt_created})
     RETURN conversation
     """
-    return await tx.run(query, conversation_id=conversation_id, dt_created=dt_created)
+    await tx.run(query, conversation_id=conversation_id, dt_created=dt_created)
 
 
 async def _add_chat_user(tx, user_id: int, dt_created: datetime):
@@ -29,7 +29,39 @@ async def _add_chat_user(tx, user_id: int, dt_created: datetime):
     MERGE (user:ChatUser {user_id: $user_id, dt_created: $dt_created})
     RETURN user
     """
-    return await tx.run(query, user_id=user_id, dt_created=dt_created)
+    await tx.run(query, user_id=user_id, dt_created=dt_created)
+
+
+async def _add_search_queries(tx, conversation_id: int, dt_created: datetime, query_texts: list[str]):
+    query = """
+    UNWIND $input_structs AS query_struct
+    MERGE (s:SearchQuery {text: query_struct.text})
+    WITH query_struct, s
+    MATCH (m:ChatMessage {conversation_id: query_struct.conversation_id, dt_created: query_struct.dt_created})
+    WITH m, s
+    MERGE (m)-[:SEEKS]->(s)
+    """
+    input_structs = [
+        {
+            'conversation_id': conversation_id,
+            'dt_created': dt_created,
+            'text': text,
+        } for text in query_texts
+    ]
+    await tx.run(query, input_structs=input_structs)
+
+
+async def _match_search_queries_from_conversation(tx, conversation_id: int):
+    query = """
+    MATCH (message:ChatMessage)-[PART_OF]->(conversation:Conversation {conversation_id: $conversation_id})
+    WITH message
+    MATCH (message)-[:SEEKS]->(search_query:SearchQuery)
+    RETURN search_query
+    """
+    records = []
+    async for result in await tx.run(query, conversation_id=conversation_id):
+        records.append(result)
+    return records
 
 
 async def _link_chat_message_received_to_chat_user(tx, conversation_id: int, dt_created: datetime, user_id: int):
@@ -38,7 +70,7 @@ async def _link_chat_message_received_to_chat_user(tx, conversation_id: int, dt_
     MERGE (user)-[rel:SENT]->(message)
     RETURN rel
     """
-    return await tx.run(query, conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
+    await tx.run(query, conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
 
 
 async def _link_chat_message_received_to_conversation(tx, conversation_id: int, dt_created: datetime, user_id: int):
@@ -47,7 +79,7 @@ async def _link_chat_message_received_to_conversation(tx, conversation_id: int, 
     MERGE (message)-[rel:PART_OF]->(conversation)
     RETURN rel
     """
-    return await tx.run(query, conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
+    await tx.run(query, conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
 
 
 async def _link_chat_message_sent_to_chat_message_received(
@@ -57,7 +89,7 @@ async def _link_chat_message_sent_to_chat_message_received(
     MERGE (sent)-[rel:REACTS_TO]->(received)
     RETURN rel
     """
-    return await tx.run(query, received_dt_created=received_dt_created, sent_dt_created=sent_dt_created, conversation_id=conversation_id)
+    await tx.run(query, received_dt_created=received_dt_created, sent_dt_created=sent_dt_created, conversation_id=conversation_id)
 
 
 async def _link_chat_user_to_conversation(tx, user_id: int, conversation_id: int):
@@ -66,31 +98,7 @@ async def _link_chat_user_to_conversation(tx, user_id: int, conversation_id: int
     MERGE (conversation)-[rel:WITH]->(user)
     RETURN rel
     """
-    return await tx.run(query, user_id=user_id, conversation_id=conversation_id)
-
-
-async def _match_all_topic_definitions(tx):
-    query = """
-    MATCH (n)-[:OF_TOPIC]->(t)
-    MATCH (d)-[r:DEFINES]->(t)
-    RETURN DISTINCT(d),r,t
-    """
-    results = []
-    async for record in await tx.run(query):
-        results.append(record)
-    return results
-
-
-async def _match_synset_definition(tx, lemma: str, pos: str):
-    query = """
-    MATCH (syndef)-[rel:DEFINES]-(syn {pos: $pos})
-    WHERE $lemma IN syn.lemmas
-    RETURN syndef,rel,syn
-    """
-    results = []
-    async for record in await tx.run(query, lemma=lemma, pos=pos):
-        results.append(record)
-    return results
+    await tx.run(query, user_id=user_id, conversation_id=conversation_id)
 
 
 class KnowledgeGraph:
@@ -99,81 +107,52 @@ class KnowledgeGraph:
 
     async def add_chat_message(self, conversation_id: int, dt_created: datetime):
         async with self.driver.session() as session:
-            results = await session.execute_write(
-                _add_chat_message, conversation_id=conversation_id, dt_created=dt_created)
-            if results:
-                logger.info(f"MERGE (message:ChatMessage {{conversation_id: {conversation_id}, dt_created: {dt_created}}})")
-            return results
+            await session.execute_write(_add_chat_message,
+                                        conversation_id=conversation_id, dt_created=dt_created)
 
     async def add_chat_user(self, user_id: int, dt_created: datetime):
         async with self.driver.session() as session:
-            results = await session.execute_write(
-                _add_chat_user, user_id=user_id, dt_created=dt_created)
-            if results:
-                logger.info(f"MERGE (user:ChatUser {{user_id: {user_id}, dt_created: {dt_created}}})")
-            return results
+            await session.execute_write(_add_chat_user,
+                                        user_id=user_id, dt_created=dt_created)
 
     async def add_conversation(self, conversation_id: int, dt_created: datetime):
         async with self.driver.session() as session:
-            results = await session.execute_write(
-                _add_conversation, conversation_id=conversation_id, dt_created=dt_created)
-            if results:
-                logger.info(f"MERGE (conversation:Conversation {{conversation_id: {conversation_id}, dt_created: {dt_created}}})")
-            return results
+            await session.execute_write(_add_conversation,
+                                        conversation_id=conversation_id, dt_created=dt_created)
+
+    async def add_search_queries(self, conversation_id: int, dt_created: datetime, query_texts: list[str]):
+        async with self.driver.session() as session:
+            await session.execute_write(_add_search_queries,
+                                        conversation_id=conversation_id, dt_created=dt_created,
+                                        query_texts=query_texts)
 
     async def link_chat_message_received_to_chat_user(self, conversation_id: int, dt_created: datetime, user_id: int):
         async with self.driver.session() as session:
-            results = await session.execute_write(
-                _link_chat_message_received_to_chat_user,
-                conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
-            if results:
-                logger.info("MERGE "
-                            f"(user:ChatUser {{user_id: {user_id}}})-[rel:SENT]->"
-                            f"(message:ChatMessage {{conversation_id: {conversation_id}, dt_created: {dt_created}}})")
-            return results
+            await session.execute_write(_link_chat_message_received_to_chat_user,
+                                        conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
 
     async def link_chat_message_received_to_conversation(self, conversation_id: int, dt_created: datetime, user_id: int):
         async with self.driver.session() as session:
-            results = await session.execute_write(
-                _link_chat_message_received_to_conversation,
-                conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
-            if results:
-                logger.info("MERGE "
-                            f"((message:ChatMessage {{conversation_id: {conversation_id}, dt_created: {dt_created}}})-[rel:PART_OF]->"
-                            f"(conversation:Conversation {{conversation_id: {conversation_id})")
-            return results
+            await session.execute_write(_link_chat_message_received_to_conversation,
+                                        conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
 
     async def link_chat_message_sent_to_chat_message_received(
             self, received_dt_created: datetime, sent_dt_created: datetime, conversation_id: int):
         async with self.driver.session() as session:
-            results = await session.execute_write(
-                _link_chat_message_sent_to_chat_message_received,
-                received_dt_created=received_dt_created, sent_dt_created=sent_dt_created,
-                conversation_id=conversation_id)
-            if results:
-                logger.info("MERGE "
-                            f"(sent:ChatMessage {{conversation_id: {conversation_id}, dt_created: {sent_dt_created}}})-[rel:REACTS_TO]->"
-                            f"(received:ChatMessage {{conversation_id: {conversation_id}, dt_created: {received_dt_created}}})")
-            return results
+            await session.execute_write(_link_chat_message_sent_to_chat_message_received,
+                                        received_dt_created=received_dt_created, sent_dt_created=sent_dt_created,
+                                        conversation_id=conversation_id)
 
     async def link_chat_user_to_conversation(self, user_id: int, conversation_id: int):
         async with self.driver.session() as session:
-            results = await session.execute_write(
-                _link_chat_user_to_conversation,
-                user_id=user_id, conversation_id=conversation_id)
-            if results:
-                logger.info("MERGE "
-                            f"(conversation:Conversation {{conversation_id: {conversation_id}}})-[rel:WITH]->"
-                            f"(user:ChatUser {{user_id: {user_id}}})")
-            return results
+            await session.execute_write(_link_chat_user_to_conversation,
+                                        user_id=user_id, conversation_id=conversation_id)
 
-    async def match_all_topic_definitions(self):
+    async def match_search_queries_from_conversation(self, conversation_id: int):
         async with self.driver.session() as session:
-            return await session.execute_read(_match_all_topic_definitions)
-
-    async def match_synset_definition(self, lemma: str, pos: str):
-        async with self.driver.session() as session:
-            return await session.execute_read(_match_synset_definition, lemma=lemma, pos=pos)
+            records = await session.execute_read(_match_search_queries_from_conversation,
+                                                 conversation_id=conversation_id)
+            return records
 
     async def shutdown(self):
         if self.driver:
