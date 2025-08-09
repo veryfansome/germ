@@ -18,26 +18,12 @@ class ConversationMetadata(BaseModel):
     conversation_id: int
     messages: dict[datetime, ChatMessageMetadata] = {}
 
-    async def add_request(self, user_id: int, dt_created: datetime, chat_request: ChatRequest,
-                          log: bool = False):
-        meta = await ChatMessageMetadata.from_request(user_id, chat_request)
-        self.messages[dt_created] = meta
+    async def add_message(self, dt_created: datetime, message_meta: ChatMessageMetadata, log: bool = False):
+        self.messages[dt_created] = message_meta
         if log:
             message_logger.info(
                 json.dumps(
-                    [int(dt_created.timestamp()), self.conversation_id, meta.model_dump(exclude_none=True)],
-                    separators=(",", ":")
-                )
-            )
-
-    async def add_response(self, dt_created: datetime, chat_response: ChatResponse,
-                           log: bool = False):
-        meta = await ChatMessageMetadata.from_response(chat_response)
-        self.messages[dt_created] = meta
-        if log:
-            message_logger.info(
-                json.dumps(
-                    [int(dt_created.timestamp()), self.conversation_id, meta.model_dump(exclude_none=True)],
+                    [int(dt_created.timestamp()), self.conversation_id, message_meta.model_dump(exclude_none=True)],
                     separators=(",", ":")
                 )
             )
@@ -61,7 +47,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         if conversation_id not in self.conversations:
             self.conversations[conversation_id] = ConversationMetadata(conversation_id=conversation_id)
-        await self.conversations[conversation_id].add_request(user_id, dt_created, chat_request, log=True)
+
+        message_meta = await self.request_classifier.classify_request(user_id, chat_request)
+        await self.conversations[conversation_id].add_message(dt_created, message_meta, log=True)
 
         # Send to LLM
         await self.delegate.on_receive(user_id, conversation_id, dt_created, chat_request, ws_sender)
@@ -72,7 +60,8 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             logger.error(f"Conversation {conversation_id} not found.")
             return
 
-        await self.conversations[conversation_id].add_response(dt_created, chat_response, log=True)
+        message_meta = await self.request_classifier.classify_response(chat_response)
+        await self.conversations[conversation_id].add_message(dt_created, message_meta, log=True)
 
     async def on_start(self):
         pass

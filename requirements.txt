@@ -15,7 +15,6 @@ fastapi
 gunicorn
 httpx
 huggingface_hub[hf_xet]
-inflect
 itsdangerous
 jinja2
 jinja2-cli
