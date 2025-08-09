@@ -12,7 +12,6 @@ from starlette.responses import Response
 from germ.api.models import EmbeddingRequestPayload, TextListPayload
 from germ.observability.logging import logging, setup_logging
 from germ.observability.tracing import setup_tracing
-from germ.services.models.predict.multi_predict import MultiHeadPredictor
 
 ##
 # Logging
@@ -31,8 +30,6 @@ tracer = trace.get_tracer(__name__)
 
 text_embedding_model = SentenceTransformer('Snowflake/snowflake-arctic-embed-l-v2.0')
 text_embedding_model_dim = text_embedding_model.get_sentence_embedding_dimension()
-ud_token_multi_classifier = MultiHeadPredictor(
-    "veryfansome/multi-classifier", subfolder="models/ud_ewt_gum_pud_20250611")
 
 max_encoding_threads = max(2, os.cpu_count() - 2)
 
@@ -49,7 +46,6 @@ async def lifespan(app: FastAPI):
     logger.info("Starting")
 
     await post_text_embedding(EmbeddingRequestPayload(texts=["Hello, world!"], prompt="passage: "))
-    await post_text_classification_ud(TextListPayload(texts=["Hello, world!"]))
 
     logger.info("Started")
 
@@ -90,11 +86,6 @@ async def get_metrics():
 @model_service.get("/text/embedding/info")
 async def get_text_embedding_info():
     return {"dim": text_embedding_model_dim}
-
-
-@model_service.post("/text/classification/ud")
-async def post_text_classification_ud(payload: TextListPayload):
-    return await run_in_threadpool(ud_token_multi_classifier.predict_batch, payload.texts)
 
 
 @model_service.post("/text/embedding")
