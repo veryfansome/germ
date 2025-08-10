@@ -10,32 +10,32 @@ logger = logging.getLogger(__name__)
 
 async def _add_chat_message(tx, conversation_id: int, dt_created: datetime):
     query = """
-    MERGE (message:ChatMessage {conversation_id: $conversation_id, dt_created: $dt_created})
-    RETURN message
+    MERGE (:ChatMessage {conversation_id: $conversation_id, dt_created: $dt_created})
     """
     await tx.run(query, conversation_id=conversation_id, dt_created=dt_created)
 
 
 async def _add_conversation(tx, conversation_id: int, dt_created: datetime):
     query = """
-    MERGE (conversation:Conversation {conversation_id: $conversation_id, dt_created: $dt_created})
-    RETURN conversation
+    MERGE (:Conversation {conversation_id: $conversation_id, dt_created: $dt_created})
     """
     await tx.run(query, conversation_id=conversation_id, dt_created=dt_created)
 
 
 async def _add_chat_user(tx, user_id: int, dt_created: datetime):
     query = """
-    MERGE (user:ChatUser {user_id: $user_id, dt_created: $dt_created})
-    RETURN user
+    MERGE (:ChatUser {user_id: $user_id, dt_created: $dt_created})
     """
     await tx.run(query, user_id=user_id, dt_created=dt_created)
 
 
-async def _add_search_queries(tx, conversation_id: int, dt_created: datetime, query_texts: list[str]):
+async def _add_search_queries(tx, conversation_id: int, dt_created: datetime,
+                              search_query_embeddings: dict[str, list[float]]):
     query = """
     UNWIND $input_structs AS query_struct
     MERGE (s:SearchQuery {text: query_struct.text})
+    WITH query_struct, s
+    SET s.embedding = query_struct.embedding
     WITH query_struct, s
     MATCH (m:ChatMessage {conversation_id: query_struct.conversation_id, dt_created: query_struct.dt_created})
     WITH m, s
@@ -45,39 +45,25 @@ async def _add_search_queries(tx, conversation_id: int, dt_created: datetime, qu
         {
             'conversation_id': conversation_id,
             'dt_created': dt_created,
+            'embedding': embedding,
             'text': text,
-        } for text in query_texts
+        } for text, embedding in search_query_embeddings.items()
     ]
     await tx.run(query, input_structs=input_structs)
 
 
-async def _match_search_queries_from_conversation(tx, conversation_id: int):
-    query = """
-    MATCH (message:ChatMessage)-[PART_OF]->(conversation:Conversation {conversation_id: $conversation_id})
-    WITH message
-    MATCH (message)-[:SEEKS]->(search_query:SearchQuery)
-    RETURN search_query
-    """
-    records = []
-    async for result in await tx.run(query, conversation_id=conversation_id):
-        records.append(result)
-    return records
-
-
 async def _link_chat_message_received_to_chat_user(tx, conversation_id: int, dt_created: datetime, user_id: int):
     query = """
-    MATCH (message:ChatMessage {conversation_id: $conversation_id, dt_created: $dt_created}), (user:ChatUser {user_id: $user_id})
-    MERGE (user)-[rel:SENT]->(message)
-    RETURN rel
+    MATCH (m:ChatMessage {conversation_id: $conversation_id, dt_created: $dt_created}), (u:ChatUser {user_id: $user_id})
+    MERGE (u)-[rel:SENT]->(m)
     """
     await tx.run(query, conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
 
 
 async def _link_chat_message_received_to_conversation(tx, conversation_id: int, dt_created: datetime, user_id: int):
     query = """
-    MATCH (message:ChatMessage {conversation_id: $conversation_id, dt_created: $dt_created}), (conversation:Conversation {conversation_id: $conversation_id})
-    MERGE (message)-[rel:PART_OF]->(conversation)
-    RETURN rel
+    MATCH (m:ChatMessage {conversation_id: $conversation_id, dt_created: $dt_created}), (c:Conversation {conversation_id: $conversation_id})
+    MERGE (m)-[:PART_OF]->(c)
     """
     await tx.run(query, conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
 
@@ -85,20 +71,56 @@ async def _link_chat_message_received_to_conversation(tx, conversation_id: int, 
 async def _link_chat_message_sent_to_chat_message_received(
         tx, received_dt_created: datetime, sent_dt_created: datetime, conversation_id: int):
     query = """
-    MATCH (received:ChatMessage {conversation_id: $conversation_id, dt_created: $received_dt_created}), (sent:ChatMessage {conversation_id: $conversation_id, dt_created: $sent_dt_created})
-    MERGE (sent)-[rel:REACTS_TO]->(received)
-    RETURN rel
+    MATCH (r:ChatMessage {conversation_id: $conversation_id, dt_created: $received_dt_created}), (s:ChatMessage {conversation_id: $conversation_id, dt_created: $sent_dt_created})
+    MERGE (s)-[:REACTS_TO]->(r)
     """
     await tx.run(query, received_dt_created=received_dt_created, sent_dt_created=sent_dt_created, conversation_id=conversation_id)
 
 
 async def _link_chat_user_to_conversation(tx, user_id: int, conversation_id: int):
     query = """
-    MATCH (user:ChatUser {user_id: $user_id}), (conversation:Conversation {conversation_id: $conversation_id})
-    MERGE (conversation)-[rel:WITH]->(user)
-    RETURN rel
+    MATCH (u:ChatUser {user_id: $user_id}), (c:Conversation {conversation_id: $conversation_id})
+    MERGE (c)-[:WITH]->(u)
     """
     await tx.run(query, user_id=user_id, conversation_id=conversation_id)
+
+
+async def _match_search_queries_by_similarity(tx, query_vector: list[float],
+                                              k: int = 5, min_similarity: float = 0.8):
+    query = """
+    CALL db.index.vector.queryNodes('searchQueryVector', $k, $query_vector)
+    YIELD node, score
+    WHERE score >= $min_similarity
+    RETURN score,
+           node.embedding   AS embedding,
+           node.text        AS text
+    """
+    results = await tx.run(query, k=k, query_vector=query_vector, min_similarity=min_similarity)
+    records = []
+    async for result in results:
+        records.append({
+            "embedding": result["embedding"],
+            "score": result["score"],
+            "text": result["text"],
+        })
+    return records
+
+
+async def _match_search_queries_by_text(tx, texts: list[str]):
+    query = """
+    MATCH (s:SearchQuery)
+    WHERE s.text IN $texts
+    RETURN s.embedding  AS embedding,
+           s.text       AS text
+    """
+    result = await tx.run(query, texts=texts)
+    records = []
+    async for result in result:
+        records.append({
+            "embedding": result["embedding"],
+            "text": result["text"],
+        })
+    return records
 
 
 class KnowledgeGraph:
@@ -107,52 +129,54 @@ class KnowledgeGraph:
 
     async def add_chat_message(self, conversation_id: int, dt_created: datetime):
         async with self.driver.session() as session:
-            await session.execute_write(_add_chat_message,
-                                        conversation_id=conversation_id, dt_created=dt_created)
+            await session.execute_write(_add_chat_message, conversation_id, dt_created)
 
     async def add_chat_user(self, user_id: int, dt_created: datetime):
         async with self.driver.session() as session:
-            await session.execute_write(_add_chat_user,
-                                        user_id=user_id, dt_created=dt_created)
+            await session.execute_write(_add_chat_user, user_id, dt_created)
 
     async def add_conversation(self, conversation_id: int, dt_created: datetime):
         async with self.driver.session() as session:
-            await session.execute_write(_add_conversation,
-                                        conversation_id=conversation_id, dt_created=dt_created)
+            await session.execute_write(_add_conversation, conversation_id, dt_created)
 
-    async def add_search_queries(self, conversation_id: int, dt_created: datetime, query_texts: list[str]):
+    async def add_search_queries(self, conversation_id: int, dt_created: datetime,
+                                 search_query_embeddings: dict[str, list[float]]):
         async with self.driver.session() as session:
             await session.execute_write(_add_search_queries,
-                                        conversation_id=conversation_id, dt_created=dt_created,
-                                        query_texts=query_texts)
+                                        conversation_id, dt_created, search_query_embeddings)
 
-    async def link_chat_message_received_to_chat_user(self, conversation_id: int, dt_created: datetime, user_id: int):
+    async def link_chat_message_received_to_chat_user(
+            self, conversation_id: int, dt_created: datetime, user_id: int):
         async with self.driver.session() as session:
             await session.execute_write(_link_chat_message_received_to_chat_user,
-                                        conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
+                                        conversation_id, dt_created, user_id)
 
-    async def link_chat_message_received_to_conversation(self, conversation_id: int, dt_created: datetime, user_id: int):
+    async def link_chat_message_received_to_conversation(
+            self, conversation_id: int, dt_created: datetime, user_id: int):
         async with self.driver.session() as session:
             await session.execute_write(_link_chat_message_received_to_conversation,
-                                        conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
+                                        conversation_id, dt_created, user_id)
 
     async def link_chat_message_sent_to_chat_message_received(
             self, received_dt_created: datetime, sent_dt_created: datetime, conversation_id: int):
         async with self.driver.session() as session:
             await session.execute_write(_link_chat_message_sent_to_chat_message_received,
-                                        received_dt_created=received_dt_created, sent_dt_created=sent_dt_created,
-                                        conversation_id=conversation_id)
+                                        received_dt_created, sent_dt_created, conversation_id)
 
     async def link_chat_user_to_conversation(self, user_id: int, conversation_id: int):
         async with self.driver.session() as session:
             await session.execute_write(_link_chat_user_to_conversation,
                                         user_id=user_id, conversation_id=conversation_id)
 
-    async def match_search_queries_from_conversation(self, conversation_id: int):
+    async def match_search_queries_by_similarity(self, query_vector: list[float],
+                                                 k: int = 5, min_similarity: float = 0.8):
         async with self.driver.session() as session:
-            records = await session.execute_read(_match_search_queries_from_conversation,
-                                                 conversation_id=conversation_id)
-            return records
+            return await session.execute_read(_match_search_queries_by_similarity,
+                                              query_vector, k=k, min_similarity=min_similarity)
+
+    async def match_search_queries_by_text(self, texts: list[str]):
+        async with self.driver.session() as session:
+            return await session.execute_read(_match_search_queries_by_text, texts=texts)
 
     async def shutdown(self):
         if self.driver:
