@@ -8,5 +8,12 @@ CREATE CONSTRAINT                       FOR (c:Conversation)        REQUIRE c.co
 
 CREATE CONSTRAINT                       FOR (w:Website)             REQUIRE w.domain_name                       IS UNIQUE;
 
-CREATE CONSTRAINT                       FOR (s:SearchQuery)         REQUIRE s.text                              IS UNIQUE;
+CREATE CONSTRAINT                       FOR (s:SearchQuery)         REQUIRE (s.text)                            IS UNIQUE;
 CREATE FULLTEXT INDEX searchQueryText   FOR (s:SearchQuery)         ON EACH [s.text];
+CREATE VECTOR INDEX searchQueryVector   FOR (s:SearchQuery)         ON (s.embedding)
+OPTIONS {
+    indexConfig: {
+          `vector.dimensions`:          1024        // Based on dimension of embedding model
+        , `vector.similarity_function`: 'cosine'
+    }
+};

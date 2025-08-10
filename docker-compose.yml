@@ -148,6 +148,7 @@ services:
       - ./scripts/neo4j-start.sh:/neo4j-start.sh
     environment:
       NEO4J_AUTH: *neo4j-auth
+      NEO4J_server_jvm_additional: "--add-modules jdk.incubator.vector"
     command: [ "/neo4j-start.sh" ]
     stop_grace_period: 1m
 
