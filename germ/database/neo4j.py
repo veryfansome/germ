@@ -109,6 +109,34 @@ async def _link_chat_user_to_conversation(tx, user_id: int, conversation_id: int
     await tx.run(query, user_id=user_id, conversation_id=conversation_id)
 
 
+async def _match_non_user_summaries_by_similarity(tx, query_vector: list[float],
+                                                  k: int = 5, min_similarity: float = 0.8):
+    query = """
+    MATCH (m:ChatMessage)
+    WHERE NOT (:ChatUser)-[:SENT]->(m)
+    WITH m
+    CALL db.index.vector.queryNodes('summaryVector', $k, $query_vector)
+    YIELD node, score
+    WHERE (m)-[:HAS_SUMMARY]->(node) AND score >= $min_similarity
+    RETURN score,
+           m.conversation_id    AS conversation_id,
+           m.dt_created         AS dt_created,
+           node.embedding       AS embedding,
+           node.text            AS text
+    """
+    results = await tx.run(query, k=k, query_vector=query_vector, min_similarity=min_similarity)
+    records = []
+    async for result in results:
+        records.append({
+            "conversation_id": result["conversation_id"],
+            "dt_created": result["dt_created"],
+            "embedding": result["embedding"],
+            "score": result["score"],
+            "text": result["text"],
+        })
+    return records
+
+
 async def _match_search_queries_by_similarity(tx, query_vector: list[float],
                                               k: int = 5, min_similarity: float = 0.8):
     query = """
@@ -142,6 +170,34 @@ async def _match_search_queries_by_text(tx, texts: list[str]):
     async for result in result:
         records.append({
             "embedding": result["embedding"],
+            "text": result["text"],
+        })
+    return records
+
+
+async def _match_user_summaries_by_similarity(tx, user_id: int, query_vector: list[float],
+                                              k: int = 5, min_similarity: float = 0.8):
+    query = """
+    MATCH (m:ChatMessage)
+    WHERE (:ChatUser {user_id: $user_id})-[:SENT]->(m)
+    WITH m
+    CALL db.index.vector.queryNodes('summaryVector', $k, $query_vector)
+    YIELD node, score
+    WHERE (m)-[:HAS_SUMMARY]->(node) AND score >= $min_similarity
+    RETURN score,
+           m.conversation_id    AS conversation_id,
+           m.dt_created         AS dt_created,
+           node.embedding       AS embedding,
+           node.text            AS text
+    """
+    results = await tx.run(query, user_id=user_id, k=k, query_vector=query_vector, min_similarity=min_similarity)
+    records = []
+    async for result in results:
+        records.append({
+            "conversation_id": result["conversation_id"],
+            "dt_created": result["dt_created"],
+            "embedding": result["embedding"],
+            "score": result["score"],
             "text": result["text"],
         })
     return records
@@ -197,6 +253,12 @@ class KnowledgeGraph:
             await session.execute_write(_link_chat_user_to_conversation,
                                         user_id=user_id, conversation_id=conversation_id)
 
+    async def match_non_user_summaries_by_similarity(self, query_vector: list[float],
+                                                     k: int = 5, min_similarity: float = 0.8):
+        async with self.driver.session() as session:
+            return await session.execute_read(_match_non_user_summaries_by_similarity,
+                                              query_vector, k=k, min_similarity=min_similarity)
+
     async def match_search_queries_by_similarity(self, query_vector: list[float],
                                                  k: int = 5, min_similarity: float = 0.8):
         async with self.driver.session() as session:
@@ -206,6 +268,12 @@ class KnowledgeGraph:
     async def match_search_queries_by_text(self, texts: list[str]):
         async with self.driver.session() as session:
             return await session.execute_read(_match_search_queries_by_text, texts=texts)
+
+    async def match_user_summaries_by_similarity(self, user_id: int, query_vector: list[float],
+                                                 k: int = 5, min_similarity: float = 0.8):
+        async with self.driver.session() as session:
+            return await session.execute_read(_match_user_summaries_by_similarity,
+                                              user_id, query_vector, k=k, min_similarity=min_similarity)
 
     async def shutdown(self):
         if self.driver:
