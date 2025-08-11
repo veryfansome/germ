@@ -8,3 +8,5 @@ def test_markdown_document_parsing():
         doc = ParsedDoc.from_text(markdown_text)
         code_block_cnt = len(doc.code_blocks)
         assert code_block_cnt == 5, code_block_cnt
+
+        assert doc.restore() == markdown_text

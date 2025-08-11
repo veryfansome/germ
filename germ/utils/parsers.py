@@ -13,22 +13,24 @@ md_parser = MarkdownIt()
 
 
 class ParsedDoc(BaseModel):
-    code_blocks: list[str]
-    text: str
+    code_blocks: list[tuple[str | None, str]]
+    text_parts: list[str]
 
     @classmethod
     def from_text(cls, doc_text: str) -> ("ParsedDoc", str):
         tokens = md_parser.parse(doc_text)
         ranges: list[tuple[int, int]] = []
-        blocks: list[str] = []
+        blocks: list[tuple[str | None, str]] = []
         for tok in tokens:
             if tok.type in {"fence", "code_block"}:
                 start, end = tok.map  # end is *exclusive*
                 ranges.append((start, end))
-                blocks.append(tok.content)  # body only; fences stripped
+                tok_info = (tok.info or "").strip()
+                lang = tok_info.split()[0].strip() if tok_info else None
+                blocks.append((lang, tok.content))  # body only; fences stripped
 
         if not ranges:  # fast-path: no blocks at all
-            return cls(code_blocks=blocks, text=doc_text)
+            return cls(code_blocks=blocks, text_parts=[doc_text])
 
         # Build sanitized text by stitching original segments + placeholders.
         lines = doc_text.splitlines(keepends=True)
@@ -47,7 +49,23 @@ class ParsedDoc(BaseModel):
             sanitized_parts.append(f"{indent}[CODE_BLOCK:{idx}]{eol_chars}")
             last = end  # skip over the whole block
         sanitized_parts.append("".join(lines[last:]))  # remainder of the doc
-        return cls(code_blocks=blocks, text="".join(sanitized_parts))
+        return cls(code_blocks=blocks, text_parts=sanitized_parts)
+
+    def restore(self) -> str:
+        text_parts = []
+        code_block_pointer = 0
+        for part in self.text_parts:
+            if not "[CODE_BLOCK:" in part:
+                text_parts.append(part)
+            else:
+                indent = leading_whitespace_pattern.match(part).group(0)
+                text_parts.append(f"{indent}```{self.code_blocks[code_block_pointer][0] or ''}\n")
+                text_parts.append("\n".join([
+                    (f"{indent}{l}" if l else l) for l in self.code_blocks[code_block_pointer][1].split("\n")
+                ]))
+                text_parts.append(f"{indent}```\n")
+                code_block_pointer += 1
+        return "".join(text_parts)
 
 
 def get_html_soup(text) -> BeautifulSoup:
