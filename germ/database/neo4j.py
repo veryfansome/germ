@@ -52,6 +52,30 @@ async def _add_search_queries(tx, conversation_id: int, dt_created: datetime,
     await tx.run(query, input_structs=input_structs)
 
 
+async def _add_summary(tx, conversation_id: int, dt_created: datetime,
+                       summary_embeddings: dict[str, tuple[int, list[float]]]):
+    query = """
+    UNWIND $input_structs AS summary_struct
+    MERGE (s:Summary {text: summary_struct.text})
+    WITH summary_struct, s
+    SET s.embedding = summary_struct.embedding
+    WITH summary_struct, s
+    MATCH (m:ChatMessage {conversation_id: summary_struct.conversation_id, dt_created: summary_struct.dt_created})
+    WITH summary_struct, m, s
+    MERGE (m)-[:HAS_SUMMARY {position: summary_struct.position}]->(s)
+    """
+    input_structs = [
+        {
+            'conversation_id': conversation_id,
+            'dt_created': dt_created,
+            'embedding': embedding,
+            'position': position,
+            'text': text,
+        } for text, (position, embedding) in summary_embeddings.items()
+    ]
+    await tx.run(query, input_structs=input_structs)
+
+
 async def _link_chat_message_received_to_chat_user(tx, conversation_id: int, dt_created: datetime, user_id: int):
     query = """
     MATCH (m:ChatMessage {conversation_id: $conversation_id, dt_created: $dt_created}), (u:ChatUser {user_id: $user_id})
@@ -144,6 +168,11 @@ class KnowledgeGraph:
         async with self.driver.session() as session:
             await session.execute_write(_add_search_queries,
                                         conversation_id, dt_created, search_query_embeddings)
+
+    async def add_summary(self, conversation_id: int, dt_created: datetime,
+                          summary_embeddings: dict[str, tuple[int, list[float]]]):
+        async with self.driver.session() as session:
+            await session.execute_write(_add_summary, conversation_id, dt_created, summary_embeddings)
 
     async def link_chat_message_received_to_chat_user(
             self, conversation_id: int, dt_created: datetime, user_id: int):

@@ -6,7 +6,7 @@ CREATE CONSTRAINT                       FOR (u:ChatUser)            REQUIRE u.us
 
 CREATE CONSTRAINT                       FOR (c:Conversation)        REQUIRE c.conversation_id                   IS UNIQUE;
 
-CREATE CONSTRAINT                       FOR (w:Website)             REQUIRE w.domain_name                       IS UNIQUE;
+// SearchQuery nodes
 
 CREATE CONSTRAINT                       FOR (s:SearchQuery)         REQUIRE (s.text)                            IS UNIQUE;
 CREATE FULLTEXT INDEX searchQueryText   FOR (s:SearchQuery)         ON EACH [s.text];
@@ -17,3 +17,19 @@ OPTIONS {
         , `vector.similarity_function`: 'cosine'
     }
 };
+
+// Summary nodes
+
+CREATE CONSTRAINT                       FOR (s:Summary)             REQUIRE s.text                              IS UNIQUE;
+CREATE FULLTEXT INDEX summaryText       FOR (s:Summary)             ON EACH [s.text];
+CREATE VECTOR INDEX summaryVector       FOR (s:Summary)             ON (s.embedding)
+OPTIONS {
+    indexConfig: {
+          `vector.dimensions`:          1024        // Based on dimension of embedding model
+        , `vector.similarity_function`: 'cosine'
+    }
+};
+
+// Website nodes
+
+CREATE CONSTRAINT                       FOR (w:Website)             REQUIRE w.domain_name                       IS UNIQUE;

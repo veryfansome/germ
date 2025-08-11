@@ -49,14 +49,19 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         )
         # TODO: code block summarization
 
-        # Generate embeddings on summarized message
+        # Generate embeddings on summarized user message
         filtered_messages: list[dict[str, str]] = [m.model_dump() for m in chat_request.messages if m.role != "system"]
-        summary_text = f"The user {(await summarize_most_recent_message(filtered_messages))['summary']}"
+        summary_text = f"The user {(await summarize_message_received(filtered_messages))['summary']}"
         logger.info(f"Message summary: {summary_text}")
         text_emb = await run_in_threadpool(
-            normalize_embedding, np.array((await get_text_embedding([summary_text]))[0], dtype=np.float32)
+            normalize_embeddings, np.array(await get_text_embedding([summary_text]), dtype=np.float32)
         )
-        text_emb_floats = text_emb.tolist()
+        text_emb_floats = text_emb[0].tolist()
+
+        # TODO:
+        #   - handle if the user is disagreeing with something I said previously
+        #   - handle if the user is simply offering agreement or a compliment
+        #   - handle if situations that don't require information search
 
         # Recall
         (
@@ -100,9 +105,12 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         await asyncio.gather(
             self.conversations[conversation_id].add_message(dt_created, message_meta, log=True),
             self.delegate.on_receive(user_id, conversation_id, dt_created, chat_request, ws_sender),  # Send to LLM
+            self.knowledge_graph.add_summary(conversation_id, dt_created, {
+                summary_text: (0, text_emb_floats)
+            }),
             self.update_search_query_embeddings(
                 conversation_id, dt_created,
-                text_emb, most_similar_search_queries, search_query_suggestions["queries"]
+                text_emb[0], most_similar_search_queries, search_query_suggestions["queries"]
             )
         )
 
@@ -112,14 +120,33 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             logger.error(f"Conversation {conversation_id} not found.")
             return
 
-        doc = await run_in_threadpool(
-            ParsedDoc.from_text, chat_response.content
+        doc_parse_task = asyncio.create_task(
+            run_in_threadpool(ParsedDoc.from_text, chat_response.content)
         )
+
+        # Hydrate message history from conversation metadata
+        messages = await run_in_threadpool(self.conversations[conversation_id].hydrate_messages)
+        messages.append({"role": "assistant", "content": chat_response.content})
+
+        # Generate embeddings on summarized assistant response
+        summary_statements = (await summarize_message_sent(messages))["statements"]
+        logger.info(f"Response summary: {summary_statements}")
+        text_embs = await run_in_threadpool(
+            normalize_embeddings, np.array(await get_text_embedding(summary_statements), dtype=np.float32)
+        )
+
+        doc = await doc_parse_task
         message_meta = ChatMessageMetadata(
             doc=doc,
             user_id=0
         )
-        await self.conversations[conversation_id].add_message(dt_created, message_meta, log=True)
+
+        await asyncio.gather(
+            self.conversations[conversation_id].add_message(dt_created, message_meta, log=True),
+            self.knowledge_graph.add_summary(conversation_id, dt_created, {
+                txt: (idx, text_embs[idx].tolist()) for idx, txt in enumerate(summary_statements)
+            })
+        )
 
     async def on_start(self):
         pass
@@ -148,7 +175,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         ])
         # Drop recalled search queries that were not selected
         recalled_embeddings = {txt: emb for txt, emb in recalled_embeddings.items() if txt in new_suggestions}
-        recalled_embeddings.update(matched_suggestions)
+        recalled_embeddings.update({txt: emb for txt, emb in matched_suggestions})
 
         embeddings_to_update: dict[str, list[float]] = {}
         # For each recalled embedding, average the new and the recalled embedding to form a new centroid
@@ -188,33 +215,40 @@ class ConversationMetadata(BaseModel):
                 )
             )
 
+    def hydrate_messages(self) -> list[dict[str, str]]:
+        return [
+            {
+                "role": ("assistant" if meta.user_id == 0 else "user"),
+                "content": meta.doc.restore()
+            }
+            for _, meta in self.messages.items()
+        ]
 
-def normalize_embedding(vec: np.ndarray) -> np.ndarray:
-    norm = np.linalg.norm(vec)
-    if norm == 0:  # avoid division by zero
-        return vec
-    return vec / norm
+
+def normalize_embeddings(embeddings: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    norms[norms == 0] = 1  # Prevent division by zero by setting zero norms to one
+    return embeddings / norms
 
 
 async def suggest_best_online_info_source(
         messages: list[dict[str, str]],
         candidates: list[str]
 ) -> dict[str, list[str]]:
+    prompt = (
+        "You are a helpful curator of information on the Internet. "
+                                  
+        "Suggest the best website for finding something that would contribute meaningfully "
+        "to the conversation. "
+                                  
+        "Limit your suggestions to websites that work well with text-based browsers. "
+                                  
+        "\nExample(s):\n" + '\n'.join(f"- {c}" for c in candidates)
+    ).strip()
+
     try:
         response = await async_openai_client.chat.completions.create(
-            messages=[
-                         {"role": "system",
-                          "content": (
-                                  "You are a helpful curator of information on the Internet. "
-                                  
-                                  "Suggest the best website for finding something that would contribute meaningfully "
-                                  "to the conversation. "
-                                  
-                                  "Limit your suggestions to websites that work well with text-based browsers. "
-                                  
-                                  "\nExample(s):\n" + '\n'.join(f"- {c}" for c in candidates)
-                          ).strip()},
-                     ] + messages,
+            messages=[{"role": "system", "content": prompt}] + messages,
             model="gpt-4o",
             response_format={
                 "type": "json_schema",
@@ -235,7 +269,7 @@ async def suggest_best_online_info_source(
             },
             n=1, timeout=30)
         suggestions = json.loads(response.choices[0].message.content)
-        logger.info(f"Best info source suggestions: {suggestions}")
+        logger.info(f"Best info source suggestions: {suggestions['domains']}")
         assert "domains" in suggestions, "Response does not contain 'domains'"
         # TODO: Return a follow-up task based on the suggestions
         return suggestions
@@ -246,7 +280,7 @@ async def suggest_best_online_info_source(
 
 async def suggest_search_query(
         messages: list[dict[str, str]],
-        similar_candidates: Iterable[str],
+        candidates: Iterable[str],
 ) -> dict[str, list[str]]:
     prompt = (
         "You are a helpful expert on the use of search engines. "
@@ -254,9 +288,10 @@ async def suggest_search_query(
         "Suggest one or more keyword queries that are likely to yield the best search "
         "results related to the conversation. "
     ).strip()
-    if similar_candidates:
+
+    if candidates:
         prompt += (
-            "\nConsider the following candidate(s):\n" + '\n'.join(f"- {c}" for c in similar_candidates)
+            "\nConsider the following candidate(s):\n" + '\n'.join(f"- {c}" for c in candidates)
         )
     try:
         response = await async_openai_client.chat.completions.create(
@@ -281,7 +316,7 @@ async def suggest_search_query(
             },
             n=1, timeout=30)
         suggestions = json.loads(response.choices[0].message.content)
-        logger.info(f"Search query suggestions: {suggestions}")
+        logger.info(f"Search query suggestions: {suggestions['queries']}")
         assert "queries" in suggestions, "Response does not contain 'queries'"
         return suggestions
     except Exception:
@@ -289,20 +324,21 @@ async def suggest_search_query(
         return {"queries": []}
 
 
-async def summarize_most_recent_message(messages: list[dict[str, str]]) -> dict[str, str]:
+async def summarize_message_received(
+        messages: list[dict[str, str]]
+) -> dict[str, str]:
+    prompt = (
+        "You are an efficient assistant for message summarization. "
+
+        "Don't respond to the user but, instead, finish the sentence \"The user ...\" by "
+        "summarizing the intent of the most recent user message as succinctly as possible. "
+    ).strip()
+
     summary: str | None = None
     while not summary:
         try:
             response = await async_openai_client.chat.completions.create(
-                messages=[
-                             {"role": "system",
-                              "content": (
-                                  "You are an efficient assistant for message summarization. "
-                                  
-                                  "Don't respond to the user but, instead, finish the sentence \"The user ...\" by "
-                                  "summarizing the intent of the most recent user message as succinctly as possible. "
-                              ).strip()},
-                         ] + messages,
+                messages=[{"role": "system", "content": prompt}] + messages,
                 model="gpt-4o",
                 response_format={
                     "type": "json_schema",
@@ -327,3 +363,50 @@ async def summarize_most_recent_message(messages: list[dict[str, str]]) -> dict[
         except Exception:
             logger.error(f"Could not get message summary: {format_exc()}")
     return {"summary": summary}
+
+
+async def summarize_message_sent(
+        messages: list[dict[str, str]]
+) -> dict[str, list[str]]:
+    prompt = (
+        "You are an efficient assistant for message summarization. "
+
+        "Summarize the contents of the assistant message you just sent to the user. "
+
+        "Use statements that effectively capture meaning for comparing similarity and recall "
+        "using semantic embeddings. "
+
+        "Start each statement with \"I ...\", then complete the sentence by explaining "
+        "what you did or said."
+    ).strip()
+
+    summary: list[str] = []
+    while not summary:
+        try:
+            response = await async_openai_client.chat.completions.create(
+                messages=[{"role": "system", "content": prompt}] + messages,
+                model="gpt-4o",
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "summary",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "statements": {
+                                    "type": "array",
+                                    "description": "Summary statements.",
+                                    "items": {"type": "string"}
+                                }
+                            },
+                            "required": ["statements"]
+                        }
+                    }
+                },
+                n=1, timeout=10)
+            response_content = json.loads(response.choices[0].message.content)
+            assert "statements" in response_content, "Response does not contain 'statements'"
+            summary.extend(response_content["statements"])
+        except Exception:
+            logger.error(f"Could not get response summary: {format_exc()}")
+    return {"statements": summary}
