@@ -65,12 +65,24 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         # Recall
         (
-            most_similar_search_queries,
+            recalled_non_user_summaries,
+            recalled_user_summaries,
+            recalled_search_queries,
         ) = await asyncio.gather(
+            self.knowledge_graph.match_non_user_summaries_by_similarity(text_emb_floats, k=5, min_similarity=0.5),
+            self.knowledge_graph.match_user_summaries_by_similarity(user_id, text_emb_floats, k=5),
             self.knowledge_graph.match_search_queries_by_similarity(text_emb_floats, k=5),
         )
-        logger.info(f"Recalled search queries: {[(r['score'], r['text']) for r in most_similar_search_queries]}")
-        most_similar_search_queries = {r["text"]: r["embedding"] for r in most_similar_search_queries}
+        logger.info(f"Recalled non-user summaries: {[
+            (r['score'], r['text'], r['conversation_id'], r['dt_created']) for r in recalled_non_user_summaries
+        ]}")
+        logger.info(f"Recalled user summaries: {[
+            (r['score'], r['text'], r['conversation_id'], r['dt_created']) for r in recalled_user_summaries
+        ]}")
+        logger.info(f"Recalled search queries: {[
+            (r['score'], r['text']) for r in recalled_search_queries
+        ]}")
+        recalled_search_queries = {r["text"]: r["embedding"] for r in recalled_search_queries}
 
         # TODO: Pull from Neo4j using search_query suggestions and text embedding
         info_source_candidates = [
@@ -90,7 +102,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             search_query_suggestions
         ) = await asyncio.gather(
             suggest_best_online_info_source(filtered_messages, info_source_candidates),
-            suggest_search_query(filtered_messages, most_similar_search_queries.keys())
+            suggest_search_query(filtered_messages, recalled_search_queries.keys())
         )
 
         doc = await doc_parse_task
@@ -110,7 +122,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             }),
             self.update_search_query_embeddings(
                 conversation_id, dt_created,
-                text_emb[0], most_similar_search_queries, search_query_suggestions["queries"]
+                text_emb[0], recalled_search_queries, search_query_suggestions["queries"]
             )
         )
 
@@ -332,6 +344,9 @@ async def summarize_message_received(
 
         "Don't respond to the user but, instead, finish the sentence \"The user ...\" by "
         "summarizing the intent of the most recent user message as succinctly as possible. "
+
+        "Choose your phrasing to effectively capture meaning for comparing similarity and recall "
+        "using semantic embeddings. "
     ).strip()
 
     summary: str | None = None
@@ -371,13 +386,15 @@ async def summarize_message_sent(
     prompt = (
         "You are an efficient assistant for message summarization. "
 
-        "Summarize the contents of the assistant message you just sent to the user. "
+        "Summarize the contents of the assistant message you just sent. "
 
         "Use statements that effectively capture meaning for comparing similarity and recall "
         "using semantic embeddings. "
 
         "Start each statement with \"I ...\", then complete the sentence by explaining "
-        "what you did or said."
+        "what you (the assistant) did or said. "
+        
+        "When needed, refer to the user as \"the user\". "
     ).strip()
 
     summary: list[str] = []
