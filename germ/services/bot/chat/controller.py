@@ -13,10 +13,11 @@ from typing import Iterable
 from germ.api.models import ChatRequest, ChatResponse
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
-from germ.services.bot.chat import async_openai_client
+from germ.services.bot.chat import async_openai_client, openai_handlers
 from germ.services.bot.websocket import (WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                                          WebSocketSendEventHandler, WebSocketSender, WebSocketSessionMonitor)
 from germ.services.models import get_text_embedding
+from germ.settings import germ_settings
 from germ.utils.parsers import ParsedDoc
 
 logger = logging.getLogger(__name__)
@@ -27,11 +28,7 @@ summary_prefix_pattern = re.compile(r"^(The user|User):?\s*(?:\.\.\.\s*)?")
 
 class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                      WebSocketSendEventHandler, WebSocketSessionMonitor):
-    def __init__(
-            self, knowledge_graph: KnowledgeGraph,
-            delegate: WebSocketReceiveEventHandler,
-    ):
-        self.delegate = delegate
+    def __init__(self, knowledge_graph: KnowledgeGraph):
         self.conversations: dict[int, ConversationMetadata] = {}
         self.knowledge_graph = knowledge_graph
 
@@ -43,6 +40,11 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         if conversation_id not in self.conversations:
             self.conversations[conversation_id] = ConversationMetadata(conversation_id=conversation_id)
+
+        if chat_request.uploaded_filenames:
+            for filename in chat_request.uploaded_filenames:
+                # TODO: handle uploaded files
+                pass
 
         doc_parse_task = asyncio.create_task(
             run_in_threadpool(ParsedDoc.from_text, chat_request.messages[-1].content)
@@ -115,9 +117,17 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             user_id=user_id,
         )
 
+        if germ_settings.REASONING_MODEL:
+            delegate_handler = openai_handlers.ReasoningChatModelEventHandler()
+        else:
+            delegate_handler = openai_handlers.ChatModelEventHandler()
+
         await asyncio.gather(
+            # Complete chat request
+            delegate_handler.on_receive(user_id, conversation_id, dt_created, chat_request, ws_sender),
+
+            # House-keeping
             self.conversations[conversation_id].add_message(dt_created, message_meta, log=True),
-            self.delegate.on_receive(user_id, conversation_id, dt_created, chat_request, ws_sender),  # Send to LLM
             self.knowledge_graph.add_summary(conversation_id, dt_created, {
                 summary_text: (0, text_emb_floats)
             }),
