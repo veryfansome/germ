@@ -2,6 +2,7 @@ import asyncio
 import logging
 from neo4j import AsyncGraphDatabase
 from datetime import datetime
+from traceback import format_exc
 
 from germ.settings.germ_settings import NEO4J_AUTH, NEO4J_HOST, NEO4J_PORT
 
@@ -109,22 +110,45 @@ async def _link_chat_user_to_conversation(tx, user_id: int, conversation_id: int
     await tx.run(query, user_id=user_id, conversation_id=conversation_id)
 
 
-async def _match_non_user_summaries_by_similarity(tx, query_vector: list[float],
-                                                  k: int = 5, min_similarity: float = 0.8):
+async def _match_non_user_summaries_after_user_message(
+        tx, conversation_id:int, dt_created: datetime,
+):
     query = """
-    MATCH (m:ChatMessage)
-    WHERE NOT (:ChatUser)-[:SENT]->(m)
-    WITH m
-    CALL db.index.vector.queryNodes('summaryVector', $k, $query_vector)
-    YIELD node, score
-    WHERE (m)-[:HAS_SUMMARY]->(node) AND score >= $min_similarity
+    MATCH (m:ChatMessage {conversation_id: $conversation_id}), (s:Summary)
+    WHERE NOT (:ChatUser)-[:SENT]->(m) AND m.dt_created > $dt_created AND (m)-[r:HAS_SUMMARY]->(s)
+    WITH m, r, s
+    ORDER BY m.dt_created ASC, r.position ASC
+    RETURN m.dt_created AS dt_created,
+           s.text       AS text
+    """
+    results = await tx.run(query, conversation_id=conversation_id, dt_created=dt_created)
+    records = []
+    async for result in results:
+        records.append({
+            "dt_created": result["dt_created"],
+            "text": result["text"],
+        })
+    return records
+
+
+async def _match_non_user_summaries_by_similarity(
+        tx, current_conversation_id:int, query_vector: list[float],
+        k: int = 5, min_similarity: float = 0.8
+):
+    query = """
+    MATCH (m:ChatMessage), (s:Summary)
+    WHERE NOT (:ChatUser)-[:SENT]->(m) AND m.conversation_id <> $current_conversation_id AND (m)-[:HAS_SUMMARY]->(s) AND s.embedding IS NOT NULL
+    WITH m, s, vector.similarity.cosine(s.embedding, $query_vector) AS score
+    WHERE score >= $min_similarity
+    ORDER BY score DESC LIMIT $k
     RETURN score,
            m.conversation_id    AS conversation_id,
            m.dt_created         AS dt_created,
-           node.embedding       AS embedding,
-           node.text            AS text
+           s.embedding          AS embedding,
+           s.text               AS text
     """
-    results = await tx.run(query, k=k, query_vector=query_vector, min_similarity=min_similarity)
+    results = await tx.run(query, current_conversation_id=current_conversation_id,
+                           k=k, query_vector=query_vector, min_similarity=min_similarity)
     records = []
     async for result in results:
         records.append({
@@ -175,22 +199,24 @@ async def _match_search_queries_by_text(tx, texts: list[str]):
     return records
 
 
-async def _match_user_summaries_by_similarity(tx, user_id: int, query_vector: list[float],
-                                              k: int = 5, min_similarity: float = 0.8):
+async def _match_user_summaries_by_similarity(
+        tx, current_conversation_id:int, user_id: int, query_vector: list[float],
+        k: int = 5, min_similarity: float = 0.8
+):
     query = """
-    MATCH (m:ChatMessage)
-    WHERE (:ChatUser {user_id: $user_id})-[:SENT]->(m)
-    WITH m
-    CALL db.index.vector.queryNodes('summaryVector', $k, $query_vector)
-    YIELD node, score
-    WHERE (m)-[:HAS_SUMMARY]->(node) AND score >= $min_similarity
+    MATCH (m:ChatMessage), (s:Summary)
+    WHERE (:ChatUser {user_id: $user_id})-[:SENT]->(m) AND m.conversation_id <> $current_conversation_id AND (m)-[:HAS_SUMMARY]->(s) AND s.embedding IS NOT NULL
+    WITH m, s, vector.similarity.cosine(s.embedding, $query_vector) AS score
+    WHERE score >= $min_similarity
+    ORDER BY score DESC LIMIT $k
     RETURN score,
            m.conversation_id    AS conversation_id,
            m.dt_created         AS dt_created,
-           node.embedding       AS embedding,
-           node.text            AS text
+           s.embedding          AS embedding,
+           s.text               AS text
     """
-    results = await tx.run(query, user_id=user_id, k=k, query_vector=query_vector, min_similarity=min_similarity)
+    results = await tx.run(query, current_conversation_id=current_conversation_id, user_id=user_id,
+                           k=k, query_vector=query_vector, min_similarity=min_similarity)
     records = []
     async for result in results:
         records.append({
@@ -253,11 +279,20 @@ class KnowledgeGraph:
             await session.execute_write(_link_chat_user_to_conversation,
                                         user_id=user_id, conversation_id=conversation_id)
 
-    async def match_non_user_summaries_by_similarity(self, query_vector: list[float],
-                                                     k: int = 5, min_similarity: float = 0.8):
-        async with self.driver.session() as session:
-            return await session.execute_read(_match_non_user_summaries_by_similarity,
-                                              query_vector, k=k, min_similarity=min_similarity)
+    async def match_non_user_summaries_by_similarity(
+            self, current_conversation_id: int, query_vector: list[float],
+            k: int = 5, min_similarity: float = 0.8
+    ):
+        try:
+            async with self.driver.session() as session:
+                return await session.execute_read(
+                    _match_non_user_summaries_by_similarity,
+                    current_conversation_id, query_vector,
+                    k=k, min_similarity=min_similarity
+                )
+        except Exception:
+            logger.error(f"Error while fetching non-user summaries: {format_exc()}")
+            return []
 
     async def match_search_queries_by_similarity(self, query_vector: list[float],
                                                  k: int = 5, min_similarity: float = 0.8):
@@ -269,11 +304,20 @@ class KnowledgeGraph:
         async with self.driver.session() as session:
             return await session.execute_read(_match_search_queries_by_text, texts=texts)
 
-    async def match_user_summaries_by_similarity(self, user_id: int, query_vector: list[float],
-                                                 k: int = 5, min_similarity: float = 0.8):
-        async with self.driver.session() as session:
-            return await session.execute_read(_match_user_summaries_by_similarity,
-                                              user_id, query_vector, k=k, min_similarity=min_similarity)
+    async def match_user_summaries_by_similarity(
+            self, current_conversation_id:int, user_id: int, query_vector: list[float],
+            k: int = 5, min_similarity: float = 0.8
+    ):
+        try:
+            async with self.driver.session() as session:
+                return await session.execute_read(
+                    _match_user_summaries_by_similarity,
+                    current_conversation_id, user_id, query_vector,
+                    k=k, min_similarity=min_similarity
+                )
+        except Exception:
+            logger.error(f"Error while fetching user summaries: {format_exc()}")
+            return []
 
     async def shutdown(self):
         if self.driver:
@@ -287,14 +331,3 @@ def new_async_driver():
     auth_parts = NEO4J_AUTH.split("/")
     return AsyncGraphDatabase.driver(
         f"bolt://{NEO4J_HOST}:{NEO4J_PORT}", auth=(auth_parts[0], auth_parts[1]))
-
-
-if __name__ == "__main__":
-    from germ.observability.logging import setup_logging
-    setup_logging()
-
-    async def main():
-        knowledge_graph = KnowledgeGraph()
-        await knowledge_graph.shutdown()
-
-    asyncio.run(main())
