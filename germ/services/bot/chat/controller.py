@@ -69,8 +69,8 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             recalled_user_summaries,
             recalled_search_queries,
         ) = await asyncio.gather(
-            self.knowledge_graph.match_non_user_summaries_by_similarity(text_emb_floats, k=5, min_similarity=0.5),
-            self.knowledge_graph.match_user_summaries_by_similarity(user_id, text_emb_floats, k=5),
+            self.knowledge_graph.match_non_user_summaries_by_similarity(conversation_id, text_emb_floats, k=5),
+            self.knowledge_graph.match_user_summaries_by_similarity(conversation_id, user_id, text_emb_floats, k=5),
             self.knowledge_graph.match_search_queries_by_similarity(text_emb_floats, k=5),
         )
         logger.info(f"Recalled non-user summaries: {[
@@ -104,6 +104,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             suggest_best_online_info_source(filtered_messages, info_source_candidates),
             suggest_search_query(filtered_messages, recalled_search_queries.keys())
         )
+        logger.info(f"Search query suggestions: {search_query_suggestions['queries']}")
 
         doc = await doc_parse_task
         message_meta = ChatMessageMetadata(
@@ -305,35 +306,37 @@ async def suggest_search_query(
         prompt += (
             "\nConsider the following candidate(s):\n" + '\n'.join(f"- {c}" for c in candidates)
         )
-    try:
-        response = await async_openai_client.chat.completions.create(
-            messages=[{"role": "system", "content": prompt}] + messages,
-            model="gpt-4o",
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "keywords",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "queries": {
-                                "type": "array",
-                                "description": "Keyword queries.",
-                                "items": {"type": "string"}
-                            }
-                        },
-                        "required": ["queries"]
+
+    suggestions = []
+    while not suggestions:
+        try:
+            response = await async_openai_client.chat.completions.create(
+                messages=[{"role": "system", "content": prompt}] + messages,
+                model="gpt-4o",
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "keywords",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "queries": {
+                                    "type": "array",
+                                    "description": "Keyword queries.",
+                                    "items": {"type": "string"}
+                                }
+                            },
+                            "required": ["queries"]
+                        }
                     }
-                }
-            },
-            n=1, timeout=30)
-        suggestions = json.loads(response.choices[0].message.content)
-        logger.info(f"Search query suggestions: {suggestions['queries']}")
-        assert "queries" in suggestions, "Response does not contain 'queries'"
-        return suggestions
-    except Exception:
-        logger.error(f"Could not get search query suggestions: {format_exc()}")
-        return {"queries": []}
+                },
+                n=1, timeout=30)
+            response_content = json.loads(response.choices[0].message.content)
+            assert "queries" in response_content, "Response does not contain 'queries'"
+            suggestions.extend(response_content['queries'])
+        except Exception:
+            logger.error(f"Could not get search query suggestions: {format_exc()}")
+    return {"queries": suggestions}
 
 
 async def summarize_message_received(
