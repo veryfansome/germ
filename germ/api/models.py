@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Any, Optional
+from typing import Any
 
 
 class ChatMessage(BaseModel):
@@ -9,14 +9,17 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
-    parameters: Optional[dict[str, str]] = None
-    uploaded_filenames: Optional[list[Any]] = None
+    model: str | None = None
+    parameters: dict[str, str] | None = None
+    reasoning_effort: str | None = None
+    timeout: float | None = None
+    uploaded_filenames: list[Any] | None = None
 
 
 class ChatResponse(ChatMessage):
-    complete: Optional[bool] = None
-    conversation_ident: Optional[str] = None
-    error: Optional[bool] = False
+    complete: bool | None = None
+    conversation_ident: str | None = None
+    error: bool | None = False
     model: str = "none"
     role: str = "assistant"
 

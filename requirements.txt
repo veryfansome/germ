@@ -1,7 +1,6 @@
 accelerate
 aiofiles
 aiohttp
-apscheduler
 asyncpg
 bcrypt
 beautifulsoup4

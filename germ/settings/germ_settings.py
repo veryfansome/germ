@@ -23,6 +23,12 @@ NEO4J_AUTH = os.getenv("NEO4J_AUTH", "neo4j/oops")
 NEO4J_HOST = os.getenv("GERM_NEO4J_HOST", "germ-neo4j")
 NEO4J_PORT = os.getenv("GERM_NEO4J_PORT", "7687")
 
+# OpenAI
+CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL") or "gpt-4o"
+IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL") or "dall-e-3"
+MINI_MODEL = os.getenv("OPENAI_MINI_MODEL") or "gpt-4o-mini"
+REASONING_MODEL = os.getenv("OPENAI_REASONING_MODEL") or None
+
 # PostgreSQL
 
 DB_HOST = os.getenv("DB_HOST", "germ-pg")

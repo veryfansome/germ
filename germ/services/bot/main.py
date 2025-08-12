@@ -1,7 +1,6 @@
 import aiofiles
 import asyncio
 import os
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, status
 from fastapi.responses import FileResponse, RedirectResponse
@@ -29,12 +28,8 @@ from germ.observability.logging import logging, setup_logging
 from germ.observability.tracing import setup_tracing
 from germ.services.bot.auth import MAX_COOKIE_AGE, SESSION_COOKIE_NAME, AuthHelper, verify_password
 from germ.services.bot.chat.controller import ChatController
-from germ.services.bot.chat.openai_beta import AssistantHelper
-from germ.services.bot.chat.openai_handlers import ChatRoutingEventHandler
 from germ.services.bot.websocket import WebSocketConnectionManager
 from germ.settings import germ_settings
-
-scheduler = AsyncIOScheduler()
 
 ##
 # Logging
@@ -88,21 +83,10 @@ async def lifespan(app: FastAPI):
     """
     logger.info("Starting")
 
-    assistant_helper = AssistantHelper()
-    await assistant_helper.refresh_assistants()
-    await assistant_helper.refresh_files()
-    await assistant_helper.no_loose_files()
-    scheduler.scheduled_job(assistant_helper.refresh_files, "interval", minutes=5)
-
-    router = ChatRoutingEventHandler(assistant_helper=assistant_helper)
-
-    chat_controller = ChatController(knowledge_graph, router)
+    chat_controller = ChatController(knowledge_graph)
     websocket_manager.add_conversation_monitor(chat_controller)
     websocket_manager.add_receive_event_handler(chat_controller)
     websocket_manager.add_send_event_handler(chat_controller)
-
-    # Scheduler
-    scheduler.start()
 
     # Started
     logger.info("Started")
@@ -112,18 +96,13 @@ async def lifespan(app: FastAPI):
     # Stopping
     logger.info("Stopping")
 
-    scheduler.shutdown()
-    await asyncio.gather(*[
-        assistant_helper.no_loose_files(),
-        assistant_helper.no_loose_threads(),
-        websocket_manager.disconnect_all(),
-    ])
+    await websocket_manager.disconnect_all()
     await asyncio.gather(*[
         knowledge_graph.shutdown(),
         pg_async_engine.dispose(),
         redis_client.close(),
     ])
-    pg_sync_engine.dispose(),
+    pg_sync_engine.dispose()
 
     logger.info("Stopped")
 

@@ -3,7 +3,6 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from fastapi import WebSocket
-from prometheus_client import Gauge
 from sqlalchemy import Table, and_, insert, select
 from sqlalchemy.ext.asyncio import async_sessionmaker as async_pg_session_maker
 from starlette.websockets import WebSocketDisconnect
@@ -12,22 +11,12 @@ from traceback import format_exc
 from germ.api.models import ChatRequest, ChatResponse
 from germ.database.neo4j import KnowledgeGraph
 from germ.security.encryption import decrypt_integer, derive_key_from_passphrase, encrypt_integer
-from germ.settings.germ_settings import (ENCRYPTION_PASSWORD, UUID5_NS,
-                                         WEBSOCKET_IDLE_TIMEOUT, WEBSOCKET_MONITOR_INTERVAL_SECONDS)
+from germ.settings.germ_settings import (ENCRYPTION_PASSWORD, WEBSOCKET_IDLE_TIMEOUT,
+                                         WEBSOCKET_MONITOR_INTERVAL_SECONDS)
 
 logger = logging.getLogger(__name__)
-message_logger = logging.getLogger('message')
-
-##
-# Encryption
 
 ENCRYPTION_KEY = derive_key_from_passphrase(ENCRYPTION_PASSWORD)
-
-##
-# Metrics
-
-METRIC_CONVERSATIONS_IN_PROGRESS = Gauge(
-    "conversations_in_progress", "Number of conversations that have yet to be disconnected")
 
 
 class WebSocketDisconnectEventHandler(ABC):
@@ -135,8 +124,6 @@ class WebSocketConnectionManager:
         self.send_event_handlers.append(handler)
 
     async def connect(self, user_id: int, ws: WebSocket, conversation_ident: str = None) -> int | None:
-        METRIC_CONVERSATIONS_IN_PROGRESS.inc()
-
         try:
             conversation_id = None if conversation_ident is None else decrypt_integer(conversation_ident, ENCRYPTION_KEY)
         except Exception:
@@ -187,8 +174,6 @@ class WebSocketConnectionManager:
         async_tasks = [asyncio.create_task(handler.on_disconnect(conversation_id))
                        for handler in self.disconnect_event_handlers]
         await asyncio.gather(*async_tasks)
-
-        METRIC_CONVERSATIONS_IN_PROGRESS.dec()
 
     async def disconnect_all(self):
         await asyncio.gather(*[self.disconnect(conversation_id) for conversation_id in self.active_connections])

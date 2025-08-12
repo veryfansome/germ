@@ -43,10 +43,6 @@ def setup_logging(global_level: str = germ_settings.LOG_LEVEL,
                 "level": global_level,
                 "handlers": ["console"],
             },
-            "apscheduler": {
-                "level": "ERROR",
-                **console_only_logger_config,
-            },
             "httpx": {
                 "level": "ERROR",
                 **console_only_logger_config,
