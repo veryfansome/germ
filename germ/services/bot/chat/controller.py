@@ -54,11 +54,11 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         # Generate embeddings on summarized user message
         filtered_messages: list[dict[str, str]] = [m.model_dump() for m in chat_request.messages if m.role != "system"]
         summary_text = f"The user {(await summarize_message_received(filtered_messages))['summary']}"
-        logger.info(f"Message summary: {summary_text}")
-        text_emb = await run_in_threadpool(
+        logger.info(f"Message summary:\n - {summary_text}")
+        summary_emb = await run_in_threadpool(
             normalize_embeddings, np.array(await get_text_embedding([summary_text]), dtype=np.float32)
         )
-        text_emb_floats = text_emb[0].tolist()
+        summary_emb_floats = summary_emb[0].tolist()
 
         # TODO:
         #   - handle if the user is disagreeing with something I said previously
@@ -67,23 +67,35 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         # Recall
         (
-            recalled_non_user_summaries,
+            recalled_bot_message_summaries,
             recalled_user_summaries,
-            recalled_search_queries,
         ) = await asyncio.gather(
-            self.knowledge_graph.match_non_user_summaries_by_similarity(conversation_id, text_emb_floats, k=5),
-            self.knowledge_graph.match_user_summaries_by_similarity(conversation_id, user_id, text_emb_floats, k=5),
-            self.knowledge_graph.match_search_queries_by_similarity(text_emb_floats, k=5),
+            self.knowledge_graph.match_bot_message_summaries_by_similarity_to_message_received(conversation_id, summary_emb_floats, k=5),
+            self.knowledge_graph.match_user_message_summaries_by_similarity(conversation_id, user_id, summary_emb_floats, k=5),
         )
-        logger.info(f"Recalled non-user summaries: {[
-            (r['score'], r['text'], r['conversation_id'], r['dt_created']) for r in recalled_non_user_summaries
-        ]}")
-        logger.info(f"Recalled user summaries: {[
-            (r['score'], r['text'], r['conversation_id'], r['dt_created']) for r in recalled_user_summaries
-        ]}")
-        logger.info(f"Recalled search queries: {[
-            (r['score'], r['text']) for r in recalled_search_queries
-        ]}")
+        logger.info(f"Recalled bot message summaries: {''.join(
+            ('\n - ' + str((r['score'], r['text'], r['conversation_id'], r['dt_created'])))
+            for r in recalled_bot_message_summaries
+        )}")
+        logger.info(f"Recalled user summaries: {''.join(
+            ("\n - " + str((r['score'], r['text'], r['conversation_id'], r['dt_created'])))
+            for r in recalled_user_summaries
+        )}")
+
+        # TODO: Current implementation doesn't recall search queries from current conversation because it relies on
+        #       recalled user message summaries, which ignores the current conversation.
+        recalled_search_queries = await self.knowledge_graph.match_search_queries_by_similarity_to_message_received(
+            summary_emb_floats, [
+                {
+                    "conversation_id": struct["conversation_id"],
+                    "dt_created": struct["dt_created"],
+                    "score": struct["score"],
+                } for struct in recalled_user_summaries
+            ], alpha=0.7, k=5,
+        )
+        logger.info(f"Recalled search queries: {''.join(
+            ("\n - " + str((r['score'], r['text']))) for r in recalled_search_queries
+        )}")
         recalled_search_queries = {r["text"]: r["embedding"] for r in recalled_search_queries}
 
         # TODO: Pull from Neo4j using search_query suggestions and text embedding
@@ -129,12 +141,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             # House-keeping
             self.conversations[conversation_id].add_message(dt_created, message_meta, log=True),
             self.knowledge_graph.add_summary(conversation_id, dt_created, {
-                summary_text: (0, text_emb_floats)
+                summary_text: (0, summary_emb_floats)
             }),
-            self.update_search_query_embeddings(
-                conversation_id, dt_created,
-                text_emb[0], recalled_search_queries, search_query_suggestions["queries"]
-            )
+            self.update_search_query_embeddings(conversation_id, dt_created, search_query_suggestions["queries"])
         )
 
     async def on_send(self, conversation_id: int, dt_created: datetime,
@@ -153,7 +162,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         # Generate embeddings on summarized assistant response
         summary_statements = (await summarize_message_sent(messages))["statements"]
-        logger.info(f"Response summary: {summary_statements}")
+        logger.info(f"Response summary: {''.join(
+            f'\n - {s}' for s in summary_statements
+        )}")
         text_embs = await run_in_threadpool(
             normalize_embeddings, np.array(await get_text_embedding(summary_statements), dtype=np.float32)
         )
@@ -166,6 +177,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         await asyncio.gather(
             self.conversations[conversation_id].add_message(dt_created, message_meta, log=True),
+            # TODO: Check similarity and dedupe
             self.knowledge_graph.add_summary(conversation_id, dt_created, {
                 txt: (idx, text_embs[idx].tolist()) for idx, txt in enumerate(summary_statements)
             })
@@ -189,30 +201,15 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
 
     async def update_search_query_embeddings(
-            self, conversation_id, dt_created: datetime,
-            new_embedding: np.ndarray, recalled_embeddings: dict[str, list[float]], new_suggestions: list[str]
+            self, conversation_id, dt_created: datetime, new_suggestions: list[str]
     ):
-        # Check if suggested search queries are known but were missed during earlier recall
-        matched_suggestions = await self.knowledge_graph.match_search_queries_by_text([
-            q for q in new_suggestions if q not in recalled_embeddings
-        ])
-        # Drop recalled search queries that were not selected
-        recalled_embeddings = {txt: emb for txt, emb in recalled_embeddings.items() if txt in new_suggestions}
-        recalled_embeddings.update({txt: emb for txt, emb in matched_suggestions})
-
-        embeddings_to_update: dict[str, list[float]] = {}
-        # For each recalled embedding, average the new and the recalled embedding to form a new centroid
-        for text, recalled_embedding in recalled_embeddings.items():
-            embeddings_to_update[text] = (
-                    (new_embedding + np.array(recalled_embedding, dtype=np.float32)) / 2
-            ).tolist()
-        # Use the new embedding for anything that is completely new.
-        for text in new_suggestions:
-            if text not in recalled_embeddings:
-                embeddings_to_update[text] = new_embedding.tolist()
-
+        new_suggestions_embedding = await run_in_threadpool(
+            normalize_embeddings, np.array(await get_text_embedding(new_suggestions), dtype=np.float32)
+        )
         await self.knowledge_graph.add_search_queries(
-            conversation_id, dt_created, embeddings_to_update
+            conversation_id, dt_created, {
+                txt: new_suggestions_embedding[idx].tolist() for idx, txt in enumerate(new_suggestions)
+            }
         )
 
 
