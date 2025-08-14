@@ -110,12 +110,12 @@ async def _link_chat_user_to_conversation(tx, user_id: int, conversation_id: int
 
 
 async def _match_bot_message_summaries_by_similarity_to_message_received(
-        tx, current_conversation_id:int, message_received_vector: list[float],
+        tx, current_conversation_id: int, message_received_vector: list[float],
         k: int = 5, min_similarity: float = 0.8
 ):
     cypher = """
     MATCH (m:ChatMessage), (s:Summary)
-    WHERE NOT (:ChatUser)-[:SENT]->(m) AND m.conversation_id <> $current_conversation_id AND (m)-[:HAS_SUMMARY]->(s) AND s.embedding IS NOT NULL
+    WHERE NOT (:ChatUser)-[:SENT]->(m) AND (m)-[:HAS_SUMMARY]->(s) AND s.embedding IS NOT NULL
     WITH m, s, vector.similarity.cosine(s.embedding, $message_received_vector) AS score
     WHERE score >= $min_similarity
     ORDER BY score DESC LIMIT $k
@@ -126,7 +126,8 @@ async def _match_bot_message_summaries_by_similarity_to_message_received(
            s.text               AS text
     """
     results = await tx.run(cypher, current_conversation_id=current_conversation_id,
-                           k=k, message_received_vector=message_received_vector, min_similarity=min_similarity)
+                           message_received_vector=message_received_vector,
+                           k=k, min_similarity=min_similarity)
     records = []
     async for result in results:
         records.append({
@@ -221,13 +222,13 @@ async def _match_search_queries_by_text(tx, texts: list[str]):
     return records
 
 
-async def _match_user_summaries_by_similarity(
-        tx, current_conversation_id:int, user_id: int, message_received_vector: list[float],
+async def _match_user_message_summaries_by_similarity_to_message_received(
+        tx, current_conversation_id: int, user_id: int, message_received_vector: list[float],
         k: int = 5, min_similarity: float = 0.8
 ):
     cypher = """
     MATCH (m:ChatMessage), (s:Summary)
-    WHERE (:ChatUser {user_id: $user_id})-[:SENT]->(m) AND m.conversation_id <> $current_conversation_id AND (m)-[:HAS_SUMMARY]->(s) AND s.embedding IS NOT NULL
+    WHERE (:ChatUser {user_id: $user_id})-[:SENT]->(m) AND (m)-[:HAS_SUMMARY]->(s) AND s.embedding IS NOT NULL
     WITH m, s, vector.similarity.cosine(s.embedding, $message_received_vector) AS score
     WHERE score >= $min_similarity
     ORDER BY score DESC LIMIT $k
@@ -238,7 +239,8 @@ async def _match_user_summaries_by_similarity(
            s.text               AS text
     """
     results = await tx.run(cypher, current_conversation_id=current_conversation_id, user_id=user_id,
-                           k=k, message_received_vector=message_received_vector, min_similarity=min_similarity)
+                           message_received_vector=message_received_vector,
+                           k=k, min_similarity=min_similarity)
     records = []
     async for result in results:
         records.append({
@@ -309,8 +311,7 @@ class KnowledgeGraph:
             async with self.driver.session() as session:
                 return await session.execute_read(
                     _match_bot_message_summaries_by_similarity_to_message_received,
-                    current_conversation_id, message_received_vector,
-                    k=k, min_similarity=min_similarity
+                    current_conversation_id, message_received_vector, k=k, min_similarity=min_similarity
                 )
         except Exception:
             logger.error(f"Error while fetching bot message summaries: {format_exc()}")
@@ -341,14 +342,14 @@ class KnowledgeGraph:
         async with self.driver.session() as session:
             return await session.execute_read(_match_search_queries_by_text, texts=texts)
 
-    async def match_user_message_summaries_by_similarity(
-            self, current_conversation_id:int, user_id: int, message_received_vector: list[float],
+    async def match_user_message_summaries_by_similarity_to_message_received(
+            self, current_conversation_id: int, user_id: int, message_received_vector: list[float],
             k: int = 5, min_similarity: float = 0.8
     ):
         try:
             async with self.driver.session() as session:
                 return await session.execute_read(
-                    _match_user_summaries_by_similarity,
+                    _match_user_message_summaries_by_similarity_to_message_received,
                     current_conversation_id, user_id, message_received_vector,
                     k=k, min_similarity=min_similarity
                 )

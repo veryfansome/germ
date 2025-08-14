@@ -68,35 +68,40 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         # Recall
         (
             recalled_bot_message_summaries,
-            recalled_user_summaries,
+            recalled_user_message_summaries,
         ) = await asyncio.gather(
-            self.knowledge_graph.match_bot_message_summaries_by_similarity_to_message_received(conversation_id, summary_emb_floats, k=5),
-            self.knowledge_graph.match_user_message_summaries_by_similarity(conversation_id, user_id, summary_emb_floats, k=5),
+            self.knowledge_graph.match_bot_message_summaries_by_similarity_to_message_received(
+                conversation_id, summary_emb_floats, k=15, min_similarity=0.85,
+            ),
+            self.knowledge_graph.match_user_message_summaries_by_similarity_to_message_received(
+                conversation_id, user_id, summary_emb_floats, k=15, min_similarity=0.85,
+            ),
         )
-        logger.info(f"Recalled bot message summaries: {''.join(
-            ('\n - ' + str((r['score'], r['text'], r['conversation_id'], r['dt_created'])))
-            for r in recalled_bot_message_summaries
-        )}")
-        logger.info(f"Recalled user summaries: {''.join(
-            ("\n - " + str((r['score'], r['text'], r['conversation_id'], r['dt_created'])))
-            for r in recalled_user_summaries
-        )}")
-
-        # TODO: Current implementation doesn't recall search queries from current conversation because it relies on
-        #       recalled user message summaries, which ignores the current conversation.
         recalled_search_queries = await self.knowledge_graph.match_search_queries_by_similarity_to_message_received(
             summary_emb_floats, [
                 {
                     "conversation_id": struct["conversation_id"],
                     "dt_created": struct["dt_created"],
                     "score": struct["score"],
-                } for struct in recalled_user_summaries
+                } for struct in recalled_user_message_summaries
             ], alpha=0.7, k=5,
         )
+        # Filter out recalled summaries from the current conversation, they used for search query recall but not after.
+        recalled_bot_message_summaries = [s for s in recalled_bot_message_summaries
+                                          if s["conversation_id"] != conversation_id]
+        recalled_user_message_summaries = [s for s in recalled_user_message_summaries
+                                          if s["conversation_id"] != conversation_id]
+        logger.info(f"Recalled bot message summaries: {''.join(
+            ('\n - ' + str((r['score'], r['text'], r['conversation_id'], r['dt_created'])))
+            for r in recalled_bot_message_summaries
+        )}")
+        logger.info(f"Recalled user message summaries: {''.join(
+            ("\n - " + str((r['score'], r['text'], r['conversation_id'], r['dt_created'])))
+            for r in recalled_user_message_summaries
+        )}")
         logger.info(f"Recalled search queries: {''.join(
             ("\n - " + str((r['score'], r['text']))) for r in recalled_search_queries
         )}")
-        recalled_search_queries = {r["text"]: r["embedding"] for r in recalled_search_queries}
 
         # TODO: Pull from Neo4j using search_query suggestions and text embedding
         info_source_candidates = [
@@ -116,7 +121,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             search_query_suggestions
         ) = await asyncio.gather(
             suggest_best_online_info_source(filtered_messages, info_source_candidates),
-            suggest_search_query(filtered_messages, recalled_search_queries.keys())
+            suggest_search_query(filtered_messages, [r["text"] for r in recalled_search_queries])
         )
         logger.info(f"Search query suggestions: {search_query_suggestions['queries']}")
 
@@ -262,9 +267,12 @@ async def suggest_best_online_info_source(
         "to the conversation. "
                                   
         "Limit your suggestions to websites that work well with text-based browsers. "
-                                  
-        "\nExample(s):\n" + '\n'.join(f"- {c}" for c in candidates)
     ).strip()
+
+    if candidates:
+        prompt += (
+                "\nConsider the following candidate(s):\n" + '\n'.join(f"- {c}" for c in candidates)
+        )
 
     try:
         response = await async_openai_client.chat.completions.create(
@@ -279,7 +287,7 @@ async def suggest_best_online_info_source(
                         "properties": {
                             "domains": {
                                 "type": "array",
-                                "description": "Website domain names.",
+                                "description": "A list of website domain names.",
                                 "items": {"type": "string"},
                             }
                         },
@@ -329,7 +337,7 @@ async def suggest_search_query(
                             "properties": {
                                 "queries": {
                                     "type": "array",
-                                    "description": "Keyword queries.",
+                                    "description": "A list of keyword queries.",
                                     "items": {"type": "string"}
                                 }
                             },
@@ -344,6 +352,56 @@ async def suggest_search_query(
         except Exception:
             logger.error(f"Could not get search query suggestions: {format_exc()}")
     return {"queries": suggestions}
+
+
+async def suggest_user_intent(
+        messages: list[dict[str, str]],
+) -> dict[str, list[str]]:
+    prompt = (
+        "You are an insight observer of human behavior. "
+
+        "Consider the intention of the user's most recent message apply the appropriate labels. "
+    ).strip()
+
+    try:
+        response = await async_openai_client.chat.completions.create(
+            messages=[{"role": "system", "content": prompt}] + messages,
+            model="gpt-4o",
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "intent",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "labels": {
+                                "type": "array",
+                                "description": "A list of user intention classifications.",
+                                "items": {"type": "string"},
+                                "enum": [
+                                    "to accept a statement as true",
+                                    "to reject a statement as false",
+
+                                    "to give consent",
+                                    "to deny or withold consent",
+
+                                    "to seek information",
+                                    "to solve a problem",
+                                ],
+                            }
+                        },
+                        "required": ["labels"]
+                    }
+                }
+            },
+            n=1, timeout=30)
+        suggestions = json.loads(response.choices[0].message.content)
+        logger.info(f"User intent suggestions: {suggestions}")
+        assert "labels" in suggestions, "Response does not contain 'labels'"
+        return suggestions
+    except Exception:
+        logger.error(f"Could not get user intent suggestions: {format_exc()}")
+        return {"labels": []}
 
 
 async def summarize_message_received(
@@ -374,7 +432,7 @@ async def summarize_message_received(
                             "properties": {
                                 "summary": {
                                     "type": "string",
-                                    "description": "Message summary.",
+                                    "description": "A summary of the most recent user message.",
                                 }
                             },
                             "required": ["summary"]
@@ -422,7 +480,7 @@ async def summarize_message_sent(
                             "properties": {
                                 "statements": {
                                     "type": "array",
-                                    "description": "Summary statements.",
+                                    "description": "A list of statements summarizing your message to the user.",
                                     "items": {"type": "string"}
                                 }
                             },
