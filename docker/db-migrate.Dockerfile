@@ -2,7 +2,7 @@
 FROM python:3.12-slim
 
 RUN apt-get update
-RUN apt-get install -y curl netcat-traditional openjdk-17-jdk postgresql-client
+RUN apt-get install -y curl netcat-traditional openjdk-21-jdk postgresql-client
 
 # Install jbang and neo4j-migrations tool
 RUN curl -sL https://sh.jbang.dev | bash

@@ -28,10 +28,12 @@ tracer = trace.get_tracer(__name__)
 ##
 # App
 
-text_embedding_model = SentenceTransformer('Snowflake/snowflake-arctic-embed-l-v2.0')
-text_embedding_model_dim = text_embedding_model.get_sentence_embedding_dimension()
-
 max_encoding_threads = max(2, os.cpu_count() - 2)
+
+# NOTE:
+#   - When changing the model here, the following needs to be updated as well:
+#     - database/neo4j/migrations/V0000000001__init.cypher (embedding dimension in constraints)
+text_embedding_model = SentenceTransformer('Snowflake/snowflake-arctic-embed-l-v2.0')
 
 
 @asynccontextmanager
@@ -81,11 +83,6 @@ async def get_healthz():
 @model_service.get("/metrics")
 async def get_metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
-
-
-@model_service.get("/text/embedding/info")
-async def get_text_embedding_info():
-    return {"dim": text_embedding_model_dim}
 
 
 @model_service.post("/text/embedding")
