@@ -14,6 +14,7 @@ from germ.api.models import ChatRequest, ChatResponse
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
 from germ.services.bot.chat import async_openai_client, openai_handlers
+from germ.services.bot.chat.classifier import UserIntentClassifier
 from germ.services.bot.websocket import (WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                                          WebSocketSendEventHandler, WebSocketSender, WebSocketSessionMonitor)
 from germ.services.models import get_text_embedding
@@ -51,10 +52,20 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         )
         # TODO: code block summarization
 
-        # Generate embeddings on summarized user message
         filtered_messages: list[dict[str, str]] = [m.model_dump() for m in chat_request.messages if m.role != "system"]
-        summary_text = f"The user {(await summarize_message_received(filtered_messages))['summary']}"
-        logger.info(f"Message summary:\n - {summary_text}")
+
+        (
+            message_summary,
+            user_intent_labels,
+        ) = await asyncio.gather(
+            summarize_message_received(filtered_messages),
+            UserIntentClassifier.suggest_user_intent(filtered_messages),
+        )
+        summary_text = f"The user {message_summary['summary']}"
+        logger.info(f"User message summary:\n - {summary_text}")
+        logger.info(f"User intent labels: {''.join(f'\n - {l}' for l in user_intent_labels['intents'])}")
+
+        # Generate embeddings on summarized user message
         summary_emb = await run_in_threadpool(
             normalize_embeddings, np.array(await get_text_embedding([summary_text]), dtype=np.float32)
         )
@@ -352,56 +363,6 @@ async def suggest_search_query(
         except Exception:
             logger.error(f"Could not get search query suggestions: {format_exc()}")
     return {"queries": suggestions}
-
-
-async def suggest_user_intent(
-        messages: list[dict[str, str]],
-) -> dict[str, list[str]]:
-    prompt = (
-        "You are an insight observer of human behavior. "
-
-        "Consider the intention of the user's most recent message apply the appropriate labels. "
-    ).strip()
-
-    try:
-        response = await async_openai_client.chat.completions.create(
-            messages=[{"role": "system", "content": prompt}] + messages,
-            model="gpt-4o",
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "intent",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "labels": {
-                                "type": "array",
-                                "description": "A list of user intention classifications.",
-                                "items": {"type": "string"},
-                                "enum": [
-                                    "to accept a statement as true",
-                                    "to reject a statement as false",
-
-                                    "to give consent",
-                                    "to deny or withold consent",
-
-                                    "to seek information",
-                                    "to solve a problem",
-                                ],
-                            }
-                        },
-                        "required": ["labels"]
-                    }
-                }
-            },
-            n=1, timeout=30)
-        suggestions = json.loads(response.choices[0].message.content)
-        logger.info(f"User intent suggestions: {suggestions}")
-        assert "labels" in suggestions, "Response does not contain 'labels'"
-        return suggestions
-    except Exception:
-        logger.error(f"Could not get user intent suggestions: {format_exc()}")
-        return {"labels": []}
 
 
 async def summarize_message_received(
