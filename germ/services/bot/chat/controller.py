@@ -288,7 +288,7 @@ async def suggest_best_online_info_source(
     try:
         response = await async_openai_client.chat.completions.create(
             messages=[{"role": "system", "content": prompt}] + messages,
-            model="gpt-4o",
+            model=germ_settings.CURATION_MODEL,
             response_format={
                 "type": "json_schema",
                 "json_schema": {
@@ -306,7 +306,7 @@ async def suggest_best_online_info_source(
                     }
                 }
             },
-            n=1, timeout=30)
+            n=1, timeout=10)
         suggestions = json.loads(response.choices[0].message.content)
         logger.info(f"Best info source suggestions: {suggestions['domains']}")
         assert "domains" in suggestions, "Response does not contain 'domains'"
@@ -338,7 +338,7 @@ async def suggest_search_query(
         try:
             response = await async_openai_client.chat.completions.create(
                 messages=[{"role": "system", "content": prompt}] + messages,
-                model="gpt-4o",
+                model=germ_settings.CURATION_MODEL,
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
@@ -356,7 +356,7 @@ async def suggest_search_query(
                         }
                     }
                 },
-                n=1, timeout=30)
+                n=1, timeout=10)
             response_content = json.loads(response.choices[0].message.content)
             assert "queries" in response_content, "Response does not contain 'queries'"
             suggestions.extend(response_content['queries'])
@@ -383,7 +383,7 @@ async def summarize_message_received(
         try:
             response = await async_openai_client.chat.completions.create(
                 messages=[{"role": "system", "content": prompt}] + messages,
-                model="gpt-4o",
+                model=germ_settings.SUMMARY_MODEL,
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
@@ -431,7 +431,7 @@ async def summarize_message_sent(
         try:
             response = await async_openai_client.chat.completions.create(
                 messages=[{"role": "system", "content": prompt}] + messages,
-                model="gpt-4o",
+                model=germ_settings.SUMMARY_MODEL,
                 response_format={
                     "type": "json_schema",
                     "json_schema": {

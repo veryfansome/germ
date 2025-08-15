@@ -3,6 +3,7 @@ import logging
 from traceback import format_exc
 
 from germ.services.bot.chat import async_openai_client
+from germ.settings import germ_settings
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ class UserIntentClassifier:
             try:
                 response = await async_openai_client.chat.completions.create(
                     messages=[{"role": "system", "content": cls.prompt}] + messages,
-                    model="gpt-4o",
+                    model=germ_settings.CLASSIFICATION_MODEL,
                     response_format={
                         "type": "json_schema",
                         "json_schema": {
@@ -116,9 +117,7 @@ class UserIntentClassifier:
                         }
                     },
                     n=1,
-                    timeout=30,
-                    temperature=0,
-                    top_p=1,
+                    timeout=15,
                 )
                 response_content = json.loads(response.choices[0].message.content)
                 assert "labels" in response_content, "Response does not contain 'labels'"
