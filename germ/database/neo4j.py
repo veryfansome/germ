@@ -32,12 +32,12 @@ async def _add_chat_user(tx, user_id: int, dt_created: datetime):
 async def _add_search_queries(tx, conversation_id: int, dt_created: datetime,
                               search_query_embeddings: dict[str, list[float]]):
     cypher = """
-    UNWIND $input_structs AS query_struct
-    MERGE (s:SearchQuery {text: query_struct.text})
-    WITH query_struct, s
-    SET s.embedding = query_struct.embedding
-    WITH query_struct, s
-    MATCH (m:ChatMessage {conversation_id: query_struct.conversation_id, dt_created: query_struct.dt_created})
+    UNWIND $input_structs AS input_struct
+    MERGE (s:SearchQuery {text: input_struct.text})
+    WITH input_struct, s
+    SET s.embedding = input_struct.embedding
+    WITH input_struct, s
+    MATCH (m:ChatMessage {conversation_id: input_struct.conversation_id, dt_created: input_struct.dt_created})
     WITH m, s
     MERGE (m)-[:SEEKS]->(s)
     """
@@ -55,14 +55,14 @@ async def _add_search_queries(tx, conversation_id: int, dt_created: datetime,
 async def _add_summary(tx, conversation_id: int, dt_created: datetime,
                        summary_embeddings: dict[str, tuple[int, list[float]]]):
     cypher = """
-    UNWIND $input_structs AS summary_struct
-    MERGE (s:Summary {text: summary_struct.text})
-    WITH summary_struct, s
-    SET s.embedding = summary_struct.embedding
-    WITH summary_struct, s
-    MATCH (m:ChatMessage {conversation_id: summary_struct.conversation_id, dt_created: summary_struct.dt_created})
-    WITH summary_struct, m, s
-    MERGE (m)-[:HAS_SUMMARY {position: summary_struct.position}]->(s)
+    UNWIND $input_structs AS input_struct
+    MERGE (s:Summary {text: input_struct.text})
+    WITH input_struct, s
+    SET s.embedding = input_struct.embedding
+    WITH input_struct, s
+    MATCH (m:ChatMessage {conversation_id: input_struct.conversation_id, dt_created: input_struct.dt_created})
+    WITH input_struct, m, s
+    MERGE (m)-[:HAS_SUMMARY {position: input_struct.position}]->(s)
     """
     input_structs = [
         {
@@ -74,6 +74,28 @@ async def _add_summary(tx, conversation_id: int, dt_created: datetime,
         } for text, (position, embedding) in summary_embeddings.items()
     ]
     await tx.run(cypher, input_structs=input_structs)
+
+
+async def _add_user_message_intent(tx, conversation_id: int, dt_created: datetime,
+                                   labels: list[list[str]]):
+    cypher = """
+    MATCH (m:ChatMessage {conversation_id: $conversation_id, dt_created: $dt_created})
+    UNWIND $input_structs AS input_struct
+    MERGE (i:Intent {name: input_struct.intent})
+    WITH input_struct, m, i
+    MERGE (c:IntentCategory {name: input_struct.category})
+    WITH m, i, c
+    MERGE (m)-[:HAS_INTENT]->(i)
+    WITH i, c
+    MERGE (i)-[:CATEGORIZED_AS]->(c)
+    """
+    input_structs = [
+        {
+            'category': label[0],
+            'intent': label[1],
+        } for label in labels
+    ]
+    await tx.run(cypher, conversation_id=conversation_id, dt_created=dt_created, input_structs=input_structs)
 
 
 async def _link_chat_message_received_to_chat_user(tx, conversation_id: int, dt_created: datetime, user_id: int):
@@ -258,50 +280,102 @@ class KnowledgeGraph:
         self.driver = driver if driver is not None else new_async_driver()
 
     async def add_chat_message(self, conversation_id: int, dt_created: datetime):
-        async with self.driver.session() as session:
-            await session.execute_write(_add_chat_message, conversation_id, dt_created)
+        try:
+            async with self.driver.session() as session:
+                await session.execute_write(_add_chat_message, conversation_id, dt_created)
+        except Exception:
+            logging.error(f"Failed to add chat message from {conversation_id} at {dt_created}: {format_exc()}")
 
     async def add_chat_user(self, user_id: int, dt_created: datetime):
-        async with self.driver.session() as session:
-            await session.execute_write(_add_chat_user, user_id, dt_created)
+        try:
+            async with self.driver.session() as session:
+                await session.execute_write(_add_chat_user, user_id, dt_created)
+        except Exception:
+            logging.error(f"Failed to add chat user {user_id}: {format_exc()}")
 
     async def add_conversation(self, conversation_id: int, dt_created: datetime):
-        async with self.driver.session() as session:
-            await session.execute_write(_add_conversation, conversation_id, dt_created)
+        try:
+            async with self.driver.session() as session:
+                await session.execute_write(_add_conversation, conversation_id, dt_created)
+        except Exception:
+            logging.error(f"Failed to add conversation {conversation_id}: {format_exc()}")
 
-    async def add_search_queries(self, conversation_id: int, dt_created: datetime,
-                                 search_query_embeddings: dict[str, list[float]]):
-        async with self.driver.session() as session:
-            await session.execute_write(_add_search_queries,
-                                        conversation_id, dt_created, search_query_embeddings)
+    async def add_search_queries(
+            self, conversation_id: int, dt_created: datetime,
+            search_query_embeddings: dict[str, list[float]]
+    ):
+        try:
+            async with self.driver.session() as session:
+                await session.execute_write(
+                    _add_search_queries, conversation_id, dt_created, search_query_embeddings
+                )
+        except Exception:
+            logging.error(f"Failed to add search queries related to chat message from conversation {conversation_id}, "
+                          f"received at {dt_created}, {search_query_embeddings.keys()}: {format_exc()}")
 
-    async def add_summary(self, conversation_id: int, dt_created: datetime,
-                          summary_embeddings: dict[str, tuple[int, list[float]]]):
-        async with self.driver.session() as session:
-            await session.execute_write(_add_summary, conversation_id, dt_created, summary_embeddings)
+    async def add_summary(
+            self, conversation_id: int, dt_created: datetime,
+            summary_embeddings: dict[str, tuple[int, list[float]]]
+    ):
+        try:
+            async with self.driver.session() as session:
+                await session.execute_write(_add_summary, conversation_id, dt_created, summary_embeddings)
+        except Exception:
+            logging.error(f"Failed to add summaries of chat message from conversation {conversation_id}, "
+                          f"received at {dt_created}, {summary_embeddings.keys()}: {format_exc()}")
+
+    async def add_user_message_intent(
+            self, conversation_id: int, dt_created: datetime,
+            labels: list[list[str]]
+    ):
+        try:
+            async with self.driver.session() as session:
+                await session.execute_write(_add_user_message_intent, conversation_id, dt_created, labels)
+        except Exception:
+            logging.error(f"Failed to add intent of chat message from conversation {conversation_id}, "
+                          f"received at {dt_created}, {labels}: {format_exc()}")
+
 
     async def link_chat_message_received_to_chat_user(
-            self, conversation_id: int, dt_created: datetime, user_id: int):
-        async with self.driver.session() as session:
-            await session.execute_write(_link_chat_message_received_to_chat_user,
-                                        conversation_id, dt_created, user_id)
+            self, conversation_id: int, dt_created: datetime, user_id: int
+    ):
+        try:
+            async with self.driver.session() as session:
+                await session.execute_write(_link_chat_message_received_to_chat_user,
+                                            conversation_id, dt_created, user_id)
+        except Exception:
+            logger.error(f"Failed to link chat message from conversation {conversation_id}, "
+                         f"received at {dt_created} to chat user {user_id}: {format_exc()}")
 
     async def link_chat_message_received_to_conversation(
-            self, conversation_id: int, dt_created: datetime, user_id: int):
-        async with self.driver.session() as session:
-            await session.execute_write(_link_chat_message_received_to_conversation,
-                                        conversation_id, dt_created, user_id)
+            self, conversation_id: int, dt_created: datetime, user_id: int
+    ):
+        try:
+            async with self.driver.session() as session:
+                await session.execute_write(_link_chat_message_received_to_conversation,
+                                            conversation_id, dt_created, user_id)
+        except Exception:
+            logger.error(f"Failed to link chat message from conversation {conversation_id}, "
+                         f"received at {dt_created}: {format_exc()}")
 
     async def link_chat_message_sent_to_chat_message_received(
-            self, received_dt_created: datetime, sent_dt_created: datetime, conversation_id: int):
-        async with self.driver.session() as session:
-            await session.execute_write(_link_chat_message_sent_to_chat_message_received,
-                                        received_dt_created, sent_dt_created, conversation_id)
+            self, received_dt_created: datetime, sent_dt_created: datetime, conversation_id: int
+    ):
+        try:
+            async with self.driver.session() as session:
+                await session.execute_write(_link_chat_message_sent_to_chat_message_received,
+                                            received_dt_created, sent_dt_created, conversation_id)
+        except Exception:
+            logger.error(f"Failed to link chat message sent at {sent_dt_created} to chat message received at "
+                         f"{received_dt_created}, from conversation {conversation_id}: {format_exc()}")
 
     async def link_chat_user_to_conversation(self, user_id: int, conversation_id: int):
-        async with self.driver.session() as session:
-            await session.execute_write(_link_chat_user_to_conversation,
-                                        user_id=user_id, conversation_id=conversation_id)
+        try:
+            async with self.driver.session() as session:
+                await session.execute_write(_link_chat_user_to_conversation,
+                                            user_id=user_id, conversation_id=conversation_id)
+        except Exception:
+            logger.error(f"Failed to link chat user {user_id} to conversation {conversation_id}: {format_exc()}")
 
     async def match_bot_message_summaries_by_similarity_to_message_received(
             self, current_conversation_id: int, message_received_vector: list[float],
@@ -317,14 +391,23 @@ class KnowledgeGraph:
             logger.error(f"Error while fetching bot message summaries: {format_exc()}")
             return []
 
-    async def match_search_queries_by_similarity(self, query_vector: list[float],
-                                                 k: int = 5, min_similarity: float = 0.8):
-        async with self.driver.session() as session:
-            return await session.execute_read(_match_search_queries_by_similarity,
-                                              query_vector, k=k, min_similarity=min_similarity)
+    async def match_search_queries_by_similarity(
+            self, query_vector: list[float],
+            k: int = 5, min_similarity: float = 0.8
+    ):
+        try:
+            async with self.driver.session() as session:
+                return await session.execute_read(
+                    _match_search_queries_by_similarity,
+                    query_vector, k=k, min_similarity=min_similarity
+                )
+        except Exception:
+            logger.error(f"Error while fetching search queries: {format_exc()}")
+            return []
 
     async def match_search_queries_by_similarity_to_message_received(
-            self, message_received_vector: list[float], similar_message_structs: list[dict[str, float | datetime | int]],
+            self, message_received_vector: list[float],
+            similar_message_structs: list[dict[str, float | datetime | int]],
             alpha: float = 0.7, k: int = 5,
     ):
         try:
@@ -335,12 +418,16 @@ class KnowledgeGraph:
                     alpha=alpha, k=k
                 )
         except Exception:
-            logger.error(f"Error while fetching similar search queries: {format_exc()}")
+            logger.error(f"Error while fetching search queries: {format_exc()}")
             return []
 
     async def match_search_queries_by_text(self, texts: list[str]):
-        async with self.driver.session() as session:
-            return await session.execute_read(_match_search_queries_by_text, texts=texts)
+        try:
+            async with self.driver.session() as session:
+                return await session.execute_read(_match_search_queries_by_text, texts=texts)
+        except Exception:
+            logger.error(f"Error while fetching search queries: {format_exc()}")
+            return []
 
     async def match_user_message_summaries_by_similarity_to_message_received(
             self, current_conversation_id: int, user_id: int, message_received_vector: list[float],
