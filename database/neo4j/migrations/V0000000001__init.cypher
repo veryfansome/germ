@@ -6,6 +6,11 @@ CREATE CONSTRAINT                       FOR (u:ChatUser)            REQUIRE u.us
 
 CREATE CONSTRAINT                       FOR (c:Conversation)        REQUIRE c.conversation_id                   IS UNIQUE;
 
+// Intent
+
+CREATE CONSTRAINT                       FOR (s:Intent)              REQUIRE (s.text)                            IS UNIQUE;
+CREATE CONSTRAINT                       FOR (s:IntentCategory)      REQUIRE (s.text)                            IS UNIQUE;
+
 // SearchQuery nodes
 
 CREATE CONSTRAINT                       FOR (s:SearchQuery)         REQUIRE (s.text)                            IS UNIQUE;

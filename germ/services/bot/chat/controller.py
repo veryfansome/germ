@@ -159,6 +159,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             self.knowledge_graph.add_summary(conversation_id, dt_created, {
                 summary_text: (0, summary_emb_floats)
             }),
+            self.knowledge_graph.add_user_message_intent(conversation_id, dt_created, [
+                l.lower().split(": ") for l in user_intent_labels['intents']
+            ]),
             self.update_search_query_embeddings(conversation_id, dt_created, search_query_suggestions["queries"])
         )
 
