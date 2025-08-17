@@ -29,17 +29,19 @@ async def _add_chat_user(tx, user_id: int, dt_created: datetime):
     await tx.run(cypher, user_id=user_id, dt_created=dt_created)
 
 
-async def _add_search_queries(tx, conversation_id: int, dt_created: datetime,
-                              search_query_embeddings: dict[str, list[float]]):
+async def _add_keyword_phrases(
+        tx, conversation_id: int, dt_created: datetime,
+        keyword_phrase_embeddings: dict[str, list[float]]
+):
     cypher = """
     UNWIND $input_structs AS input_struct
-    MERGE (s:SearchQuery {text: input_struct.text})
-    WITH input_struct, s
-    SET s.embedding = input_struct.embedding
-    WITH input_struct, s
+    MERGE (kw:KeywordPhrase {text: input_struct.text})
+    WITH input_struct, kw
+    SET kw.embedding = input_struct.embedding
+    WITH input_struct, kw
     MATCH (m:ChatMessage {conversation_id: input_struct.conversation_id, dt_created: input_struct.dt_created})
-    WITH m, s
-    MERGE (m)-[:SEEKS]->(s)
+    WITH m, kw
+    MERGE (m)-[:SEEKS]->(kw)
     """
     input_structs = [
         {
@@ -47,7 +49,7 @@ async def _add_search_queries(tx, conversation_id: int, dt_created: datetime,
             'dt_created': dt_created,
             'embedding': embedding,
             'text': text,
-        } for text, embedding in search_query_embeddings.items()
+        } for text, embedding in keyword_phrase_embeddings.items()
     ]
     await tx.run(cypher, input_structs=input_structs)
 
@@ -77,7 +79,7 @@ async def _add_summary(tx, conversation_id: int, dt_created: datetime,
 
 
 async def _add_user_message_intent(tx, conversation_id: int, dt_created: datetime,
-                                   labels: list[list[str]]):
+                                   labels: list[tuple[str, str]]):
     cypher = """
     MATCH (m:ChatMessage {conversation_id: $conversation_id, dt_created: $dt_created})
     UNWIND $input_structs AS input_struct
@@ -91,9 +93,9 @@ async def _add_user_message_intent(tx, conversation_id: int, dt_created: datetim
     """
     input_structs = [
         {
-            'category': label[0],
-            'intent': label[1],
-        } for label in labels
+            'category': category,
+            'intent': intent,
+        } for category, intent in labels
     ]
     await tx.run(cypher, conversation_id=conversation_id, dt_created=dt_created, input_structs=input_structs)
 
@@ -123,6 +125,14 @@ async def _link_chat_message_sent_to_chat_message_received(
     await tx.run(cypher, received_dt_created=received_dt_created, sent_dt_created=sent_dt_created, conversation_id=conversation_id)
 
 
+async def _link_chat_message_to_summary(tx, conversation_id: int, dt_created: datetime, position: int, summary_text: str):
+    cypher = """
+    MATCH (m: ChatMessage {conversation_id: $conversation_id, dt_created: $dt_created}), (s:Summary {text: $summary_text})
+    MERGE (m)-[:HAS_SUMMARY {position: $position}]->(s)
+    """
+    await tx.run(cypher, conversation_id=conversation_id, dt_created=dt_created, position=position, summary_text=summary_text)
+
+
 async def _link_chat_user_to_conversation(tx, user_id: int, conversation_id: int):
     cypher = """
     MATCH (u:ChatUser {user_id: $user_id}), (c:Conversation {conversation_id: $conversation_id})
@@ -131,14 +141,14 @@ async def _link_chat_user_to_conversation(tx, user_id: int, conversation_id: int
     await tx.run(cypher, user_id=user_id, conversation_id=conversation_id)
 
 
-async def _match_bot_message_summaries_by_similarity_to_message_received(
-        tx, current_conversation_id: int, message_received_vector: list[float],
+async def _match_bot_message_summaries_by_similarity_to_query_vector(
+        tx, current_conversation_id: int, query_vector: list[float],
         k: int = 5, min_similarity: float = 0.8
 ):
     cypher = """
     MATCH (m:ChatMessage), (s:Summary)
     WHERE NOT (:ChatUser)-[:SENT]->(m) AND (m)-[:HAS_SUMMARY]->(s) AND s.embedding IS NOT NULL
-    WITH m, s, vector.similarity.cosine(s.embedding, $message_received_vector) AS score
+    WITH m, s, vector.similarity.cosine(s.embedding, $query_vector) AS score
     WHERE score >= $min_similarity
     ORDER BY score DESC LIMIT $k
     RETURN score,
@@ -148,7 +158,7 @@ async def _match_bot_message_summaries_by_similarity_to_message_received(
            s.text               AS text
     """
     results = await tx.run(cypher, current_conversation_id=current_conversation_id,
-                           message_received_vector=message_received_vector,
+                           query_vector=query_vector,
                            k=k, min_similarity=min_similarity)
     records = []
     async for result in results:
@@ -162,8 +172,8 @@ async def _match_bot_message_summaries_by_similarity_to_message_received(
     return records
 
 
-async def _match_search_queries_by_similarity(tx, query_vector: list[float],
-                                              k: int = 5, min_similarity: float = 0.8):
+async def _match_keyword_phrases_by_similarity(tx, query_vector: list[float],
+                                               k: int = 5, min_similarity: float = 0.8):
     cypher = """
     CALL db.index.vector.queryNodes('searchQueryVector', $k, $query_vector)
     YIELD node, score
@@ -183,8 +193,8 @@ async def _match_search_queries_by_similarity(tx, query_vector: list[float],
     return records
 
 
-async def _match_search_queries_by_similarity_to_message_received(
-        tx, message_received_vector: list[float], similar_message_structs: list[dict[str, float | datetime | int]],
+async def _match_keyword_phrases_by_similarity_to_query_vector(
+        tx, query_vector: list[float], similar_message_structs: list[dict[str, float | datetime | int]],
         alpha: float = 0.7, k: int = 5,
 ):
     cypher = """
@@ -192,21 +202,21 @@ async def _match_search_queries_by_similarity_to_message_received(
     MATCH (m:ChatMessage {conversation_id: input_struct.conversation_id})
     WHERE datetime(m.dt_created).epochMillis = datetime(input_struct.dt_created).epochMillis
     WITH collect(DISTINCT m) AS messages, input_struct
-    MATCH (s:SearchQuery)
-    WHERE all(m IN messages WHERE (m)-[:SEEKS]->(s))
-    WITH DISTINCT s AS s,
-          coalesce(input_struct.recalled_message_score, 0.0)                                    AS recalled_message_score,
-          coalesce(vector.similarity.cosine(s.embedding, $message_received_vector), 0.0)        AS search_query_score
-     WITH s,
-          ((recalled_message_score + 1.0) / 2.0)                                                AS norm_recalled_message_score,
-          ((search_query_score + 1.0) / 2.0)                                                    AS norm_search_query_score
-     WITH s,
-          (($alpha * norm_recalled_message_score) + ((1 - $alpha) * norm_search_query_score))   AS combined_score
-     WITH s, max(combined_score)                                                                AS score
+    MATCH (kw:KeywordPhrase)
+    WHERE all(m IN messages WHERE (m)-[:SEEKS]->(kw) AND kw.embedding IS NOT NULL)
+    WITH DISTINCT kw AS kw,
+          coalesce(input_struct.recalled_message_score, 0.0)                                AS recalled_message_score,
+          coalesce(vector.similarity.cosine(kw.embedding, $query_vector), 0.0)              AS keyword_score
+     WITH kw,
+          ((recalled_message_score + 1.0) / 2.0)                                            AS norm_recalled_message_score,
+          ((keyword_score + 1.0) / 2.0)                                                     AS norm_keyword_score
+     WITH kw,
+          (($alpha * norm_recalled_message_score) + ((1 - $alpha) * norm_keyword_score))    AS combined_score
+     WITH kw, max(combined_score)                                                           AS score
      ORDER BY score DESC LIMIT $k
      RETURN score,
-            s.embedding      AS embedding,
-            s.text           AS text
+            kw.embedding    AS embedding,
+            kw.text         AS text
     """
     input_structs = [
         {
@@ -215,7 +225,7 @@ async def _match_search_queries_by_similarity_to_message_received(
             "recalled_message_score": m["score"],
         } for m in similar_message_structs
     ]
-    results = await tx.run(cypher, message_received_vector=message_received_vector, input_structs=input_structs,
+    results = await tx.run(cypher, query_vector=query_vector, input_structs=input_structs,
                            alpha=alpha, k=k)
     records = []
     async for result in results:
@@ -227,12 +237,12 @@ async def _match_search_queries_by_similarity_to_message_received(
     return records
 
 
-async def _match_search_queries_by_text(tx, texts: list[str]):
+async def _match_keyword_phrases_by_text(tx, texts: list[str]):
     cypher = """
-    MATCH (s:SearchQuery)
-    WHERE s.text IN $texts
-    RETURN s.embedding  AS embedding,
-           s.text       AS text
+    MATCH (kw:KeywordPhrase)
+    WHERE kw.text IN $texts
+    RETURN kw.embedding AS embedding,
+           kw.text      AS text
     """
     result = await tx.run(cypher, texts=texts)
     records = []
@@ -244,14 +254,14 @@ async def _match_search_queries_by_text(tx, texts: list[str]):
     return records
 
 
-async def _match_user_message_summaries_by_similarity_to_message_received(
-        tx, current_conversation_id: int, user_id: int, message_received_vector: list[float],
+async def _match_user_message_summaries_by_similarity_to_query_vector(
+        tx, current_conversation_id: int, user_id: int, query_vector: list[float],
         k: int = 5, min_similarity: float = 0.8
 ):
     cypher = """
     MATCH (m:ChatMessage), (s:Summary)
     WHERE (:ChatUser {user_id: $user_id})-[:SENT]->(m) AND (m)-[:HAS_SUMMARY]->(s) AND s.embedding IS NOT NULL
-    WITH m, s, vector.similarity.cosine(s.embedding, $message_received_vector) AS score
+    WITH m, s, vector.similarity.cosine(s.embedding, $query_vector) AS score
     WHERE score >= $min_similarity
     ORDER BY score DESC LIMIT $k
     RETURN score,
@@ -261,7 +271,7 @@ async def _match_user_message_summaries_by_similarity_to_message_received(
            s.text               AS text
     """
     results = await tx.run(cypher, current_conversation_id=current_conversation_id, user_id=user_id,
-                           message_received_vector=message_received_vector,
+                           query_vector=query_vector,
                            k=k, min_similarity=min_similarity)
     records = []
     async for result in results:
@@ -300,18 +310,18 @@ class KnowledgeGraph:
         except Exception:
             logging.error(f"Failed to add conversation {conversation_id}: {format_exc()}")
 
-    async def add_search_queries(
+    async def add_keyword_phrases(
             self, conversation_id: int, dt_created: datetime,
-            search_query_embeddings: dict[str, list[float]]
+            keyword_phrase_embeddings: dict[str, list[float]]
     ):
         try:
             async with self.driver.session() as session:
                 await session.execute_write(
-                    _add_search_queries, conversation_id, dt_created, search_query_embeddings
+                    _add_keyword_phrases, conversation_id, dt_created, keyword_phrase_embeddings
                 )
         except Exception:
-            logging.error(f"Failed to add search queries related to chat message from conversation {conversation_id}, "
-                          f"received at {dt_created}, {search_query_embeddings.keys()}: {format_exc()}")
+            logging.error(f"Failed to add search keywords related to chat message from conversation {conversation_id}, "
+                          f"received at {dt_created}, {keyword_phrase_embeddings.keys()}: {format_exc()}")
 
     async def add_summary(
             self, conversation_id: int, dt_created: datetime,
@@ -326,7 +336,7 @@ class KnowledgeGraph:
 
     async def add_user_message_intent(
             self, conversation_id: int, dt_created: datetime,
-            labels: list[list[str]]
+            labels: list[tuple[str, str]]
     ):
         try:
             async with self.driver.session() as session:
@@ -369,6 +379,17 @@ class KnowledgeGraph:
             logger.error(f"Failed to link chat message sent at {sent_dt_created} to chat message received at "
                          f"{received_dt_created}, from conversation {conversation_id}: {format_exc()}")
 
+    async def link_chat_message_to_summary(
+            self, conversation_id: int, dt_created: datetime, position: int, summary_text: str
+    ):
+        try:
+            async with self.driver.session() as session:
+                await session.execute_write(_link_chat_message_to_summary,
+                                            conversation_id, dt_created, position, summary_text)
+        except Exception:
+            logger.error(f"Failed to link chat message from conversation {conversation_id}, "
+                         f"received at {dt_created} to summary, \"{summary_text}\": {format_exc()}")
+
     async def link_chat_user_to_conversation(self, user_id: int, conversation_id: int):
         try:
             async with self.driver.session() as session:
@@ -377,67 +398,67 @@ class KnowledgeGraph:
         except Exception:
             logger.error(f"Failed to link chat user {user_id} to conversation {conversation_id}: {format_exc()}")
 
-    async def match_bot_message_summaries_by_similarity_to_message_received(
-            self, current_conversation_id: int, message_received_vector: list[float],
+    async def match_bot_message_summaries_by_similarity_to_query_vector(
+            self, current_conversation_id: int, query_vector: list[float],
             k: int = 5, min_similarity: float = 0.8
     ):
         try:
             async with self.driver.session() as session:
                 return await session.execute_read(
-                    _match_bot_message_summaries_by_similarity_to_message_received,
-                    current_conversation_id, message_received_vector, k=k, min_similarity=min_similarity
+                    _match_bot_message_summaries_by_similarity_to_query_vector,
+                    current_conversation_id, query_vector, k=k, min_similarity=min_similarity
                 )
         except Exception:
             logger.error(f"Error while fetching bot message summaries: {format_exc()}")
             return []
 
-    async def match_search_queries_by_similarity(
+    async def match_keyword_phrases_by_similarity(
             self, query_vector: list[float],
             k: int = 5, min_similarity: float = 0.8
     ):
         try:
             async with self.driver.session() as session:
                 return await session.execute_read(
-                    _match_search_queries_by_similarity,
+                    _match_keyword_phrases_by_similarity,
                     query_vector, k=k, min_similarity=min_similarity
                 )
         except Exception:
-            logger.error(f"Error while fetching search queries: {format_exc()}")
+            logger.error(f"Error while fetching search keywords: {format_exc()}")
             return []
 
-    async def match_search_queries_by_similarity_to_message_received(
-            self, message_received_vector: list[float],
+    async def match_keyword_phrases_by_similarity_to_query_vector(
+            self, query_vector: list[float],
             similar_message_structs: list[dict[str, float | datetime | int]],
             alpha: float = 0.7, k: int = 5,
     ):
         try:
             async with self.driver.session() as session:
                 return await session.execute_read(
-                    _match_search_queries_by_similarity_to_message_received,
-                    message_received_vector, similar_message_structs,
+                    _match_keyword_phrases_by_similarity_to_query_vector,
+                    query_vector, similar_message_structs,
                     alpha=alpha, k=k
                 )
         except Exception:
-            logger.error(f"Error while fetching search queries: {format_exc()}")
+            logger.error(f"Error while fetching search keywords: {format_exc()}")
             return []
 
-    async def match_search_queries_by_text(self, texts: list[str]):
+    async def match_keyword_phrases_by_text(self, texts: list[str]):
         try:
             async with self.driver.session() as session:
-                return await session.execute_read(_match_search_queries_by_text, texts=texts)
+                return await session.execute_read(_match_keyword_phrases_by_text, texts=texts)
         except Exception:
-            logger.error(f"Error while fetching search queries: {format_exc()}")
+            logger.error(f"Error while fetching search keywords: {format_exc()}")
             return []
 
-    async def match_user_message_summaries_by_similarity_to_message_received(
-            self, current_conversation_id: int, user_id: int, message_received_vector: list[float],
+    async def match_user_message_summaries_by_similarity_to_query_vector(
+            self, current_conversation_id: int, user_id: int, query_vector: list[float],
             k: int = 5, min_similarity: float = 0.8
     ):
         try:
             async with self.driver.session() as session:
                 return await session.execute_read(
-                    _match_user_message_summaries_by_similarity_to_message_received,
-                    current_conversation_id, user_id, message_received_vector,
+                    _match_user_message_summaries_by_similarity_to_query_vector,
+                    current_conversation_id, user_id, query_vector,
                     k=k, min_similarity=min_similarity
                 )
         except Exception:
