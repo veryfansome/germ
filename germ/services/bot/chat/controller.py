@@ -80,10 +80,10 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             recalled_user_message_summaries,
         ) = await asyncio.gather(
             self.knowledge_graph.match_bot_message_summaries_by_similarity_to_query_vector(
-                conversation_id, summary_emb_floats, k=15, min_similarity=0.85,
+                summary_emb_floats, k=15, min_similarity=0.8,
             ),
             self.knowledge_graph.match_user_message_summaries_by_similarity_to_query_vector(
-                conversation_id, user_id, summary_emb_floats, k=15, min_similarity=0.85,
+                user_id, summary_emb_floats, k=15, min_similarity=0.8,
             ),
         )
         recalled_keyword_phrases = await self.knowledge_graph.match_keyword_phrases_by_similarity_to_query_vector(
@@ -181,8 +181,24 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         text_embs = await run_in_threadpool(
             normalize_embeddings, np.array(await get_text_embedding(summary_statements), dtype=np.float32)
         )
-        #near_dup_pairs = await run_in_threadpool(find_near_dup_pairs, text_embs)
-        #logger.info(f"Near duplicate pairs: {near_dup_pairs}")
+
+        # Recall most similar bot message summaries
+        recall_tasks = {}
+        for idx, emb in enumerate(text_embs):
+            recall_tasks[idx] = asyncio.create_task(
+                self.knowledge_graph.match_bot_message_summaries_by_similarity_to_query_vector(
+                    emb.tolist(), k=3, min_similarity=0.8,
+                )
+            )
+
+        # Persist summaries using recalled summaries to dedup
+        persist_summary_tasks = []
+        for idx, task in recall_tasks.items():
+            persist_summary_tasks.append(asyncio.create_task(
+                self.persist_message_summary(
+                    conversation_id, dt_created, idx, summary_statements[idx], text_embs[idx].tolist(), await task
+                )
+            ))
 
         doc = await doc_parse_task
         message_meta = ChatMessageMetadata(
@@ -192,10 +208,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         await asyncio.gather(
             self.conversations[conversation_id].add_message(dt_created, message_meta, log=True),
-            # TODO: Check similarity and dedupe
-            self.knowledge_graph.add_summary(conversation_id, dt_created, {
-                txt: (idx, text_embs[idx].tolist()) for idx, txt in enumerate(summary_statements)
-            })
+            *persist_summary_tasks,
         )
 
     async def on_start(self):
