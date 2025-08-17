@@ -194,9 +194,12 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         # Persist summaries using recalled summaries to dedup
         persist_summary_tasks = []
         for idx, task in recall_tasks.items():
+            recalled_structs = await task
+            logger.info(f"Recalled {len(recalled_structs)} summaries for deduplication")
             persist_summary_tasks.append(asyncio.create_task(
                 self.persist_message_summary(
-                    conversation_id, dt_created, idx, summary_statements[idx], text_embs[idx].tolist(), await task
+                    conversation_id, dt_created, idx,
+                    summary_statements[idx], text_embs[idx].tolist(), recalled_structs
                 )
             ))
 
@@ -267,6 +270,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 judgment = await judgment_task
                 logger.info(f"Merge near-duplicate summaries: {judgment['judgment']}, {(x, y)}")
                 if judgment["judgment"] == "yes":
+                    # TODO:
+                    #   - combine or choose the new summary text
+                    #   - pool embeddings?
                     await self.knowledge_graph.link_chat_message_to_summary(
                         conversation_id, dt_created, position, x if x != summary_text else y
                     )
