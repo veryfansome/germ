@@ -86,8 +86,8 @@ class UserIntentClassifier:
     @classmethod
     async def suggest_user_intent(
             cls, messages: list[dict[str, str]],
-    ) -> dict[str, list[str]]:
-        intents: list[str] = []
+    ) -> dict[str, list[tuple[str, str]]]:
+        intents: list[tuple[str, str]] = []
         while not intents:
             try:
                 response = await async_openai_client.chat.completions.create(
@@ -121,7 +121,12 @@ class UserIntentClassifier:
                 )
                 response_content = json.loads(response.choices[0].message.content)
                 assert "labels" in response_content, "Response does not contain 'labels'"
-                intents.extend(response_content["labels"])
+                labels: list[tuple[str, str]] = []
+                for label_blobs in response_content["labels"]:
+                    label_parts = label_blobs.lower().split(": ")
+                    assert len(label_parts) == 2, f"Unexpected label format '{label_blobs}'"
+                    labels.append((label_parts[0], label_parts[1]))
+                intents.extend(labels)
             except Exception:
                 logger.error(f"Could not get user intent suggestions: {format_exc()}")
         return {"intents": intents}

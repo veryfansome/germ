@@ -11,11 +11,11 @@ CREATE CONSTRAINT                       FOR (c:Conversation)        REQUIRE c.co
 CREATE CONSTRAINT                       FOR (s:Intent)              REQUIRE (s.text)                            IS UNIQUE;
 CREATE CONSTRAINT                       FOR (s:IntentCategory)      REQUIRE (s.text)                            IS UNIQUE;
 
-// SearchQuery nodes
+// KeywordPhrase nodes
 
-CREATE CONSTRAINT                       FOR (s:SearchQuery)         REQUIRE (s.text)                            IS UNIQUE;
-CREATE FULLTEXT INDEX searchQueryText   FOR (s:SearchQuery)         ON EACH [s.text];
-CREATE VECTOR INDEX searchQueryVector   FOR (s:SearchQuery)         ON (s.embedding)
+CREATE CONSTRAINT                       FOR (k:KeywordPhrase)       REQUIRE (k.text)                            IS UNIQUE;
+CREATE FULLTEXT INDEX keywordPhraseText FOR (k:KeywordPhrase)       ON EACH [k.text];
+CREATE VECTOR INDEX keywordPhraseVector FOR (k:KeywordPhrase)       ON (k.embedding)
 OPTIONS {
     indexConfig: {
           `vector.dimensions`:          1024        // Based on dimension of embedding model
