@@ -75,15 +75,16 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         # TODO: handle if situations that don't require information search
 
         # Recall
+        min_similarity = 0.75
         (
             recalled_bot_message_summaries,
             recalled_user_message_summaries,
         ) = await asyncio.gather(
             self.knowledge_graph.match_bot_message_summaries_by_similarity_to_query_vector(
-                summary_emb_floats, k=15, min_similarity=0.8,
+                summary_emb_floats, k=15, min_similarity=min_similarity,
             ),
             self.knowledge_graph.match_user_message_summaries_by_similarity_to_query_vector(
-                user_id, summary_emb_floats, k=15, min_similarity=0.8,
+                user_id, summary_emb_floats, k=15, min_similarity=min_similarity,
             ),
         )
         recalled_keyword_phrases = await self.knowledge_graph.match_keyword_phrases_by_similarity_to_query_vector(
@@ -155,7 +156,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 conversation_id, dt_created, 0,
                 summary_text, summary_emb_floats, recalled_user_message_summaries
             ),
-            self.persist_keyword_phrase_embeddings(conversation_id, dt_created, keyword_phrase_suggestions["phrases"])
+            self.persist_keyword_phrase_embeddings(
+                conversation_id, dt_created, keyword_phrase_suggestions["phrases"]
+            )
         )
 
 
@@ -182,16 +185,17 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             normalize_embeddings, np.array(await get_text_embedding(summary_statements), dtype=np.float32)
         )
 
-        # Recall most similar bot message summaries
+        # Recall similar message summaries for deduplication
+        min_similarity = 0.75
         recall_tasks = {}
         for idx, emb in enumerate(text_embs):
             recall_tasks[idx] = asyncio.create_task(
                 self.knowledge_graph.match_bot_message_summaries_by_similarity_to_query_vector(
-                    emb.tolist(), k=3, min_similarity=0.8,
+                    emb.tolist(), k=3, min_similarity=min_similarity,
                 )
             )
 
-        # Persist summaries using recalled summaries to dedup
+        # Call persist_message_summary() with recalled summaries
         persist_summary_tasks = []
         for idx, task in recall_tasks.items():
             recalled_structs = await task
@@ -199,7 +203,8 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             persist_summary_tasks.append(asyncio.create_task(
                 self.persist_message_summary(
                     conversation_id, dt_created, idx,
-                    summary_statements[idx], text_embs[idx].tolist(), recalled_structs
+                    summary_statements[idx], text_embs[idx].tolist(), recalled_structs,
+                    sim_threshold=min_similarity,
                 )
             ))
 
@@ -232,7 +237,8 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
     async def persist_message_summary(
             self, conversation_id: int, dt_created: datetime, position: int,
-            summary_text: str, summary_emb_floats: list[float], recalled_summary_structs
+            summary_text: str, summary_emb_floats: list[float], recalled_summary_structs,
+            sim_threshold: float = 0.7,
     ):
         create_new_summary = True
         if recalled_summary_structs:
@@ -254,7 +260,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             near_dup_pairs = await run_in_threadpool(
                 find_near_dup_pairs, [t[1] for t in candidates],
                 normalize=False,  # Since already normalized
-                sim_threshold=0.8,
+                sim_threshold=sim_threshold,
             )
 
             # Get judgment call on near duplicates
@@ -500,10 +506,11 @@ async def summarize_message_received(
         "You are an efficient assistant for message summarization. "
 
         "Don't respond to the user but, instead, finish the sentence \"The user ...\" by "
-        "summarizing the intent of the most recent user message as succinctly as possible. "
+        "summarizing the substance of the most recent user message. "
 
-        "Choose your phrasing to effectively capture meaning for comparing similarity and recall "
-        "using semantic embeddings. "
+        "Focus only on what was said, i.e. the core inquiries, imperatives, or ideas the user conveyed. "
+
+        "Do not invent or generalize beyond what was said. "
     ).strip()
 
     summary: str | None = None
@@ -543,15 +550,17 @@ async def summarize_message_sent(
     prompt = (
         "You are an efficient assistant for message summarization. "
 
-        "Summarize the contents of the assistant message you just sent. "
+        "Summarize the substance of the most recent message the assistant (you) sent to the user. "
 
-        "Use statements that effectively capture meaning for comparing similarity and recall "
-        "using semantic embeddings. "
+        "Focus only on what was said, i.e. the core ideas the assistant conveyed. "
+
+        "Do not invent or generalize beyond what was said. "
+
+        "Multiple statement may be appropriate, but only if what was said cannot be summarized "
+        "simply using a single statement. "
 
         "Start each statement with \"I ...\", then complete the sentence by explaining "
         "what you (the assistant) did or said. "
-        
-        "When needed, refer to the user as \"the user\". "
     ).strip()
 
     seen = set()
@@ -570,7 +579,8 @@ async def summarize_message_sent(
                             "properties": {
                                 "statements": {
                                     "type": "array",
-                                    "description": "A list of statements summarizing your message to the user.",
+                                    "description": ("A list of simple statements summarizing core ideas "
+                                                    "conveyed to the user."),
                                     "items": {"type": "string"}
                                 }
                             },
