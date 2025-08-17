@@ -142,8 +142,7 @@ async def _link_chat_user_to_conversation(tx, user_id: int, conversation_id: int
 
 
 async def _match_bot_message_summaries_by_similarity_to_query_vector(
-        tx, current_conversation_id: int, query_vector: list[float],
-        k: int = 5, min_similarity: float = 0.8
+        tx, query_vector: list[float], k: int = 5, min_similarity: float = 0.8
 ):
     cypher = """
     MATCH (m:ChatMessage), (s:Summary)
@@ -157,9 +156,7 @@ async def _match_bot_message_summaries_by_similarity_to_query_vector(
            s.embedding          AS embedding,
            s.text               AS text
     """
-    results = await tx.run(cypher, current_conversation_id=current_conversation_id,
-                           query_vector=query_vector,
-                           k=k, min_similarity=min_similarity)
+    results = await tx.run(cypher, query_vector=query_vector, k=k, min_similarity=min_similarity)
     records = []
     async for result in results:
         records.append({
@@ -255,8 +252,7 @@ async def _match_keyword_phrases_by_text(tx, texts: list[str]):
 
 
 async def _match_user_message_summaries_by_similarity_to_query_vector(
-        tx, current_conversation_id: int, user_id: int, query_vector: list[float],
-        k: int = 5, min_similarity: float = 0.8
+        tx, user_id: int, query_vector: list[float], k: int = 5, min_similarity: float = 0.8
 ):
     cypher = """
     MATCH (m:ChatMessage), (s:Summary)
@@ -270,9 +266,7 @@ async def _match_user_message_summaries_by_similarity_to_query_vector(
            s.embedding          AS embedding,
            s.text               AS text
     """
-    results = await tx.run(cypher, current_conversation_id=current_conversation_id, user_id=user_id,
-                           query_vector=query_vector,
-                           k=k, min_similarity=min_similarity)
+    results = await tx.run(cypher, user_id=user_id, query_vector=query_vector, k=k, min_similarity=min_similarity)
     records = []
     async for result in results:
         records.append({
@@ -399,14 +393,13 @@ class KnowledgeGraph:
             logger.error(f"Failed to link chat user {user_id} to conversation {conversation_id}: {format_exc()}")
 
     async def match_bot_message_summaries_by_similarity_to_query_vector(
-            self, current_conversation_id: int, query_vector: list[float],
-            k: int = 5, min_similarity: float = 0.8
+            self, query_vector: list[float], k: int = 5, min_similarity: float = 0.8
     ):
         try:
             async with self.driver.session() as session:
                 return await session.execute_read(
                     _match_bot_message_summaries_by_similarity_to_query_vector,
-                    current_conversation_id, query_vector, k=k, min_similarity=min_similarity
+                    query_vector, k=k, min_similarity=min_similarity
                 )
         except Exception:
             logger.error(f"Error while fetching bot message summaries: {format_exc()}")
@@ -434,8 +427,7 @@ class KnowledgeGraph:
         try:
             async with self.driver.session() as session:
                 return await session.execute_read(
-                    _match_keyword_phrases_by_similarity_to_query_vector,
-                    query_vector, similar_message_structs,
+                    _match_keyword_phrases_by_similarity_to_query_vector, query_vector, similar_message_structs,
                     alpha=alpha, k=k
                 )
         except Exception:
@@ -451,14 +443,12 @@ class KnowledgeGraph:
             return []
 
     async def match_user_message_summaries_by_similarity_to_query_vector(
-            self, current_conversation_id: int, user_id: int, query_vector: list[float],
-            k: int = 5, min_similarity: float = 0.8
+            self, user_id: int, query_vector: list[float], k: int = 5, min_similarity: float = 0.8
     ):
         try:
             async with self.driver.session() as session:
                 return await session.execute_read(
-                    _match_user_message_summaries_by_similarity_to_query_vector,
-                    current_conversation_id, user_id, query_vector,
+                    _match_user_message_summaries_by_similarity_to_query_vector, user_id, query_vector,
                     k=k, min_similarity=min_similarity
                 )
         except Exception:
