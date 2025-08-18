@@ -111,6 +111,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 summary_emb_floats, recalled_user_message_summaries, alpha=0.7, k=5,
             ),
         )
+        # TODO: Implement relevance gate for recalled replies
         logger.info(f"Recalled reply summaries: {''.join(
             ('\n - ' + str((s['score'], s['text']))) for s in recalled_reply_summaries
         )}")
