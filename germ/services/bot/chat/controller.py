@@ -87,25 +87,35 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 user_id, summary_emb_floats, k=15, min_similarity=min_similarity,
             ),
         )
-        recalled_keyword_phrases = await self.knowledge_graph.match_keyword_phrases_by_similarity_to_query_vector(
-            summary_emb_floats, [
-                {
-                    "conversation_id": struct["conversation_id"],
-                    "dt_created": struct["dt_created"],
-                    "score": struct["score"],
-                } for struct in recalled_user_message_summaries
-            ], alpha=0.7, k=5,
-        )
         logger.info(f"Recalled bot message summaries: {''.join(
-            ('\n - ' + str((r['score'], r['text'], r['conversation_id'], r['dt_created'])))
-            for r in recalled_bot_message_summaries if r["conversation_id"] != conversation_id
+            ('\n - ' + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
+            for s in recalled_bot_message_summaries if s["conversation_id"] != conversation_id
         )}")
         logger.info(f"Recalled user message summaries: {''.join(
-            ("\n - " + str((r['score'], r['text'], r['conversation_id'], r['dt_created'])))
-            for r in recalled_user_message_summaries if r["conversation_id"] != conversation_id
+            ("\n - " + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
+            for s in recalled_user_message_summaries if s["conversation_id"] != conversation_id
+        )}")
+
+        (
+            recalled_reply_summaries,
+            recalled_keyword_phrases,
+        ) = await asyncio.gather(
+            self.knowledge_graph.match_reply_summaries_by_similarity_to_query_vector(
+                summary_emb_floats, [
+                    # Need to exclude messages received from current conversation
+                    s for s in recalled_user_message_summaries if s["conversation_id"] != conversation_id
+                ], alpha=0.7, k=5,
+            ),
+            self.knowledge_graph.match_keyword_phrases_by_similarity_to_query_vector(
+                # Ok to include previous phrases from current conversation
+                summary_emb_floats, recalled_user_message_summaries, alpha=0.7, k=5,
+            ),
+        )
+        logger.info(f"Recalled reply summaries: {''.join(
+            ('\n - ' + str((s['score'], s['text']))) for s in recalled_reply_summaries
         )}")
         logger.info(f"Recalled keyword phrases: {''.join(
-            ("\n - " + str((r['score'], r['text']))) for r in recalled_keyword_phrases
+            ("\n - " + str((k['score'], k['text']))) for k in recalled_keyword_phrases
         )}")
 
         # TODO: Pull from Neo4j
@@ -126,7 +136,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             keyword_phrase_suggestions
         ) = await asyncio.gather(
             suggest_best_online_info_source(filtered_messages, info_source_candidates),
-            suggest_keyword_phrases(filtered_messages, [r["text"] for r in recalled_keyword_phrases])
+            suggest_keyword_phrases(filtered_messages, [k["text"] for k in recalled_keyword_phrases])
         )
         logger.info(f"Info source suggestions: {info_source_suggestions['domains']}")
         logger.info(f"Search keyword suggestions: {keyword_phrase_suggestions['phrases']}")
