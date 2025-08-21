@@ -61,26 +61,31 @@ class UserIntentClassifier:
         },
     }
 
-    label_category_descriptions = ''.join(f"\n - {k}: {v['description']}" for k, v in label_spec.items())
+    label_category_descriptions = ''.join(f"\n- {k}: {v['description']}" for k, v in label_spec.items())
 
-    label_descriptions = ''.join(f"\n - {k}: {l}, {d}" for k, v in label_spec.items() for l, d in v["labels"].items())
+    label_descriptions = ''.join(f"\n- {k}: {l}, {d}" for k, v in label_spec.items() for l, d in v["labels"].items())
 
     labels = [f"{k}: {l}" for k, v in label_spec.items() for l in v["labels"].keys()]
 
     prompt = (
-        "You are an insightful observer of human interactions and judge of user intentions. "
+        "You are a classifier of user intentions. "
 
-        "Consider the user's objective and return all intent labels that apply to the user's most recent message. "
-        
-        "Multiple labels may be appropriate but use only the labels described below. "
-        
-        "Do not invent or generalize beyond them. "
+        "\n\nTask: "
+        "\n- Consider the user's objective and return all intent labels that apply to the user's most recent message. "
 
-        f"\n\nEach label falls into one of six broad categorical buckets: "
+        "\n\nCategory descriptions: "
         f"{label_category_descriptions}"
         
-        "\n\nEach label is formated as '<category>: <intent>': "
+        "\n\nIntent descriptions: "
         f"{label_descriptions}\n"
+
+        "\n\nGuidelines: "
+        "\n- Each label is formated as '<category>: <intent>'."
+        "\n- Multiple labels may be appropriate but use only the labels described above. Do not invent or generalize beyond them. "
+        "\n- Only use 'miscellaneous: unclear' when no other label applies. Don't use this label in combination with other labels."
+
+        "\n\nOutput: "
+        "\n- Return only a JSON object conforming to the provided schema with a 'labels' attribute that is a list of the labels described above. "
     ).strip()
 
     @classmethod
@@ -92,14 +97,13 @@ class UserIntentClassifier:
             try:
                 response = await async_openai_client.chat.completions.create(
                     messages=[{"role": "system", "content": cls.prompt}] + messages,
-                    model=germ_settings.CLASSIFICATION_MODEL,
+                    model=germ_settings.OPENAI_CLASSIFICATION_MODEL,
                     response_format={
                         "type": "json_schema",
                         "json_schema": {
                             "name": "intent",
                             "schema": {
                                 "type": "object",
-                                "additionalProperties": False,
                                 "properties": {
                                     "labels": {
                                         "type": "array",
@@ -112,11 +116,13 @@ class UserIntentClassifier:
                                         "uniqueItems": True,
                                     }
                                 },
+                                "additionalProperties": False,
                                 "required": ["labels"],
-                            }
+                            },
                         }
                     },
                     n=1,
+                    seed=germ_settings.OPENAI_SEED,
                     timeout=15,
                 )
                 response_content = json.loads(response.choices[0].message.content)
