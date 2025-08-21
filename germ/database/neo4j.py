@@ -260,19 +260,21 @@ async def _match_reply_summaries_by_similarity_to_query_vector(
     WITH collect(DISTINCT mr) AS received_messages, message_received_struct
     MATCH (ms:ChatMessage), (s:Summary)
     WHERE all(mr IN received_messages WHERE (mr)-[:HAS_REPLY]->(ms) AND (ms)-[:HAS_SUMMARY]->(s) AND s.embedding IS NOT NULL)
-    WITH DISTINCT s AS s,
+    WITH ms, s,
          coalesce(message_received_struct.recalled_message_score, 0.0)                  AS recalled_message_score,
          coalesce(vector.similarity.cosine(s.embedding, $query_vector), 0.0)            AS summary_score
-    WITH s,
+    WITH ms, s,
          ((recalled_message_score + 1.0) / 2.0)                                         AS norm_recalled_message_score,
          ((summary_score + 1.0) / 2.0)                                                  AS norm_summary_score
-    WITH s,
+    WITH ms, s,
          (($alpha * norm_recalled_message_score) + ((1 - $alpha) * norm_summary_score)) AS combined_score
-    WITH s, max(combined_score)                                                         AS score
+    WITH ms, s, max(combined_score)                                                         AS score
     ORDER BY score DESC LIMIT $k
     RETURN score,
-           s.embedding  AS embedding,
-           s.text       AS text
+           ms.conversation_id   AS conversation_id,
+           ms.dt_created        AS dt_created,
+           s.embedding          AS embedding,
+           s.text               AS text
     """
     results = await tx.run(cypher, query_vector=query_vector, message_received_structs=[
         {
@@ -284,8 +286,10 @@ async def _match_reply_summaries_by_similarity_to_query_vector(
     records = []
     async for result in results:
         records.append({
-            "score": result["score"],
+            "conversation_id": result["conversation_id"],
+            "dt_created": result["dt_created"],
             "embedding": result["embedding"],
+            "score": result["score"],
             "text": result["text"],
         })
     return records

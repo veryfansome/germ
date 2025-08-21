@@ -20,7 +20,7 @@ class ChatModelEventHandler(WebSocketReceiveEventHandler):
             chat_request: ChatRequest, ws_sender: WebSocketSender
     ):
         if chat_request.model is None:
-            chat_request.model = germ_settings.CHAT_MODEL
+            chat_request.model = germ_settings.OPENAI_CHAT_MODEL
         if chat_request.timeout is None:
             chat_request.timeout = self.httpx_timeout
 
@@ -54,7 +54,7 @@ class ReasoningChatModelEventHandler(WebSocketReceiveEventHandler):
             chat_request: ChatRequest, ws_sender: WebSocketSender
     ):
         if chat_request.model is None:
-            chat_request.model = germ_settings.REASONING_MODEL
+            chat_request.model = germ_settings.OPENAI_REASONING_MODEL
         if chat_request.reasoning_effort is None:
             chat_request.reasoning_effort = "low"
         if chat_request.timeout is None:

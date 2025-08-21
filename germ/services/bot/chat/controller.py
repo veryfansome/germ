@@ -74,11 +74,11 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         # TODO: handle if situations that don't require information search
 
-        # Recall
+        # Recall Phase 1
         min_similarity = 0.75
         (
-            recalled_bot_message_summaries,
-            recalled_user_message_summaries,
+            recalled_bot_message_structs,  # bot messages similar to summary_emb
+            recalled_user_message_structs,  # user messages similar to summary_emb
         ) = await asyncio.gather(
             self.knowledge_graph.match_bot_message_summaries_by_similarity_to_query_vector(
                 summary_emb_floats, k=15, min_similarity=min_similarity,
@@ -89,35 +89,42 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         )
         logger.info(f"Recalled bot message summaries: {''.join(
             ('\n - ' + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
-            for s in recalled_bot_message_summaries if s["conversation_id"] != conversation_id
+            for s in recalled_bot_message_structs if s["conversation_id"] != conversation_id
         )}")
         logger.info(f"Recalled user message summaries: {''.join(
             ("\n - " + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
-            for s in recalled_user_message_summaries if s["conversation_id"] != conversation_id
+            for s in recalled_user_message_structs if s["conversation_id"] != conversation_id
         )}")
 
+        # Recall Phase 2
         (
-            recalled_reply_summaries,
-            recalled_keyword_phrases,
+            recalled_linked_reply_structs,  # replies linked to recalled user messages
+            recalled_keyword_phase_structs,  # keyword phrases linked to recalled user messages
         ) = await asyncio.gather(
             self.knowledge_graph.match_reply_summaries_by_similarity_to_query_vector(
                 summary_emb_floats, [
-                    # Need to exclude messages received from current conversation
-                    s for s in recalled_user_message_summaries if s["conversation_id"] != conversation_id
-                ], alpha=0.7, k=5,
+                    # Exclude messages received from current conversation
+                    s for s in recalled_user_message_structs if s["conversation_id"] != conversation_id
+                ], alpha=0.7, k=30,
             ),
             self.knowledge_graph.match_keyword_phrases_by_similarity_to_query_vector(
                 # Ok to include previous phrases from current conversation
-                summary_emb_floats, recalled_user_message_summaries, alpha=0.7, k=5,
+                summary_emb_floats, recalled_user_message_structs, alpha=0.7, k=5,
             ),
         )
-        # TODO: Implement relevance gate for recalled replies
-        logger.info(f"Recalled reply summaries: {''.join(
-            ('\n - ' + str((s['score'], s['text']))) for s in recalled_reply_summaries
+        logger.info(f"Recalled linked reply summaries: {''.join(
+            ('\n - ' + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
+            for s in recalled_linked_reply_structs
         )}")
         logger.info(f"Recalled keyword phrases: {''.join(
-            ("\n - " + str((k['score'], k['text']))) for k in recalled_keyword_phrases
+            ("\n - " + str((k['score'], k['text']))) for k in recalled_keyword_phase_structs
         )}")
+
+        # Dedup summary texts for relevance gate
+        bot_summary_texts = []
+        for s in (recalled_bot_message_structs + recalled_linked_reply_structs):
+            if s["text"] not in bot_summary_texts:
+                bot_summary_texts.append(s["text"])
 
         # TODO: Pull from Neo4j
         info_source_candidates = [
@@ -134,13 +141,18 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         ]
         (
             info_source_suggestions,
-            keyword_phrase_suggestions
+            keyword_phrase_suggestions,
+            relevant_summaries,
         ) = await asyncio.gather(
             suggest_best_online_info_source(filtered_messages, info_source_candidates),
-            suggest_keyword_phrases(filtered_messages, [k["text"] for k in recalled_keyword_phrases])
+            suggest_keyword_phrases(filtered_messages, [k["text"] for k in recalled_keyword_phase_structs]),
+            identify_relevant_summaries(filtered_messages, bot_summary_texts)  # Relevance Gate 1
         )
         logger.info(f"Info source suggestions: {info_source_suggestions['domains']}")
         logger.info(f"Search keyword suggestions: {keyword_phrase_suggestions['phrases']}")
+        logger.info(f"Relevant summaries: {''.join(
+            f'\n - {bot_summary_texts[idx]}' for idx in relevant_summaries['items']
+        )}")
 
         doc = await doc_parse_task
         message_meta = ChatMessageMetadata(
@@ -151,10 +163,12 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             user_id=user_id,
         )
 
-        if germ_settings.REASONING_MODEL:
+        if germ_settings.OPENAI_REASONING_MODEL:
             delegate_handler = openai_handlers.ReasoningChatModelEventHandler()
         else:
             delegate_handler = openai_handlers.ChatModelEventHandler()
+
+        # TODO: Implement relevance gate for recalled replies
 
         await asyncio.gather(
             # Complete chat request
@@ -165,7 +179,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             self.knowledge_graph.add_user_message_intent(conversation_id, dt_created, user_intent_labels['intents']),
             self.persist_message_summary(
                 conversation_id, dt_created, 0,
-                summary_text, summary_emb_floats, recalled_user_message_summaries
+                summary_text, summary_emb_floats, recalled_user_message_structs
             ),
             self.persist_keyword_phrase_embeddings(
                 conversation_id, dt_created, keyword_phrase_suggestions["phrases"]
@@ -347,14 +361,30 @@ class ConversationMetadata(BaseModel):
 
 async def dedup_summaries(statements: list[str]):
     prompt = (
-        "You are a deduper of similar statements summarizing chat messages. "
+        "You are a deduper for summary statements of chat messages. "
 
-        "Determine if the given statements describe the same situation or user intent. "
-        
-        "If the statements can be deduplicated, answer 'yes', otherwise answer 'no'. "
-        
-        "For example, when comparing \"The user requested a joke\" and \"The user requested another joke\", "
-        "the answer is 'yes' because in both cases, the user wanting a joke is the underlying situation. "
+        "\n\nTask: "
+        "\n- Decide if the provided statements describe the same situation or intent. "
+        "\n- If all statements can be deduplicated into one canonical underlying situation or intent, answer 'yes'. "
+        "\n- If any statement materially differs (topic, target, action, constraints, etc.), answer 'no'. "
+        "\n- If uncertain, answer 'no' to prioritize precision over recall. "
+
+        "\n\nGuidelines: "
+        "\n- Statements involving the same actors, actions, and primary topics/goals should be treated as the same. "
+        "\n- Statements with small wording differences (tense, politeness, count/plurality, etc.) that don't change the core intent should be treated as the same. "
+        "\n- 'another' or 'again' still maps to the same underlying situation or intent if nothing else differs. "
+
+        "\n\nOutput: "
+        "\n- Return only a JSON object conforming to the provided schema with a 'judgment' attribute that is either 'yes' or 'no'. "
+
+        "\n\nExamples that are the same: "
+        "\n- \"The user requested a joke.\" vs \"The user wants another joke.\" => yes "
+        "\n- \"Summarize the article.\" vs \"Provide a brief summary of the article.\" => yes "
+
+        "\n\nExamples that are not the same: "
+        "\n- \"Translate this to Spanish.\" vs \"Translate this to French.\" => no "
+        "\n- \"Summarize the article.\" vs \"Explain the article.\" => no "
+        "\n- \"Help me place an order.\" vs \"Help me cancel an order.\" => no "
     ).strip()
 
     judgment: str | None = None
@@ -367,25 +397,30 @@ async def dedup_summaries(statements: list[str]):
                         "".join([f"\n{num}. {s}" for num, s in enumerate(statements, 1)])
                     )
                 }],
-                model=germ_settings.CURATION_MODEL,
+                model=germ_settings.OPENAI_DEDUP_MODEL,
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
                         "name": "equality",
+                        "strict": True,
                         "schema": {
                             "type": "object",
                             "properties": {
                                 "judgment": {
                                     "type": "string",
-                                    "description": "A list of website domain names.",
+                                    "description": "Judgment of whether to deduplicate the statements.",
                                     "enum": ["yes", "no"]
                                 }
                             },
+                            "additionalProperties": False,
                             "required": ["judgment"]
                         }
                     }
                 },
-                n=1, timeout=10)
+                n=1,
+                seed=germ_settings.OPENAI_SEED,
+                timeout=10,
+            )
             response_content = json.loads(response.choices[0].message.content)
             assert "judgment" in response_content, "Response does not contain 'judgment'"
             normalized_content = response_content["judgment"].lower().strip()
@@ -394,6 +429,76 @@ async def dedup_summaries(statements: list[str]):
         except Exception:
             logger.error(f"Could not get deduplication judgment: {format_exc()}")
     return {"judgment": judgment}
+
+
+async def identify_relevant_summaries(
+        messages: list[dict[str, str]],
+        recalled_summaries: list[str],
+):
+    if not recalled_summaries:
+        return {"items": []}
+
+    prompt = (
+        "You are a relevance gate for recalled chat message summaries from past conversations. "
+
+        "\n\nTask: "
+        "\n- Consider the user's current intention or objective based on their most recent message. "
+        "\n- Decide which past messages should be retrieved and reviewed based on their summary's relevance to the current conversation. "
+        
+        "\n\nGuidelines: "
+        "\n- Messages should be reviewed: "
+        "\n  - If reviewing them should result in a more consistent response. "
+        "\n  - If they should contain relevant facts, contexts, or directly reusable content. "
+        "\n- Messages should not be reviewed: "
+        "\n  - If reviewing them is unlikely to result in a higher quality or more informed response. "
+        "\n  - If they are about unrelated subject matter or only some-what related subject matter. "
+
+        "\n\nOutput: "
+        "\n- Return only a JSON object conforming to the provided schema with an 'items' attribute that lists item numbers from the following recalled summaries. "
+        
+        "\n\nRecalled summaries: "
+    ).strip()
+    prompt += ("".join([f"\n{num}. {s}" for num, s in enumerate(recalled_summaries, 1)]))  # Shift by 1
+
+    relevant_items: list[int] | None = None
+    while relevant_items is None:
+        try:
+            response = await async_openai_client.chat.completions.create(
+                messages=[{"role": "system", "content": prompt}] + messages,
+                model=germ_settings.OPENAI_CURATION_MODEL,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "relevant_summaries",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "items": {
+                                    "type": "array",
+                                    "description": "Item numbers of the selected summaries.",
+                                    "items": {"type": "number"},
+                                    "minItems": 0,
+                                    "uniqueItems": True,
+                                }
+                            },
+                            "additionalProperties": False,
+                            "required": ["judgment"]
+                        },
+                    }
+                },
+                n=1,
+                seed=germ_settings.OPENAI_SEED,
+                timeout=10,
+            )
+            response_content = json.loads(response.choices[0].message.content)
+            assert "items" in response_content, "Response does not contain 'items'"
+            relevant_items = [
+                (n - 1)  # Unshift by 1
+                for n in response_content["items"]
+            ]
+        except Exception:
+            logger.error(f"Could not get relevant items: {format_exc()}")
+    return {"items": relevant_items}
 
 
 async def suggest_best_online_info_source(
@@ -420,7 +525,7 @@ async def suggest_best_online_info_source(
         try:
             response = await async_openai_client.chat.completions.create(
                 messages=[{"role": "system", "content": prompt}] + messages,
-                model=germ_settings.CURATION_MODEL,
+                model=germ_settings.OPENAI_CURATION_MODEL,
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
@@ -434,11 +539,16 @@ async def suggest_best_online_info_source(
                                     "items": {"type": "string"},
                                 }
                             },
+                            "additionalProperties": False,
                             "required": ["domains"]
-                        }
+                        },
+                        "strict": True,
                     }
                 },
-                n=1, timeout=10)
+                n=1,
+                seed=germ_settings.OPENAI_SEED,
+                timeout=10,
+            )
             response_content = json.loads(response.choices[0].message.content)
             assert "domains" in response_content, "Response does not contain 'domains'"
             for dom in response_content["domains"]:
@@ -476,7 +586,7 @@ async def suggest_keyword_phrases(
         try:
             response = await async_openai_client.chat.completions.create(
                 messages=[{"role": "system", "content": prompt}] + messages,
-                model=germ_settings.CURATION_MODEL,
+                model=germ_settings.OPENAI_CURATION_MODEL,
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
@@ -490,11 +600,16 @@ async def suggest_keyword_phrases(
                                     "items": {"type": "string"}
                                 }
                             },
+                            "additionalProperties": False,
                             "required": ["phrases"]
-                        }
+                        },
+                        "strict": True,
                     }
                 },
-                n=1, timeout=10)
+                n=1,
+                seed=germ_settings.OPENAI_SEED,
+                timeout=10,
+            )
             response_content = json.loads(response.choices[0].message.content)
             assert "phrases" in response_content, "Response does not contain 'phrases'"
             for qry in response_content["phrases"]:
@@ -514,14 +629,20 @@ async def summarize_message_received(
         messages: list[dict[str, str]]
 ) -> dict[str, str]:
     prompt = (
-        "You are an efficient assistant for message summarization. "
+        "You are a summarizer of user chat messages. "
 
-        "Don't respond to the user but, instead, finish the sentence \"The user ...\" by "
-        "summarizing the substance of the most recent user message. "
+        "\n\nTask: "
+        "\n- Summarize the substance of the most recent message sent by the user. "
+        "\n- Start your summary with \"The user ...\", then complete the sentence by explaining what the user wants or said. "
+        "\n- Use complete and grammatically correct sentences. "
 
-        "Focus only on what was said, i.e. the core inquiries, imperatives, or ideas the user conveyed. "
+        "\n\nGuidelines: "
+        "\n- Only summarize the user's message, don't respond to the user. "
+        "\n- Focus only on what was said, i.e. the core ideas, imperatives, inquiries, intents, or situations the user conveyed. "
+        "\n- Do not invent or generalize beyond what was said. "
 
-        "Do not invent or generalize beyond what was said. "
+        "\n\nOutput: "
+        "\n- Return only a JSON object conforming to the provided schema with a 'summary' attribute that is your summary statement. "
     ).strip()
 
     summary: str | None = None
@@ -529,7 +650,7 @@ async def summarize_message_received(
         try:
             response = await async_openai_client.chat.completions.create(
                 messages=[{"role": "system", "content": prompt}] + messages,
-                model=germ_settings.SUMMARY_MODEL,
+                model=germ_settings.OPENAI_SUMMARY_MODEL,
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
@@ -542,11 +663,16 @@ async def summarize_message_received(
                                     "description": "A summary of the most recent user message.",
                                 }
                             },
+                            "additionalProperties": False,
                             "required": ["summary"]
-                        }
+                        },
+                        "strict": True,
                     }
                 },
-                n=1, timeout=10)
+                n=1,
+                seed=germ_settings.OPENAI_SEED,
+                timeout=10,
+            )
             response_content = json.loads(response.choices[0].message.content)
             assert "summary" in response_content, "Response does not contain 'summary'"
             summary = summary_prefix_pattern.sub("", response_content["summary"]).rstrip()
@@ -559,19 +685,20 @@ async def summarize_message_sent(
         messages: list[dict[str, str]]
 ) -> dict[str, list[str]]:
     prompt = (
-        "You are an efficient assistant for message summarization. "
+        "You are a summarizer of assistant chat messages. "
 
-        "Summarize the substance of the most recent message the assistant (you) sent to the user. "
+        "\n\nTask: "
+        "\n- Summarize the substance of the most recent message the assistant (you) sent to the user. "
+        "\n- Start each statement with \"I ...\", then complete the sentence by explaining what you (the assistant) did or said. "
+        "\n- Use complete and grammatically correct sentences. "
 
-        "Focus only on what was said, i.e. the core ideas the assistant conveyed. "
+        "\n\nGuidelines: "
+        "\n- Focus only on what was said, i.e. the core ideas, intent, or situation the assistant conveyed. "
+        "\n- Multiple statement may be appropriate, but only if what was said cannot be summarized simply using a single statement. "
+        "\n- Do not invent or generalize beyond what was said. "
 
-        "Do not invent or generalize beyond what was said. "
-
-        "Multiple statement may be appropriate, but only if what was said cannot be summarized "
-        "simply using a single statement. "
-
-        "Start each statement with \"I ...\", then complete the sentence by explaining "
-        "what you (the assistant) did or said. "
+        "\n\nOutput: "
+        "\n- Return only a JSON object conforming to the provided schema with a 'statements' attribute that is a list containing summary statements. "
     ).strip()
 
     seen = set()
@@ -580,7 +707,7 @@ async def summarize_message_sent(
         try:
             response = await async_openai_client.chat.completions.create(
                 messages=[{"role": "system", "content": prompt}] + messages,
-                model=germ_settings.SUMMARY_MODEL,
+                model=germ_settings.OPENAI_SUMMARY_MODEL,
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
@@ -590,16 +717,20 @@ async def summarize_message_sent(
                             "properties": {
                                 "statements": {
                                     "type": "array",
-                                    "description": ("A list of simple statements summarizing core ideas "
-                                                    "conveyed to the user."),
+                                    "description": "Statements summarizing what the most recent assistant message conveyed to the user.",
                                     "items": {"type": "string"}
                                 }
                             },
+                            "additionalProperties": False,
                             "required": ["statements"]
-                        }
+                        },
+                        "strict": True,
                     }
                 },
-                n=1, timeout=10)
+                n=1,
+                seed=germ_settings.OPENAI_SEED,
+                timeout=10,
+            )
             response_content = json.loads(response.choices[0].message.content)
             assert "statements" in response_content, "Response does not contain 'statements'"
             for stmt in response_content["statements"]:
