@@ -9,9 +9,10 @@ console_only_logger_config = {
 }
 
 
-def setup_logging(global_level: str = germ_settings.LOG_LEVEL,
-                  log_dir: str = germ_settings.LOG_DIR,
-                  message_log_filename: str = germ_settings.MESSAGE_LOG_FILENAME):
+def setup_logging(germ_log_level: str = germ_settings.GERM_LOG_LEVEL,
+                  global_level: str = germ_settings.LOG_LEVEL,
+                  log_dir: str = germ_settings.GERM_LOG_DIR,
+                  message_log_filename: str = germ_settings.GERM_MESSAGE_LOG_FILENAME):
     logging.config.dictConfig({
         "version": 1,
         "disable_existing_loggers": False,
@@ -42,6 +43,10 @@ def setup_logging(global_level: str = germ_settings.LOG_LEVEL,
             "": {
                 "level": global_level,
                 "handlers": ["console"],
+            },
+            "germ.services.bot.chat.controller": {
+                "level": germ_log_level,
+                **console_only_logger_config,
             },
             "httpx": {
                 "level": "ERROR",

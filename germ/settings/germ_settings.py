@@ -4,19 +4,22 @@ from transformers.utils.constants import OPENAI_CLIP_STD, OPENAI_CLIP_MEAN
 
 # Service
 
-ENCRYPTION_PASSWORD = os.getenv("ENCRYPTION_KEY", "0Bfusc8")
-LOG_DIR = os.getenv("LOG_DIR", "/var/log/germ")
-MESSAGE_LOG_FILENAME = os.getenv("MESSAGE_LOG_FILENAME", "message.log")
-MODEL_SERVICE_ENDPOINT = os.getenv("MODEL_SERVICE_HOST", "germ-models:9000")
-UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "/tmp")
-WEBSOCKET_IDLE_TIMEOUT = 3600
-WEBSOCKET_MONITOR_INTERVAL_SECONDS = 300.0
+GERM_ENCRYPTION_PASSWORD = os.getenv("GERM_ENCRYPTION_PASSWORD", "0Bfusc8")
+GERM_LOG_DIR = os.getenv("GERM_LOG_DIR", "/var/log/germ")
+GERM_LOG_LEVEL = os.getenv("GERM_LOG_LEVEL", "INFO")
+GERM_MESSAGE_CACHE_EXPIRY_SECONDS = os.getenv("GERM_MESSAGE_CACHE_EXPIRY_SECONDS", 3600 * 24 * 3)
+GERM_MESSAGE_CACHE_PREFIX = os.getenv("GERM_MESSAGE_CACHE_PREFIX", "germ_chat_message_metadata")
+GERM_MESSAGE_LOG_FILENAME = os.getenv("GERM_MESSAGE_LOG_FILENAME", "message.log")
+GERM_MODEL_SERVICE_ENDPOINT = os.getenv("GERM_MODEL_SERVICE_HOST", "germ-models:9000")
+GERM_UPLOAD_FOLDER = os.getenv("GERM_UPLOAD_FOLDER", "/tmp")
+GERM_WEBSOCKET_IDLE_TIMEOUT = os.getenv("GERM_WEBSOCKET_IDLE_TIMEOUT", 3600)
+GERM_WEBSOCKET_MONITOR_INTERVAL_SECONDS = os.getenv("GERM_WEBSOCKET_MONITOR_INTERVAL_SECONDS", 300.0)
 
 # Observability
 
 JAEGER_HOST = os.getenv("GERM_JAEGER_HOST", "germ-jaeger")
 JAEGER_PORT = os.getenv("GERM_JAEGER_PORT", "4317")
-LOG_LEVEL = os.getenv("GERM_LOG_LEVEL", "INFO")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # Neo4j
 NEO4J_AUTH = os.getenv("NEO4J_AUTH", "neo4j/oops")
@@ -35,7 +38,7 @@ OPENAI_SUMMARY_MODEL = os.getenv("OPENAI_SUMMARY_MODEL", "gpt-4o-mini")
 
 # PostgreSQL
 
-DB_HOST = os.getenv("DB_HOST", "germ-pg")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "germ-pg")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "bacteria4life")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "germ")
 

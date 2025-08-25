@@ -3,6 +3,7 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from fastapi import WebSocket
+from opentelemetry import trace
 from sqlalchemy import Table, and_, insert, select
 from sqlalchemy.ext.asyncio import async_sessionmaker as async_pg_session_maker
 from starlette.websockets import WebSocketDisconnect
@@ -11,12 +12,14 @@ from traceback import format_exc
 from germ.api.models import ChatRequest, ChatResponse
 from germ.database.neo4j import KnowledgeGraph
 from germ.security.encryption import decrypt_integer, derive_key_from_passphrase, encrypt_integer
-from germ.settings.germ_settings import (ENCRYPTION_PASSWORD, WEBSOCKET_IDLE_TIMEOUT,
-                                         WEBSOCKET_MONITOR_INTERVAL_SECONDS)
+from germ.settings.germ_settings import (GERM_ENCRYPTION_PASSWORD, GERM_WEBSOCKET_IDLE_TIMEOUT,
+                                         GERM_WEBSOCKET_MONITOR_INTERVAL_SECONDS)
 
 logger = logging.getLogger(__name__)
 
-ENCRYPTION_KEY = derive_key_from_passphrase(ENCRYPTION_PASSWORD)
+tracer = trace.get_tracer(__name__)
+
+ENCRYPTION_KEY = derive_key_from_passphrase(GERM_ENCRYPTION_PASSWORD)
 
 
 class WebSocketDisconnectEventHandler(ABC):
@@ -81,13 +84,17 @@ class DefaultWebSocketSender(WebSocketSender):
         chat_response.conversation_ident = encrypt_integer(self.conversation_id, ENCRYPTION_KEY)
         await self.connection.send_text(chat_response.model_dump_json())
         if chat_response.model != "none":
-            async_tasks = []
             dt_created = datetime.now(tz=timezone.utc)
             await self.knowledge_graph.add_chat_message(self.conversation_id, dt_created)
-            async_tasks.append(asyncio.create_task(
-                self.knowledge_graph.link_chat_message_sent_to_chat_message_received(
-                    received_message_dt_created, dt_created, self.conversation_id)
-            ))
+            async_tasks = [
+                asyncio.create_task(
+                    self.knowledge_graph.link_chat_message_sent_to_chat_message_received(
+                        received_message_dt_created, dt_created, self.conversation_id)
+                ),
+                asyncio.create_task(
+                    self.knowledge_graph.link_chat_message_to_conversation(self.conversation_id, dt_created)
+                )
+            ]
             for handler in self.send_event_handlers:
                 async_tasks.append(asyncio.create_task(
                     handler.on_send(self.conversation_id, dt_created, chat_response,
@@ -189,7 +196,7 @@ class WebSocketConnectionManager:
                 # Wait for some seconds or until the cancel_event is set, whichever comes first.
                 try:
                     await asyncio.wait_for(asyncio.shield(cancel_event.wait()),
-                                           timeout=WEBSOCKET_MONITOR_INTERVAL_SECONDS)
+                                           timeout=GERM_WEBSOCKET_MONITOR_INTERVAL_SECONDS)
                 except asyncio.TimeoutError:
                     # TODO: Update conversation_state
                     async_tasks = [asyncio.create_task(monitor.on_tick(conversation_id, ws_sender))
@@ -243,7 +250,7 @@ class WebSocketConnectionManager:
                     self.knowledge_graph.link_chat_message_received_to_chat_user(conversation_id, dt_created, user_id)
                 ),
                 asyncio.create_task(
-                    self.knowledge_graph.link_chat_message_received_to_conversation(conversation_id, dt_created, user_id)
+                    self.knowledge_graph.link_chat_message_to_conversation(conversation_id, dt_created)
                 )
             ])
             async_tasks.extend(
@@ -256,7 +263,7 @@ class WebSocketConnectionManager:
         except WebSocketDisconnect:
             raise  # Pass through WebSocketDisconnect to the caller
         except Exception:
-            logger.error(f"Uncaught exception in conversation {conversation_id} with user {user_id}.\n{format_exc()}")
+            logger.error(f"Error in conversation {conversation_id} with user {user_id}.\n{format_exc()}")
             await ws_sender.send_message(
                 ChatResponse(complete=True, content="An error occurred while processing your request.", error=True)
             )
@@ -271,7 +278,7 @@ class WebSocketConnectionManager:
             while True:
                 await asyncio.wait_for(
                     self.receive(ws, ws_sender, user_id, conversation_id),
-                    timeout=WEBSOCKET_IDLE_TIMEOUT
+                    timeout=GERM_WEBSOCKET_IDLE_TIMEOUT
                 )
         except asyncio.TimeoutError:
             logger.info(f"Conversation {conversation_id} with user {user_id} timed out.")

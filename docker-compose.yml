@@ -2,6 +2,7 @@ networks:
   bots: {}
 
 volumes:
+  germ-log: {}
   grafana-storage: {}
 
 services:
@@ -22,22 +23,19 @@ services:
       - "8001:8000"
     volumes:
       - ./:/src:rw
+      - germ-log:/var/log/germ
     working_dir: /src
     environment: &local-dev
+      GERM_LOG_LEVEL: ${GERM_LOG_LEVEL:-INFO}
       HF_HOME: ${HF_HOME:-/src/data/huggingface}
-      MKL_NUM_THREADS: "1"
       NEO4J_AUTH: &neo4j-auth neo4j/${NEO4J_PASSWORD:-Ma9icMicr0be}
       NEO4J_HOST: &neo4j-host germ-neo4j
-      NUMBA_NUM_THREADS: "1"
-      OMP_NUM_THREADS: "1"
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL}
       OPENAI_REASONING_MODEL: ${OPENAI_REASONING_MODEL}
-      OPENBLAS_NUM_THREADS: "1"
-      PG_HOST: &pg-host germ-pg
+      POSTGRES_HOST: &pg-host germ-pg
       POSTGRES_PASSWORD: &pg-password ${POSTGRES_PASSWORD:-bacteria4life}
       POSTGRES_USER: &pg-user ${POSTGRES_USER:-germ}
-      PYTHONDONTWRITEBYTECODE: "1"
     command: [ "scripts/app-start.sh", "germ.services.bot.main:bot_service", "8000" ]
     healthcheck:
       test: [ "CMD", "curl", "-s", "localhost:8000/healthz" ]
@@ -64,6 +62,7 @@ services:
       dockerfile: docker/db-migrate.Dockerfile
     volumes:
       - ./:/src
+      - germ-log:/var/log/germ
     working_dir: /src
     environment:
       <<: *local-dev

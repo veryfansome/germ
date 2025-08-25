@@ -15,7 +15,7 @@ if [ "$SKIP_TESTS" == 'false' ] || [ "$SKIP_INTEGRATION_TESTS" == 'false' ]; the
     if [ "$SKIP_INTEGRATION_TESTS" == 'false' ]; then
         echo "Running all test cases"
         # Wait for PG
-        export WAIT_FOR_HOST=$PG_HOST WAIT_FOR_PORT=5432
+        export WAIT_FOR_HOST=$POSTGRES_HOST WAIT_FOR_PORT=5432
         bash /src/scripts/wait-for-port-up.sh
         # Wait for Neo4j
         export WAIT_FOR_HOST=$NEO4J_HOST WAIT_FOR_PORT=7474

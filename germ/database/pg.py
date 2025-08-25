@@ -3,7 +3,7 @@ from sqlalchemy import Engine, MetaData, Table
 from germ.settings import germ_settings
 
 DATABASE_URL = "{name}:{password}@{host}/germ".format(
-    host=germ_settings.DB_HOST,
+    host=germ_settings.POSTGRES_HOST,
     name=germ_settings.POSTGRES_USER,
     password=germ_settings.POSTGRES_PASSWORD,
 )

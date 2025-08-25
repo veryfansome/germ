@@ -83,7 +83,7 @@ async def lifespan(app: FastAPI):
     """
     logger.info("Starting")
 
-    chat_controller = ChatController(knowledge_graph)
+    chat_controller = ChatController(knowledge_graph, redis_client)
     websocket_manager.add_conversation_monitor(chat_controller)
     websocket_manager.add_receive_event_handler(chat_controller)
     websocket_manager.add_send_event_handler(chat_controller)
@@ -261,7 +261,7 @@ async def post_upload(request:  Request, files: List[UploadFile] = File(...)):
 
     saved_files = []
     for file in files:
-        save_path = os.path.join(germ_settings.UPLOAD_FOLDER, file.filename)
+        save_path = os.path.join(germ_settings.GERM_UPLOAD_FOLDER, file.filename)
         try:
             async with aiofiles.open(save_path, "wb") as f:
                 chunk_size = 1024 * 1024

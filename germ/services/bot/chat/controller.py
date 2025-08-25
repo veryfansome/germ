@@ -5,7 +5,10 @@ import numpy as np
 import re
 import time
 from datetime import datetime
+from opentelemetry import trace
 from pydantic import BaseModel
+from re import Pattern
+from redis.asyncio import Redis
 from starlette.concurrency import run_in_threadpool
 from traceback import format_exc
 from typing import Iterable
@@ -23,16 +26,41 @@ from germ.utils import find_near_dup_pairs, normalize_embeddings
 from germ.utils.parsers import ParsedDoc
 
 logger = logging.getLogger(__name__)
-message_logger = logging.getLogger('message')
 
-summary_prefix_pattern = re.compile(r"^(The user|User):?\s*(?:\.\.\.\s*)?")
+tracer = trace.get_tracer(__name__)
 
 
 class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                      WebSocketSendEventHandler, WebSocketSessionMonitor):
-    def __init__(self, knowledge_graph: KnowledgeGraph):
+    def __init__(self, knowledge_graph: KnowledgeGraph, redis: Redis):
         self.conversations: dict[int, ConversationMetadata] = {}
         self.knowledge_graph = knowledge_graph
+        self.message_logger = logging.getLogger('message')
+        self.redis = redis
+
+    async def load_conversations(
+            self, conversation_ids: Iterable[int],
+            redis_prefix: str = germ_settings.GERM_MESSAGE_CACHE_PREFIX,
+    ):
+        if not conversation_ids:
+            return
+
+        logger.info(f'Loading conversations: {conversation_ids}')
+        chat_message_structs = await self.knowledge_graph.match_chat_messages_by_conversation_id(conversation_ids)
+        redis_keys = [
+            f"{redis_prefix}:{struct['conversation_id']}:{struct['dt_created'].timestamp()}"
+            for struct in chat_message_structs
+        ]
+        redis_data = await self.redis.mget(redis_keys)
+        for struct, data in zip(chat_message_structs, redis_data):
+            if data is None:
+                # TODO: if not in Redis, check chat_message_log_file_link table in PG
+                continue
+            message_metadata = ChatMessageMetadata.model_validate_json(data.decode('utf-8'))
+            if struct['conversation_id'] not in self.conversations:
+                self.conversations[struct["conversation_id"]] = ConversationMetadata(conversation_id=struct["conversation_id"])
+            logger.debug(f'From Redis: {(struct, message_metadata)}')
+            self.conversations[struct['conversation_id']].messages[struct['dt_created'].timestamp()] = message_metadata
 
     async def on_disconnect(self, conversation_id: int):
         pass
@@ -72,7 +100,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         )
         summary_emb_floats = summary_emb[0].tolist()
 
-        # TODO: handle if situations that don't require information search
+        # TODO: handle situations that don't require information search
 
         # Recall Phase 1
         min_similarity = 0.75
@@ -87,14 +115,21 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 user_id, summary_emb_floats, k=15, min_similarity=min_similarity,
             ),
         )
-        logger.info(f"Recalled bot message summaries: {''.join(
-            ('\n - ' + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
-            for s in recalled_bot_message_structs if s["conversation_id"] != conversation_id
-        )}")
-        logger.info(f"Recalled user message summaries: {''.join(
-            ("\n - " + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
-            for s in recalled_user_message_structs if s["conversation_id"] != conversation_id
-        )}")
+        if logger.level == logging.DEBUG:
+            logger.debug(f"Recalled bot message summaries: {''.join(
+                ('\n - ' + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
+                for s in recalled_bot_message_structs if s["conversation_id"] != conversation_id
+            )}")
+            logger.debug(f"Recalled user message summaries: {''.join(
+                ("\n - " + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
+                for s in recalled_user_message_structs if s["conversation_id"] != conversation_id
+            )}")
+
+        # Pull old conversations from DBs
+        load_conversations_task = asyncio.create_task(self.load_conversations({
+            s["conversation_id"] for s in (recalled_bot_message_structs + recalled_user_message_structs)
+            if s["conversation_id"] != conversation_id and s["conversation_id"] not in self.conversations
+        }))
 
         # Recall Phase 2
         (
@@ -112,13 +147,14 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 summary_emb_floats, recalled_user_message_structs, alpha=0.7, k=5,
             ),
         )
-        logger.info(f"Recalled linked reply summaries: {''.join(
-            ('\n - ' + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
-            for s in recalled_linked_reply_structs
-        )}")
-        logger.info(f"Recalled keyword phrases: {''.join(
-            ("\n - " + str((k['score'], k['text']))) for k in recalled_keyword_phase_structs
-        )}")
+        if logger.level == logging.DEBUG:
+            logger.debug(f"Recalled linked reply summaries: {''.join(
+                ('\n - ' + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
+                for s in recalled_linked_reply_structs
+            )}")
+            logger.debug(f"Recalled keyword phrases: {''.join(
+                ("\n - " + str((k['score'], k['text']))) for k in recalled_keyword_phase_structs
+            )}")
 
         # Dedup summary texts for relevance gate
         bot_summary_texts = []
@@ -126,7 +162,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             if s["text"] not in bot_summary_texts:
                 bot_summary_texts.append(s["text"])
 
-        # TODO: Pull from Neo4j
+        # TODO: pull from Neo4j
         info_source_candidates = [
             "arxiv.org",
             "docs.aws.amazon.com",
@@ -140,50 +176,46 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             "stackoverflow.com",
         ]
         (
+            filtered_summaries,
             info_source_suggestions,
             keyword_phrase_suggestions,
-            relevant_summaries,
+            _,
         ) = await asyncio.gather(
+            filter_relevant_summaries(filtered_messages, bot_summary_texts),  # Relevance Gate 1
             suggest_best_online_info_source(filtered_messages, info_source_candidates),
             suggest_keyword_phrases(filtered_messages, [k["text"] for k in recalled_keyword_phase_structs]),
-            identify_relevant_summaries(filtered_messages, bot_summary_texts)  # Relevance Gate 1
+            load_conversations_task,
         )
         logger.info(f"Info source suggestions: {info_source_suggestions['domains']}")
         logger.info(f"Search keyword suggestions: {keyword_phrase_suggestions['phrases']}")
         logger.info(f"Relevant summaries: {''.join(
-            f'\n - {bot_summary_texts[idx]}' for idx in relevant_summaries['items']
+            f'\n - {bot_summary_texts[idx]}' for idx in filtered_summaries['items']
         )}")
 
+        # TODO: review messages linked to recalled summaries
+
         doc = await doc_parse_task
-        message_meta = ChatMessageMetadata(
-            doc=doc,
-            info_source_suggestions=info_source_suggestions["domains"],
-            keyword_phrase_suggestions=keyword_phrase_suggestions["phrases"],
-            message_summary=summary_text,
-            user_id=user_id,
-        )
+        message_metadata = ChatMessageMetadata(doc=doc, user_id=user_id)
 
         if germ_settings.OPENAI_REASONING_MODEL:
             delegate_handler = openai_handlers.ReasoningChatModelEventHandler()
         else:
             delegate_handler = openai_handlers.ChatModelEventHandler()
 
-        # TODO: Implement relevance gate for recalled replies
-
         await asyncio.gather(
             # Complete chat request
             delegate_handler.on_receive(user_id, conversation_id, dt_created, chat_request, ws_sender),
 
             # House-keeping
-            self.conversations[conversation_id].add_message(dt_created, message_meta, log=True),
             self.knowledge_graph.add_user_message_intent(conversation_id, dt_created, user_intent_labels['intents']),
+            self.persist_keyword_phrase_embeddings(
+                conversation_id, dt_created, keyword_phrase_suggestions["phrases"]
+            ),
+            self.persist_message_metadata(conversation_id, dt_created, message_metadata),
             self.persist_message_summary(
                 conversation_id, dt_created, 0,
                 summary_text, summary_emb_floats, recalled_user_message_structs
             ),
-            self.persist_keyword_phrase_embeddings(
-                conversation_id, dt_created, keyword_phrase_suggestions["phrases"]
-            )
         )
 
 
@@ -234,13 +266,10 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             ))
 
         doc = await doc_parse_task
-        message_meta = ChatMessageMetadata(
-            doc=doc,
-            user_id=0
-        )
+        message_metadata = ChatMessageMetadata(doc=doc, user_id=0)
 
         await asyncio.gather(
-            self.conversations[conversation_id].add_message(dt_created, message_meta, log=True),
+            self.persist_message_metadata(conversation_id, dt_created, message_metadata),
             *persist_summary_tasks,
         )
 
@@ -256,9 +285,27 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         timestamps.sort()
         last_message_age_secs = int(time.time()) - timestamps.pop().timestamp()
         logger.info(f"{last_message_age_secs} seconds since last message on conversation {conversation_id}")
-        # TODO:
-        #   - If a conversation has no user messages and has been idle for some time, recall what you know about
-        #     the user and attempt to start a conversation.
+        # TODO: if a conversation has no user messages and has been idle for some time, recall what is known about
+        #       the user and attempt to start a conversation.
+
+    async def persist_message_metadata(
+            self, conversation_id: int, dt_created: datetime, message_metadata: "ChatMessageMetadata",
+            redis_expiry_seconds: int = germ_settings.GERM_MESSAGE_CACHE_EXPIRY_SECONDS,
+            redis_prefix: str = germ_settings.GERM_MESSAGE_CACHE_PREFIX,
+    ):
+        self.conversations[conversation_id].messages[dt_created] = message_metadata
+        payload = message_metadata.model_dump_json(exclude_none=True)
+        await self.redis.set(
+            name=f"{redis_prefix}:{conversation_id}:{dt_created.timestamp()}",
+            value=payload.encode("utf-8"),
+            ex=redis_expiry_seconds,
+        )
+        self.message_logger.info(
+            json.dumps(
+                [int(dt_created.timestamp()), conversation_id, payload],
+                separators=(",", ":")
+            )
+        )
 
     async def persist_message_summary(
             self, conversation_id: int, dt_created: datetime, position: int,
@@ -329,25 +376,12 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
 class ChatMessageMetadata(BaseModel):
     doc: ParsedDoc
-    info_source_suggestions: list[str] | None = None
-    message_summary: str | None = None
-    keyword_phrase_suggestions: list[str] | None = None
     user_id: int
 
 
 class ConversationMetadata(BaseModel):
     conversation_id: int
     messages: dict[datetime, ChatMessageMetadata] = {}
-
-    async def add_message(self, dt_created: datetime, message_meta: ChatMessageMetadata, log: bool = False):
-        self.messages[dt_created] = message_meta
-        if log:
-            message_logger.info(
-                json.dumps(
-                    [int(dt_created.timestamp()), self.conversation_id, message_meta.model_dump(exclude_none=True)],
-                    separators=(",", ":")
-                )
-            )
 
     def hydrate_messages(self) -> list[dict[str, str]]:
         return [
@@ -431,7 +465,7 @@ async def dedup_summaries(statements: list[str]):
     return {"judgment": judgment}
 
 
-async def identify_relevant_summaries(
+async def filter_relevant_summaries(
         messages: list[dict[str, str]],
         recalled_summaries: list[str],
 ):
@@ -626,7 +660,8 @@ async def suggest_keyword_phrases(
 
 
 async def summarize_message_received(
-        messages: list[dict[str, str]]
+        messages: list[dict[str, str]],
+        summary_prefix_pattern: Pattern[str] = re.compile(r"^(The user|User):?\s*(?:\.\.\.\s*)?")
 ) -> dict[str, str]:
     prompt = (
         "You are a summarizer of user chat messages. "
