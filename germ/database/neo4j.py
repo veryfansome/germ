@@ -2,6 +2,7 @@ import logging
 from neo4j import AsyncGraphDatabase
 from datetime import datetime
 from traceback import format_exc
+from typing import Iterable
 
 from germ.settings.germ_settings import NEO4J_AUTH, NEO4J_HOST, NEO4J_PORT
 
@@ -108,14 +109,6 @@ async def _link_chat_message_received_to_chat_user(tx, conversation_id: int, dt_
     await tx.run(cypher, conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
 
 
-async def _link_chat_message_received_to_conversation(tx, conversation_id: int, dt_created: datetime, user_id: int):
-    cypher = """
-    MATCH (m:ChatMessage {conversation_id: $conversation_id, dt_created: $dt_created}), (c:Conversation {conversation_id: $conversation_id})
-    MERGE (m)-[:PART_OF]->(c)
-    """
-    await tx.run(cypher, conversation_id=conversation_id, dt_created=dt_created, user_id=user_id)
-
-
 async def _link_chat_message_sent_to_chat_message_received(
         tx, received_dt_created: datetime, sent_dt_created: datetime, conversation_id: int):
     cypher = """
@@ -123,6 +116,14 @@ async def _link_chat_message_sent_to_chat_message_received(
     MERGE (r)-[:HAS_REPLY]->(s)
     """
     await tx.run(cypher, received_dt_created=received_dt_created, sent_dt_created=sent_dt_created, conversation_id=conversation_id)
+
+
+async def _link_chat_message_to_conversation(tx, conversation_id: int, dt_created: datetime):
+    cypher = """
+    MATCH (m:ChatMessage {conversation_id: $conversation_id, dt_created: $dt_created}), (c:Conversation {conversation_id: $conversation_id})
+    MERGE (m)-[:PART_OF]->(c)
+    """
+    await tx.run(cypher, conversation_id=conversation_id, dt_created=dt_created)
 
 
 async def _link_chat_message_to_summary(tx, conversation_id: int, dt_created: datetime, position: int, summary_text: str):
@@ -161,10 +162,28 @@ async def _match_bot_message_summaries_by_similarity_to_query_vector(
     async for result in results:
         records.append({
             "conversation_id": result["conversation_id"],
-            "dt_created": result["dt_created"],
+            "dt_created": result["dt_created"].to_native(),
             "embedding": result["embedding"],
             "score": result["score"],
             "text": result["text"],
+        })
+    return records
+
+
+async def _match_chat_messages_by_conversation_id(tx, conversation_ids: Iterable[int]):
+    cypher = """
+    UNWIND $conversation_ids AS conversation_id
+    MATCH (m:ChatMessage {conversation_id: conversation_id})
+    ORDER BY m.conversation_id ASC, m.dt_created ASC
+    RETURN m.conversation_id    AS conversation_id,
+           m.dt_created         AS dt_created
+    """
+    results = await tx.run(cypher, conversation_ids=[i for i in conversation_ids])
+    records = []
+    async for result in results:
+        records.append({
+            "conversation_id": result["conversation_id"],
+            "dt_created": result["dt_created"].to_native()
         })
     return records
 
@@ -287,7 +306,7 @@ async def _match_reply_summaries_by_similarity_to_query_vector(
     async for result in results:
         records.append({
             "conversation_id": result["conversation_id"],
-            "dt_created": result["dt_created"],
+            "dt_created": result["dt_created"].to_native(),
             "embedding": result["embedding"],
             "score": result["score"],
             "text": result["text"],
@@ -315,7 +334,7 @@ async def _match_user_message_summaries_by_similarity_to_query_vector(
     async for result in results:
         records.append({
             "conversation_id": result["conversation_id"],
-            "dt_created": result["dt_created"],
+            "dt_created": result["dt_created"].to_native(),
             "embedding": result["embedding"],
             "score": result["score"],
             "text": result["text"],
@@ -395,17 +414,6 @@ class KnowledgeGraph:
             logger.error(f"Failed to link chat message from conversation {conversation_id}, "
                          f"received at {dt_created} to chat user {user_id}: {format_exc()}")
 
-    async def link_chat_message_received_to_conversation(
-            self, conversation_id: int, dt_created: datetime, user_id: int
-    ):
-        try:
-            async with self.driver.session() as session:
-                await session.execute_write(_link_chat_message_received_to_conversation,
-                                            conversation_id, dt_created, user_id)
-        except Exception:
-            logger.error(f"Failed to link chat message from conversation {conversation_id}, "
-                         f"received at {dt_created}: {format_exc()}")
-
     async def link_chat_message_sent_to_chat_message_received(
             self, received_dt_created: datetime, sent_dt_created: datetime, conversation_id: int
     ):
@@ -416,6 +424,14 @@ class KnowledgeGraph:
         except Exception:
             logger.error(f"Failed to link chat message sent at {sent_dt_created} to chat message received at "
                          f"{received_dt_created}, from conversation {conversation_id}: {format_exc()}")
+
+    async def link_chat_message_to_conversation(self, conversation_id: int, dt_created: datetime):
+        try:
+            async with self.driver.session() as session:
+                await session.execute_write(_link_chat_message_to_conversation, conversation_id, dt_created)
+        except Exception:
+            logger.error(f"Failed to link chat message from conversation {conversation_id}, "
+                         f"received at {dt_created}: {format_exc()}")
 
     async def link_chat_message_to_summary(
             self, conversation_id: int, dt_created: datetime, position: int, summary_text: str
@@ -447,6 +463,16 @@ class KnowledgeGraph:
                 )
         except Exception:
             logger.error(f"Error while fetching bot message summaries: {format_exc()}")
+            return []
+
+    async def match_chat_messages_by_conversation_id(self, conversation_ids: Iterable[int]):
+        try:
+            async with self.driver.session() as session:
+                return await session.execute_read(
+                    _match_chat_messages_by_conversation_id, conversation_ids
+                )
+        except Exception:
+            logger.error(f"Error while fetching chat message creation times: {format_exc()}")
             return []
 
     async def match_keyword_phrases_by_similarity_to_query_vector(

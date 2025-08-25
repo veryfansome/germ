@@ -8,7 +8,7 @@ neo4j-migrations -p $NEO4J_PASSWORD apply
 
 # PostgreSQL
 echo "Loading SQL schema"
-psql -U "$POSTGRES_USER" -h "$PG_HOST" -d germ < sql/germ.ddl
+psql -U "$POSTGRES_USER" -h "$POSTGRES_HOST" -d germ < sql/germ.ddl
 
 mapfile -t DUMP_DIRS < <(find /src/database_dump/sql/* -type d | sort -n)
 DUMP_CNT=${#DUMP_DIRS[@]}
@@ -20,13 +20,14 @@ if ((DUMP_CNT)); then
         DUMP_FILE="${DUMP_DIRS[i]}/data.sql"
         if [ -f "$DUMP_FILE" ]; then
             echo "Loading data from $DUMP_FILE"
-            psql -U "$POSTGRES_USER" -h "$PG_HOST" -d germ < "$DUMP_FILE"
+            psql -U "$POSTGRES_USER" -h "$POSTGRES_HOST" -d germ < "$DUMP_FILE"
             LOADED_FROM_DUMP=1
         fi
     done
     if ! ((LOADED_FROM_DUMP)); then
         echo "Failed to load any dumps, loading initial data instead"
-        psql -U "$POSTGRES_USER" -h "$PG_HOST" -d germ < sql/germ_data.sql
+        psql -U "$POSTGRES_USER" -h "$POSTGRES_HOST" -d germ < sql/germ_data.sql
+        rm -f /var/log/germ/message.log*
     fi
     if ((DUMP_CNT > MAX_DUMP_CNT)); then
         rm -rf "${DUMP_DIRS[@]:0:$((DUMP_CNT - MAX_DUMP_CNT))}"
@@ -34,5 +35,6 @@ if ((DUMP_CNT)); then
 else
     # Load initial data if no dump files
     echo "Loading initial data"
-    psql -U "$POSTGRES_USER" -h "$PG_HOST" -d germ < sql/germ_data.sql
+    psql -U "$POSTGRES_USER" -h "$POSTGRES_HOST" -d germ < sql/germ_data.sql
+    rm -f /var/log/germ/message.log*
 fi
