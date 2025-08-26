@@ -4,12 +4,11 @@ from transformers.utils.constants import OPENAI_CLIP_STD, OPENAI_CLIP_MEAN
 
 # Service
 
+GERM_DATA_DIR = os.environ.get("GERM_DATA_DIR", "/opt/germ/data")
 GERM_ENCRYPTION_PASSWORD = os.getenv("GERM_ENCRYPTION_PASSWORD", "0Bfusc8")
-GERM_LOG_DIR = os.getenv("GERM_LOG_DIR", "/var/log/germ")
 GERM_LOG_LEVEL = os.getenv("GERM_LOG_LEVEL", "INFO")
 GERM_MESSAGE_CACHE_EXPIRY_SECONDS = os.getenv("GERM_MESSAGE_CACHE_EXPIRY_SECONDS", 3600 * 24 * 3)
 GERM_MESSAGE_CACHE_PREFIX = os.getenv("GERM_MESSAGE_CACHE_PREFIX", "germ_chat_message_metadata")
-GERM_MESSAGE_LOG_FILENAME = os.getenv("GERM_MESSAGE_LOG_FILENAME", "message.log")
 GERM_MODEL_SERVICE_ENDPOINT = os.getenv("GERM_MODEL_SERVICE_HOST", "germ-models:9000")
 GERM_UPLOAD_FOLDER = os.getenv("GERM_UPLOAD_FOLDER", "/tmp")
 GERM_WEBSOCKET_IDLE_TIMEOUT = os.getenv("GERM_WEBSOCKET_IDLE_TIMEOUT", 3600)

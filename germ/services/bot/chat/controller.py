@@ -1,10 +1,13 @@
+import aiofiles
+import aiofiles.os
 import asyncio
 import json
 import logging
 import numpy as np
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
+
 from opentelemetry import trace
 from pydantic import BaseModel
 from re import Pattern
@@ -33,34 +36,34 @@ tracer = trace.get_tracer(__name__)
 class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                      WebSocketSendEventHandler, WebSocketSessionMonitor):
     def __init__(self, knowledge_graph: KnowledgeGraph, redis: Redis):
-        self.conversations: dict[int, ConversationMetadata] = {}
+        self.conversations: dict[int, Conversation] = {}
         self.knowledge_graph = knowledge_graph
-        self.message_logger = logging.getLogger('message')
         self.redis = redis
 
     async def load_conversations(
-            self, conversation_ids: Iterable[int],
-            redis_prefix: str = germ_settings.GERM_MESSAGE_CACHE_PREFIX,
+            self, user_id: int, conversation_ids: Iterable[int],
+            data_dir: str = f"{germ_settings.GERM_DATA_DIR}/chat",
     ):
         if not conversation_ids:
             return
 
         logger.info(f'Loading conversations: {conversation_ids}')
         chat_message_structs = await self.knowledge_graph.match_chat_messages_by_conversation_id(conversation_ids)
-        redis_keys = [
-            f"{redis_prefix}:{struct['conversation_id']}:{struct['dt_created'].timestamp()}"
-            for struct in chat_message_structs
-        ]
-        redis_data = await self.redis.mget(redis_keys)
-        for struct, data in zip(chat_message_structs, redis_data):
-            if data is None:
-                # TODO: if not in Redis, check chat_message_log_file_link table in PG
-                continue
-            message_metadata = ChatMessageMetadata.model_validate_json(data.decode('utf-8'))
-            if struct['conversation_id'] not in self.conversations:
-                self.conversations[struct["conversation_id"]] = ConversationMetadata(conversation_id=struct["conversation_id"])
-            logger.debug(f'From Redis: {(struct, message_metadata)}')
-            self.conversations[struct['conversation_id']].messages[struct['dt_created'].timestamp()] = message_metadata
+        for (conversation_id, year, month, day) in {
+            (s["conversation_id"], s["dt_created"].year, s["dt_created"].month, s["dt_created"].day)
+            for s in chat_message_structs
+        }:
+            if conversation_id not in self.conversations:
+                self.conversations[conversation_id] = Conversation(conversation_id=conversation_id, user_id=user_id)
+
+            data_file = f"{data_dir}/{user_id}/{year}/{month}/{day}/{conversation_id}_{year}-{month}-{day}"
+            async with aiofiles.open(data_file, encoding="utf-8") as f:
+                async for line in f:
+                    data = json.loads(line)
+                    logger.debug(f'Loading data: {data}')
+                    self.conversations[conversation_id].messages[datetime.fromtimestamp(data[0], tz=timezone.utc)] = (
+                        data[1], ParsedDoc.model_validate_json(data[2])
+                    )
 
     async def on_disconnect(self, conversation_id: int):
         pass
@@ -69,16 +72,17 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
     async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         if conversation_id not in self.conversations:
-            self.conversations[conversation_id] = ConversationMetadata(conversation_id=conversation_id)
+            self.conversations[conversation_id] = Conversation(
+                conversation_id=conversation_id, user_id=user_id,
+            )
 
         if chat_request.uploaded_filenames:
             for filename in chat_request.uploaded_filenames:
                 # TODO: handle uploaded files
                 pass
 
-        doc_parse_task = asyncio.create_task(
-            run_in_threadpool(ParsedDoc.from_text, chat_request.messages[-1].content)
-        )
+        message_doc = await run_in_threadpool(ParsedDoc.from_text, chat_request.messages[-1].content)
+        self.conversations[conversation_id].messages[dt_created] = (user_id, message_doc)
         # TODO: code block summarization
 
         filtered_messages: list[dict[str, str]] = [m.model_dump() for m in chat_request.messages if m.role != "system"]
@@ -105,31 +109,26 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         # Recall Phase 1
         min_similarity = 0.75
         (
-            recalled_bot_message_structs,  # bot messages similar to summary_emb
             recalled_user_message_structs,  # user messages similar to summary_emb
         ) = await asyncio.gather(
-            self.knowledge_graph.match_bot_message_summaries_by_similarity_to_query_vector(
-                summary_emb_floats, k=15, min_similarity=min_similarity,
-            ),
             self.knowledge_graph.match_user_message_summaries_by_similarity_to_query_vector(
                 user_id, summary_emb_floats, k=15, min_similarity=min_similarity,
             ),
         )
         if logger.level == logging.DEBUG:
-            logger.debug(f"Recalled bot message summaries: {''.join(
-                ('\n - ' + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
-                for s in recalled_bot_message_structs if s["conversation_id"] != conversation_id
-            )}")
             logger.debug(f"Recalled user message summaries: {''.join(
                 ("\n - " + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
                 for s in recalled_user_message_structs if s["conversation_id"] != conversation_id
             )}")
 
         # Pull old conversations from DBs
-        load_conversations_task = asyncio.create_task(self.load_conversations({
-            s["conversation_id"] for s in (recalled_bot_message_structs + recalled_user_message_structs)
-            if s["conversation_id"] != conversation_id and s["conversation_id"] not in self.conversations
-        }))
+        load_conversations_task = asyncio.create_task(self.load_conversations(
+            user_id,
+            {
+                s["conversation_id"] for s in recalled_user_message_structs
+                if s["conversation_id"] != conversation_id and s["conversation_id"] not in self.conversations
+            }
+        ))
 
         # Recall Phase 2
         (
@@ -158,7 +157,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         # Dedup summary texts for relevance gate
         bot_summary_texts = []
-        for s in (recalled_bot_message_structs + recalled_linked_reply_structs):
+        for s in recalled_linked_reply_structs:
             if s["text"] not in bot_summary_texts:
                 bot_summary_texts.append(s["text"])
 
@@ -194,9 +193,6 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         # TODO: review messages linked to recalled summaries
 
-        doc = await doc_parse_task
-        message_metadata = ChatMessageMetadata(doc=doc, user_id=user_id)
-
         if germ_settings.OPENAI_REASONING_MODEL:
             delegate_handler = openai_handlers.ReasoningChatModelEventHandler()
         else:
@@ -211,7 +207,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             self.persist_keyword_phrase_embeddings(
                 conversation_id, dt_created, keyword_phrase_suggestions["phrases"]
             ),
-            self.persist_message_metadata(conversation_id, dt_created, message_metadata),
+            self.persist_message(user_id, conversation_id, dt_created, message_doc),
             self.persist_message_summary(
                 conversation_id, dt_created, 0,
                 summary_text, summary_emb_floats, recalled_user_message_structs
@@ -225,9 +221,8 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             logger.error(f"Conversation {conversation_id} not found.")
             return
 
-        doc_parse_task = asyncio.create_task(
-            run_in_threadpool(ParsedDoc.from_text, chat_response.content)
-        )
+        message_doc = await run_in_threadpool(ParsedDoc.from_text, chat_response.content)
+        self.conversations[conversation_id].messages[dt_created] = (0, message_doc)
 
         # Hydrate message history from conversation metadata
         messages = await run_in_threadpool(self.conversations[conversation_id].hydrate_messages)
@@ -265,11 +260,8 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 )
             ))
 
-        doc = await doc_parse_task
-        message_metadata = ChatMessageMetadata(doc=doc, user_id=0)
-
         await asyncio.gather(
-            self.persist_message_metadata(conversation_id, dt_created, message_metadata),
+            self.persist_message(0, conversation_id, dt_created, message_doc),
             *persist_summary_tasks,
         )
 
@@ -288,24 +280,22 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         # TODO: if a conversation has no user messages and has been idle for some time, recall what is known about
         #       the user and attempt to start a conversation.
 
-    async def persist_message_metadata(
-            self, conversation_id: int, dt_created: datetime, message_metadata: "ChatMessageMetadata",
-            redis_expiry_seconds: int = germ_settings.GERM_MESSAGE_CACHE_EXPIRY_SECONDS,
-            redis_prefix: str = germ_settings.GERM_MESSAGE_CACHE_PREFIX,
+    async def persist_message(
+            self, user_id: int, conversation_id: int, dt_created: datetime, message_doc: ParsedDoc,
+            data_dir: str = f"{germ_settings.GERM_DATA_DIR}/chat",
     ):
-        self.conversations[conversation_id].messages[dt_created] = message_metadata
-        payload = message_metadata.model_dump_json(exclude_none=True)
-        await self.redis.set(
-            name=f"{redis_prefix}:{conversation_id}:{dt_created.timestamp()}",
-            value=payload.encode("utf-8"),
-            ex=redis_expiry_seconds,
-        )
-        self.message_logger.info(
-            json.dumps(
-                [int(dt_created.timestamp()), conversation_id, payload],
-                separators=(",", ":")
-            )
-        )
+        storage_path = (f"{data_dir}/{self.conversations[conversation_id].user_id}/"
+                        f"{dt_created.year}/{dt_created.month}/{dt_created.day}")
+        await aiofiles.os.makedirs(storage_path, exist_ok=True)
+
+        data_file = f"{storage_path}/{conversation_id}_{dt_created.year}-{dt_created.month}-{dt_created.day}"
+        async with aiofiles.open(data_file, mode="a", encoding="utf-8") as f:
+            await f.write(f"{json.dumps([
+                dt_created.timestamp(),
+                user_id,
+                message_doc.model_dump_json(exclude_none=True)
+            ])}\n")
+            await f.flush()
 
     async def persist_message_summary(
             self, conversation_id: int, dt_created: datetime, position: int,
@@ -374,22 +364,18 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         )
 
 
-class ChatMessageMetadata(BaseModel):
-    doc: ParsedDoc
-    user_id: int
-
-
-class ConversationMetadata(BaseModel):
+class Conversation(BaseModel):
     conversation_id: int
-    messages: dict[datetime, ChatMessageMetadata] = {}
+    messages: dict[datetime, tuple[int, ParsedDoc]] = {}
+    user_id: int
 
     def hydrate_messages(self) -> list[dict[str, str]]:
         return [
             {
-                "role": ("assistant" if meta.user_id == 0 else "user"),
-                "content": meta.doc.restore()
+                "role": ("assistant" if user_id == 0 else "user"),
+                "content": doc.restore()
             }
-            for _, meta in self.messages.items()
+            for _, (user_id, doc) in self.messages.items()
         ]
 
 

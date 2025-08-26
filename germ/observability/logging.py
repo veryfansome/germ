@@ -9,10 +9,10 @@ console_only_logger_config = {
 }
 
 
-def setup_logging(germ_log_level: str = germ_settings.GERM_LOG_LEVEL,
-                  global_level: str = germ_settings.LOG_LEVEL,
-                  log_dir: str = germ_settings.GERM_LOG_DIR,
-                  message_log_filename: str = germ_settings.GERM_MESSAGE_LOG_FILENAME):
+def setup_logging(
+        germ_log_level: str = germ_settings.GERM_LOG_LEVEL,
+        global_level: str = germ_settings.LOG_LEVEL
+):
     logging.config.dictConfig({
         "version": 1,
         "disable_existing_loggers": False,
@@ -20,23 +20,11 @@ def setup_logging(germ_log_level: str = germ_settings.GERM_LOG_LEVEL,
             "default": {
                 "format": "%(asctime)s - %(levelname)s - %(name)s - %(message)s",
             },
-            "message_only": {
-                "format": "%(message)s",
-            }
         },
         "handlers": {
             "console": {
                 "class": "logging.StreamHandler",
                 "formatter": "default",
-            },
-            "message": {
-                "filename": f"{log_dir}/{message_log_filename}",
-                "class": "logging.handlers.TimedRotatingFileHandler",
-                "formatter": "message_only",
-                # Daily rotation with 7 + 1 days of history
-                "when": "D",
-                "interval": 1,
-                "encoding": "utf8",
             },
         },
         "loggers": {
@@ -51,11 +39,6 @@ def setup_logging(germ_log_level: str = germ_settings.GERM_LOG_LEVEL,
             "httpx": {
                 "level": "ERROR",
                 **console_only_logger_config,
-            },
-            "message": {
-                "level": "INFO",
-                "handlers": ["message"],
-                "propagate": False,
             },
             "neo4j.notifications": {
                 "level": "ERROR",

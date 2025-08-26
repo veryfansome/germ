@@ -2,7 +2,7 @@ networks:
   bots: {}
 
 volumes:
-  germ-log: {}
+  germ-data: {}
   grafana-storage: {}
 
 services:
@@ -23,7 +23,7 @@ services:
       - "8001:8000"
     volumes:
       - ./:/src:rw
-      - germ-log:/var/log/germ
+      - germ-data:/opt/germ/data
     working_dir: /src
     environment: &local-dev
       GERM_LOG_LEVEL: ${GERM_LOG_LEVEL:-INFO}
@@ -62,7 +62,7 @@ services:
       dockerfile: docker/db-migrate.Dockerfile
     volumes:
       - ./:/src
-      - germ-log:/var/log/germ
+      - germ-data:/opt/germ/data
     working_dir: /src
     environment:
       <<: *local-dev
