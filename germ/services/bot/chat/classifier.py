@@ -123,7 +123,7 @@ class UserIntentClassifier:
                     },
                     n=1,
                     seed=germ_settings.OPENAI_SEED,
-                    timeout=15,
+                    timeout=15.0,
                 )
                 response_content = json.loads(response.choices[0].message.content)
                 assert "labels" in response_content, "Response does not contain 'labels'"

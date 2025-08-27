@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class ChatModelEventHandler(WebSocketReceiveEventHandler):
-    def __init__(self, httpx_timeout: float = 30):
+    def __init__(self, httpx_timeout: float = 30.0):
         self.httpx_timeout = httpx_timeout
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
@@ -45,7 +45,7 @@ class ChatModelEventHandler(WebSocketReceiveEventHandler):
 
 
 class ReasoningChatModelEventHandler(WebSocketReceiveEventHandler):
-    def __init__(self, httpx_timeout: float = 180):
+    def __init__(self, httpx_timeout: float = 180.0):
         self.httpx_timeout = httpx_timeout
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)

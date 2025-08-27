@@ -40,10 +40,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.knowledge_graph = knowledge_graph
         self.redis = redis
 
-    async def load_conversations(
-            self, user_id: int, conversation_ids: Iterable[int],
-            data_dir: str = f"{germ_settings.GERM_DATA_DIR}/chat",
-    ):
+    async def load_conversations(self, user_id: int, conversation_ids: Iterable[int]):
         if not conversation_ids:
             return
 
@@ -56,8 +53,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             if conversation_id not in self.conversations:
                 self.conversations[conversation_id] = Conversation(conversation_id=conversation_id, user_id=user_id)
 
-            data_file = f"{data_dir}/{user_id}/{year}/{month}/{day}/{conversation_id}_{year}-{month}-{day}"
-            async with aiofiles.open(data_file, encoding="utf-8") as f:
+            storage_path = get_storage_path(user_id, year, month, day)
+            data_file_name = get_data_file_name(conversation_id, year, month, day)
+            async with aiofiles.open(f"{storage_path}/{data_file_name}", encoding="utf-8") as f:
                 async for line in f:
                     data = json.loads(line)
                     logger.debug(f'Loading data: {data}')
@@ -139,11 +137,11 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 summary_emb_floats, [
                     # Exclude messages received from current conversation
                     s for s in recalled_user_message_structs if s["conversation_id"] != conversation_id
-                ], alpha=0.7, k=30,
+                ], alpha=0.5, k=30,
             ),
             self.knowledge_graph.match_keyword_phrases_by_similarity_to_query_vector(
                 # Ok to include previous phrases from current conversation
-                summary_emb_floats, recalled_user_message_structs, alpha=0.7, k=5,
+                summary_emb_floats, recalled_user_message_structs, alpha=0.5, k=5,
             ),
         )
         if logger.level == logging.DEBUG:
@@ -177,7 +175,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         (
             filtered_summaries,
             info_source_suggestions,
-            keyword_phrase_suggestions,
+            keyword_phrase_suggestions,  # TODO: also needs a relevance gate
             _,
         ) = await asyncio.gather(
             filter_relevant_summaries(filtered_messages, bot_summary_texts),  # Relevance Gate 1
@@ -280,16 +278,13 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         # TODO: if a conversation has no user messages and has been idle for some time, recall what is known about
         #       the user and attempt to start a conversation.
 
-    async def persist_message(
-            self, user_id: int, conversation_id: int, dt_created: datetime, message_doc: ParsedDoc,
-            data_dir: str = f"{germ_settings.GERM_DATA_DIR}/chat",
-    ):
-        storage_path = (f"{data_dir}/{self.conversations[conversation_id].user_id}/"
-                        f"{dt_created.year}/{dt_created.month}/{dt_created.day}")
+    async def persist_message(self, user_id: int, conversation_id: int, dt_created: datetime, message_doc: ParsedDoc):
+        storage_path = get_storage_path(self.conversations[conversation_id].user_id,
+                                        dt_created.year, dt_created.month, dt_created.day)
         await aiofiles.os.makedirs(storage_path, exist_ok=True)
 
-        data_file = f"{storage_path}/{conversation_id}_{dt_created.year}-{dt_created.month}-{dt_created.day}"
-        async with aiofiles.open(data_file, mode="a", encoding="utf-8") as f:
+        data_file_name = get_data_file_name(conversation_id, dt_created.year, dt_created.month, dt_created.day)
+        async with aiofiles.open(f"{storage_path}/{data_file_name}", mode="a", encoding="utf-8") as f:
             await f.write(f"{json.dumps([
                 dt_created.timestamp(),
                 user_id,
@@ -439,7 +434,7 @@ async def dedup_summaries(statements: list[str]):
                 },
                 n=1,
                 seed=germ_settings.OPENAI_SEED,
-                timeout=10,
+                timeout=10.0,
             )
             response_content = json.loads(response.choices[0].message.content)
             assert "judgment" in response_content, "Response does not contain 'judgment'"
@@ -508,7 +503,7 @@ async def filter_relevant_summaries(
                 },
                 n=1,
                 seed=germ_settings.OPENAI_SEED,
-                timeout=10,
+                timeout=10.0,
             )
             response_content = json.loads(response.choices[0].message.content)
             assert "items" in response_content, "Response does not contain 'items'"
@@ -519,6 +514,15 @@ async def filter_relevant_summaries(
         except Exception:
             logger.error(f"Could not get relevant items: {format_exc()}")
     return {"items": relevant_items}
+
+
+def get_data_file_name(conversation_id: int, year: int, month: int, day: int):
+    return f"{conversation_id:011d}_{year}{month:02d}{day}.ndjson"
+
+
+def get_storage_path(user_id: int, year: int, month: int, day: int,
+                     data_dir: str = f"{germ_settings.GERM_DATA_DIR}/chat"):
+    return f"{data_dir}/{user_id:05d}/{year}/{month:02d}/{day}"
 
 
 async def suggest_best_online_info_source(
@@ -567,7 +571,7 @@ async def suggest_best_online_info_source(
                 },
                 n=1,
                 seed=germ_settings.OPENAI_SEED,
-                timeout=10,
+                timeout=10.0,
             )
             response_content = json.loads(response.choices[0].message.content)
             assert "domains" in response_content, "Response does not contain 'domains'"
@@ -628,7 +632,7 @@ async def suggest_keyword_phrases(
                 },
                 n=1,
                 seed=germ_settings.OPENAI_SEED,
-                timeout=10,
+                timeout=10.0,
             )
             response_content = json.loads(response.choices[0].message.content)
             assert "phrases" in response_content, "Response does not contain 'phrases'"
@@ -692,7 +696,7 @@ async def summarize_message_received(
                 },
                 n=1,
                 seed=germ_settings.OPENAI_SEED,
-                timeout=10,
+                timeout=10.0,
             )
             response_content = json.loads(response.choices[0].message.content)
             assert "summary" in response_content, "Response does not contain 'summary'"
@@ -711,12 +715,13 @@ async def summarize_message_sent(
         "\n\nTask: "
         "\n- Summarize the substance of the most recent message the assistant (you) sent to the user. "
         "\n- Start each statement with \"I ...\", then complete the sentence by explaining what you (the assistant) did or said. "
-        "\n- Use complete and grammatically correct sentences. "
 
         "\n\nGuidelines: "
         "\n- Focus only on what was said, i.e. the core ideas, intent, or situation the assistant conveyed. "
-        "\n- Multiple statement may be appropriate, but only if what was said cannot be summarized simply using a single statement. "
         "\n- Do not invent or generalize beyond what was said. "
+        "\n- Voice your summary as the assistant, addressing a third person that is not the user. "
+        "\n- Multiple statements may be appropriate, but only if what was said cannot be summarized clearly using a single statement. "
+        "\n- Use complete and grammatically correct sentences. "
 
         "\n\nOutput: "
         "\n- Return only a JSON object conforming to the provided schema with a 'statements' attribute that is a list containing summary statements. "
@@ -750,7 +755,7 @@ async def summarize_message_sent(
                 },
                 n=1,
                 seed=germ_settings.OPENAI_SEED,
-                timeout=10,
+                timeout=10.0,
             )
             response_content = json.loads(response.choices[0].message.content)
             assert "statements" in response_content, "Response does not contain 'statements'"
