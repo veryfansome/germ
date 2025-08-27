@@ -659,12 +659,12 @@ async def summarize_message_received(
         "\n\nTask: "
         "\n- Summarize the substance of the most recent message sent by the user. "
         "\n- Start your summary with \"The user ...\", then complete the sentence by explaining what the user wants or said. "
-        "\n- Use complete and grammatically correct sentences. "
 
         "\n\nGuidelines: "
         "\n- Only summarize the user's message, don't respond to the user. "
+        "\n- Voice your summary as the assistant, addressing a person that is not the user. "
         "\n- Focus only on what was said, i.e. the core ideas, imperatives, inquiries, intents, or situations the user conveyed. "
-        "\n- Do not invent or generalize beyond what was said. "
+        "\n- Use complete and grammatically correct sentences. "
 
         "\n\nOutput: "
         "\n- Return only a JSON object conforming to the provided schema with a 'summary' attribute that is your summary statement. "
@@ -713,13 +713,12 @@ async def summarize_message_sent(
         "You are a summarizer of assistant chat messages. "
 
         "\n\nTask: "
-        "\n- Summarize the substance of the most recent message the assistant (you) sent to the user. "
-        "\n- Start each statement with \"I ...\", then complete the sentence by explaining what you (the assistant) did or said. "
+        "\n- Summarize the substance of the most recent message the assistant sent to the user. "
+        "\n- Start each statement with \"I ...\", then complete the sentence by explaining what the assistant conveyed. "
 
         "\n\nGuidelines: "
-        "\n- Focus only on what was said, i.e. the core ideas, intent, or situation the assistant conveyed. "
-        "\n- Do not invent or generalize beyond what was said. "
-        "\n- Voice your summary as the assistant, addressing a third person that is not the user. "
+        "\n- Voice your summary as the assistant, addressing a person that is not the user. "
+        "\n- Focus only on what was said, i.e. the core ideas, intent, or situations conveyed. "
         "\n- Multiple statements may be appropriate, but only if what was said cannot be summarized clearly using a single statement. "
         "\n- Use complete and grammatically correct sentences. "
 
