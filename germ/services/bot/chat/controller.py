@@ -85,16 +85,13 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         filtered_messages: list[dict[str, str]] = [m.model_dump() for m in chat_request.messages if m.role != "system"]
 
-        (
-            message_summary,
-            user_intent_labels,
-        ) = await asyncio.gather(
-            summarize_message_received(filtered_messages),
-            UserIntentClassifier.suggest_user_intent(filtered_messages),
-        )
+        # Label user intent in background
+        user_intent_labels_task = asyncio.create_task(UserIntentClassifier.classify_user_intent(filtered_messages))
+
+        # Summarized user message
+        message_summary = await summarize_message_received(filtered_messages)
         summary_text = f"The user {message_summary['statement']}"
         logger.info(f"User message summary:\n - {summary_text}")
-        logger.info(f"User intent labels: {''.join(f'\n - {l}' for l in user_intent_labels['intents'])}")
 
         # Generate embeddings on summarized user message
         summary_emb = await run_in_threadpool(
@@ -102,9 +99,10 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         )
         summary_emb_floats = summary_emb[0].tolist()
 
-        # TODO: handle situations that don't require information search
-
+        ##
         # Recall Phase 1
+
+        # Get similar messages from same user
         min_similarity = 0.75
         (
             recalled_user_message_structs,  # user messages similar to summary_emb
@@ -119,91 +117,77 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 for s in recalled_user_message_structs if s["conversation_id"] != conversation_id
             )}")
 
-        # Pull old conversations from DBs
-        load_conversations_task = asyncio.create_task(self.load_conversations(
-            user_id,
-            {
-                s["conversation_id"] for s in recalled_user_message_structs
-                if s["conversation_id"] != conversation_id and s["conversation_id"] not in self.conversations
-            }
-        ))
-
-        # Recall Phase 2
-        (
-            recalled_linked_reply_structs,  # replies linked to recalled user messages
-            recalled_keyword_phase_structs,  # keyword phrases linked to recalled user messages
-        ) = await asyncio.gather(
-            self.knowledge_graph.match_reply_summaries_by_similarity_to_query_vector(
-                summary_emb_floats, [
-                    # Exclude messages received from current conversation
-                    s for s in recalled_user_message_structs if s["conversation_id"] != conversation_id
-                ], alpha=0.5, k=30,
-            ),
-            self.knowledge_graph.match_keyword_phrases_by_similarity_to_query_vector(
-                # Ok to include previous phrases from current conversation
-                summary_emb_floats, recalled_user_message_structs, alpha=0.5, k=5,
-            ),
-        )
-        if logger.level == logging.DEBUG:
-            logger.debug(f"Recalled linked reply summaries: {''.join(
-                ('\n - ' + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
-                for s in recalled_linked_reply_structs
-            )}")
-            logger.debug(f"Recalled keyword phrases: {''.join(
-                ("\n - " + str((k['score'], k['text']))) for k in recalled_keyword_phase_structs
-            )}")
-
-        # Dedup summary texts for relevance gate
-        bot_summary_texts = []
-        for s in recalled_linked_reply_structs:
-            if s["text"] not in bot_summary_texts:
-                bot_summary_texts.append(s["text"])
-
-        # TODO: pull from Neo4j
-        info_source_candidates = [
-            "arxiv.org",
-            "docs.aws.amazon.com",
-            "docs.cloud.google.com",
-            "en.wikipedia.org",
-            "en.wiktionary.org",
-            "github.com",
-            "huggingface.co",
-            "jmlr.org",
-            "registry.terraform.io",
-            "stackoverflow.com",
+        # Pull old conversations from storage
+        pending_tasks = [
+            asyncio.create_task(self.load_conversations(
+                user_id,
+                {
+                    s["conversation_id"] for s in recalled_user_message_structs
+                    if s["conversation_id"] != conversation_id and s["conversation_id"] not in self.conversations
+                }
+            ))
         ]
-        (
-            filtered_summaries,
-            info_source_suggestions,
-            keyword_phrase_suggestions,  # TODO: also needs a relevance gate
-            _,
-        ) = await asyncio.gather(
-            filter_relevant_summaries(filtered_messages, bot_summary_texts),  # Relevance Gate 1
-            suggest_best_online_info_source(filtered_messages, info_source_candidates),
-            suggest_keyword_phrases(filtered_messages, [k["text"] for k in recalled_keyword_phase_structs]),
-            load_conversations_task,
+
+        ##
+        # Recall Phase 2
+
+        # Get replies linked to similar user messages
+        linked_replies_task = asyncio.create_task(
+            get_relevant_linked_replies(filtered_messages, asyncio.create_task(
+                self.knowledge_graph.match_reply_summaries_by_similarity_to_query_vector(
+                    summary_emb_floats, [
+                        # Exclude messages received from current conversation
+                        s for s in recalled_user_message_structs if s["conversation_id"] != conversation_id
+                    ], alpha=0.5, k=30,
+                )
+            ))
         )
-        logger.info(f"Info source suggestions: {info_source_suggestions['domains']}")
-        logger.info(f"Search keyword suggestions: {keyword_phrase_suggestions['phrases']}")
-        logger.info(f"Relevant summaries: {''.join(
-            f'\n - {bot_summary_texts[idx]}' for idx in filtered_summaries['items']
-        )}")
+        pending_tasks.append(linked_replies_task)
 
-        # TODO: review messages linked to recalled summaries
+        # Get intent labels
+        user_intent_labels = await user_intent_labels_task
+        logger.info(f"User intent labels: {''.join(f'\n - {l}' for l in user_intent_labels['intents'])}")
 
-        if germ_settings.OPENAI_REASONING_MODEL:
-            delegate_handler = openai_handlers.ReasoningChatModelEventHandler()
-        else:
-            delegate_handler = openai_handlers.ChatModelEventHandler()
+        has_informational_intent = False
+        has_instrumental_intent = False
+        for intent_category, intent in user_intent_labels["intents"]:
+            if intent_category == "informational":
+                has_informational_intent = True
+            elif intent_category == "instrumental":
+                has_instrumental_intent = True
+
+        # Intent-specific tasks
+        online_info_task = None
+        keyword_phrase_suggestions_task = None
+
+        if has_informational_intent or has_instrumental_intent:
+            online_info_task = asyncio.create_task(get_online_info(filtered_messages))
+            pending_tasks.append(online_info_task)
+
+            keyword_phrase_suggestions_task = asyncio.create_task(
+                get_keyword_phrase_suggestions(filtered_messages, asyncio.create_task(
+                    self.knowledge_graph.match_keyword_phrases_by_similarity_to_query_vector(
+                        # Ok to include previous phrases from current conversation
+                        summary_emb_floats, recalled_user_message_structs, alpha=0.5, k=5,
+                    )
+                ))
+            )
+            pending_tasks.append(keyword_phrase_suggestions_task)
+
+        await asyncio.gather(*pending_tasks)
 
         await asyncio.gather(
             # Complete chat request
-            delegate_handler.on_receive(user_id, conversation_id, dt_created, chat_request, ws_sender),
+            (
+                openai_handlers.ReasoningChatModelEventHandler() if germ_settings.OPENAI_REASONING_MODEL
+                else openai_handlers.ChatModelEventHandler()
+            ).on_receive(user_id, conversation_id, dt_created, chat_request, ws_sender),
 
             # House-keeping
             self.knowledge_graph.add_user_message_intent(conversation_id, dt_created, user_intent_labels['intents']),
             self.persist_keyword_phrase_embeddings(
-                conversation_id, dt_created, keyword_phrase_suggestions["phrases"]
+                conversation_id, dt_created,
+                [] if not keyword_phrase_suggestions_task else keyword_phrase_suggestions_task.result()["phrases"]
             ),
             self.persist_message(user_id, conversation_id, dt_created, message_doc),
             self.persist_message_summary(
@@ -211,7 +195,6 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 summary_text, summary_emb_floats, recalled_user_message_structs
             ),
         )
-
 
     async def on_send(self, conversation_id: int, dt_created: datetime,
                       chat_response: ChatResponse, received_message_dt_created: datetime = None):
@@ -349,6 +332,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
     async def persist_keyword_phrase_embeddings(
             self, conversation_id, dt_created: datetime, new_suggestions: list[str]
     ):
+        if not new_suggestions:
+            return
+
         new_suggestions_embedding = await run_in_threadpool(
             normalize_embeddings, np.array(await get_text_embedding(new_suggestions), dtype=np.float32)
         )
@@ -449,7 +435,7 @@ async def dedup_summaries(statements: list[str]):
 async def filter_relevant_summaries(
         messages: list[dict[str, str]],
         recalled_summaries: list[str],
-):
+) -> dict[str, list[int]]:
     if not recalled_summaries:
         return {"items": []}
 
@@ -520,6 +506,50 @@ def get_data_file_name(conversation_id: int, year: int, month: int, day: int):
     return f"{conversation_id:011d}_{year}{month:02d}{day}.ndjson"
 
 
+async def get_keyword_phrase_suggestions(
+        filtered_messages: list[dict[str, str]],
+        keyword_phrase_recall_task
+):
+    recalled_keyword_phase_structs = await keyword_phrase_recall_task
+    logger.debug(f"Recalled keyword phrases: {''.join(
+        ("\n - " + str((k['score'], k['text']))) for k in recalled_keyword_phase_structs
+    )}")
+
+    keyword_phrase_suggestions = await suggest_keyword_phrases(filtered_messages, [k["text"] for k in recalled_keyword_phase_structs])
+    logger.info(f"Search keyword suggestions: {keyword_phrase_suggestions['phrases']}")
+    return keyword_phrase_suggestions
+
+
+async def get_online_info(
+        filtered_messages: list[dict[str, str]],
+):
+    info_source_suggestions = await suggest_best_online_info_source(filtered_messages, [])
+    logger.info(f"Info source suggestions: {info_source_suggestions['urls']}")
+
+
+async def get_relevant_linked_replies(
+        filtered_messages: list[dict[str, str]],
+        linked_reply_recall_task
+):
+    recalled_linked_reply_structs = await linked_reply_recall_task
+    if logger.level == logging.DEBUG:
+        logger.debug(f"Recalled linked reply summaries: {''.join(
+            ('\n - ' + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
+            for s in recalled_linked_reply_structs
+        )}")
+
+    bot_summary_texts = []
+    for s in recalled_linked_reply_structs:
+        if s["text"] not in bot_summary_texts:
+            bot_summary_texts.append(s["text"])
+
+    filtered_summaries = await filter_relevant_summaries(filtered_messages, bot_summary_texts)
+    logger.info(f"Relevant summaries: {''.join(
+        f'\n - {bot_summary_texts[idx]}' for idx in filtered_summaries['items']
+    )}")
+    # TODO: review messages linked to recalled summaries
+
+
 def get_storage_path(user_id: int, year: int, month: int, day: int,
                      data_dir: str = f"{germ_settings.GERM_DATA_DIR}/chat"):
     return f"{data_dir}/{user_id:05d}/{year}/{month:02d}/{day}"
@@ -530,18 +560,24 @@ async def suggest_best_online_info_source(
         candidates: list[str]
 ) -> dict[str, list[str]]:
     prompt = (
-        "You are a helpful curator of information on the Internet. "
-                                  
-        "Suggest the best website for finding something that would contribute meaningfully "
-        "to the conversation. "
-                                  
-        "Limit your suggestions to websites that work well with text-based browsers. "
+        "You are a curator of authoritative information on the Internet. "
+
+        "\n\nTask: "
+        "\n- Choose the best webpages for finding authoritative information to assist the user. "
+        
+        "\n\nGuidelines: "
+        "\n- Prioritize well maintained, trusted websites that are more likely to have stable URLs, and accurate, up-to-date information. "
+        "\n- Prioritize pages that don't require logins and are not gated behind paywalls. "
+        "\n- In cases where multiple URLs lead to the same content, pick only one. "
+
+        "\n\nOutput: "
+        "\n- Return only a JSON object conforming to the provided schema with a 'urls' attribute that is a list of recommended webpage URLs. "
     ).strip()
 
-    if candidates:
-        prompt += (
-                "\nConsider the following candidate(s):\n" + '\n'.join(f"- {c}" for c in candidates)
-        )
+    #if candidates:
+    #    prompt += (
+    #            "\nConsider the following candidate(s):\n" + '\n'.join(f"- {c}" for c in candidates)
+    #    )
 
     seen = set()
     suggestions = []
@@ -553,29 +589,29 @@ async def suggest_best_online_info_source(
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
-                        "name": "website",
+                        "name": "webpage",
                         "schema": {
                             "type": "object",
                             "properties": {
-                                "domains": {
+                                "urls": {
                                     "type": "array",
-                                    "description": "A list of website domain names.",
+                                    "description": "A list of recommended webpage URLs.",
                                     "items": {"type": "string"},
                                 }
                             },
                             "additionalProperties": False,
-                            "required": ["domains"]
+                            "required": ["urls"]
                         },
                         "strict": True,
                     }
                 },
                 n=1,
                 seed=germ_settings.OPENAI_SEED,
-                timeout=10.0,
+                timeout=30.0,
             )
             response_content = json.loads(response.choices[0].message.content)
-            assert "domains" in response_content, "Response does not contain 'domains'"
-            for dom in response_content["domains"]:
+            assert "urls" in response_content, "Response does not contain 'urls'"
+            for dom in response_content["urls"]:
                 if dom.strip() == "":
                     continue
                 elif dom in seen:
@@ -585,7 +621,7 @@ async def suggest_best_online_info_source(
                     suggestions.append(dom)
         except Exception:
             logger.error(f"Could not get best info source suggestions: {format_exc()}")
-    return {"domains": suggestions}
+    return {"urls": suggestions}
 
 
 async def suggest_keyword_phrases(
@@ -719,7 +755,7 @@ async def summarize_message_sent(
         "\n\nGuidelines: "
         "\n- Voice your summary as the assistant, addressing a person that is not the user. "
         "\n- Focus only on what was said, i.e. the core ideas, intent, or situations conveyed. "
-        "\n- Multiple statements may be appropriate, but only if what was said cannot be summarized clearly using a single statement. "
+        "\n- Multiple statements may be appropriate, but only if what was said cannot be summarized simply using a single statement. "
         "\n- Use complete and grammatically correct sentences. "
 
         "\n\nOutput: "
