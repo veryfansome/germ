@@ -89,7 +89,7 @@ class UserIntentClassifier:
     ).strip()
 
     @classmethod
-    async def suggest_user_intent(
+    async def classify_user_intent(
             cls, messages: list[dict[str, str]],
     ) -> dict[str, list[tuple[str, str]]]:
         intents: list[tuple[str, str]] = []
