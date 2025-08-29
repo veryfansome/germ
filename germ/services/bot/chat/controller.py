@@ -7,16 +7,15 @@ import numpy as np
 import re
 import time
 from datetime import datetime, timezone
-
 from opentelemetry import trace
 from pydantic import BaseModel
 from re import Pattern
-from redis.asyncio import Redis
 from starlette.concurrency import run_in_threadpool
 from traceback import format_exc
 from typing import Iterable
 
 from germ.api.models import ChatRequest, ChatResponse
+from germ.browser import fetch_page_text
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
 from germ.services.bot.chat import async_openai_client, openai_handlers
@@ -35,10 +34,9 @@ tracer = trace.get_tracer(__name__)
 
 class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                      WebSocketSendEventHandler, WebSocketSessionMonitor):
-    def __init__(self, knowledge_graph: KnowledgeGraph, redis: Redis):
+    def __init__(self, knowledge_graph: KnowledgeGraph):
         self.conversations: dict[int, Conversation] = {}
         self.knowledge_graph = knowledge_graph
-        self.redis = redis
 
     async def load_conversations(self, user_id: int, conversation_ids: Iterable[int]):
         if not conversation_ids:
@@ -133,7 +131,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         # Get replies linked to similar user messages
         linked_replies_task = asyncio.create_task(
-            get_relevant_linked_replies(filtered_messages, asyncio.create_task(
+            fetch_relevant_linked_replies(filtered_messages, asyncio.create_task(
                 self.knowledge_graph.match_reply_summaries_by_similarity_to_query_vector(
                     summary_emb_floats, [
                         # Exclude messages received from current conversation
@@ -161,11 +159,11 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         keyword_phrase_suggestions_task = None
 
         if has_informational_intent or has_instrumental_intent:
-            online_info_task = asyncio.create_task(get_online_info(filtered_messages))
+            online_info_task = asyncio.create_task(fetch_online_info(filtered_messages))
             pending_tasks.append(online_info_task)
 
             keyword_phrase_suggestions_task = asyncio.create_task(
-                get_keyword_phrase_suggestions(filtered_messages, asyncio.create_task(
+                fetch_keyword_phrase_suggestions(filtered_messages, asyncio.create_task(
                     self.knowledge_graph.match_keyword_phrases_by_similarity_to_query_vector(
                         # Ok to include previous phrases from current conversation
                         summary_emb_floats, recalled_user_message_structs, alpha=0.5, k=5,
@@ -432,6 +430,61 @@ async def dedup_summaries(statements: list[str]):
     return {"judgment": judgment}
 
 
+async def fetch_keyword_phrase_suggestions(
+        filtered_messages: list[dict[str, str]],
+        keyword_phrase_recall_task
+):
+    recalled_keyword_phase_structs = await keyword_phrase_recall_task
+    if logger.level == logging.DEBUG:
+        logger.debug(f"Recalled keyword phrases: {''.join(
+            ("\n - " + str((k['score'], k['text']))) for k in recalled_keyword_phase_structs
+        )}")
+
+    keyword_phrase_suggestions = await suggest_keyword_phrases(filtered_messages, [k["text"] for k in recalled_keyword_phase_structs])
+    logger.info(f"Search keyword suggestions: {keyword_phrase_suggestions['phrases']}")
+    return keyword_phrase_suggestions
+
+
+async def fetch_online_info(
+        filtered_messages: list[dict[str, str]],
+):
+    info_source_suggestions = await suggest_best_online_info_source(filtered_messages, [])
+    logger.info(f"Info source suggestions: {info_source_suggestions['urls']}")
+
+    page_text_fetch_tasks = {}
+    for url in info_source_suggestions['urls']:
+        page_text_fetch_tasks[url] = asyncio.create_task(fetch_page_text(url))
+    await asyncio.gather(*page_text_fetch_tasks.values())
+
+    for url, fetch_task in page_text_fetch_tasks.items():
+        final_url, text, resp_status = fetch_task.result()
+        if logger.level == logging.DEBUG:
+            logger.debug(f"Completed fetching {len(text)} characters of page text from {url}")
+
+
+async def fetch_relevant_linked_replies(
+        filtered_messages: list[dict[str, str]],
+        linked_reply_recall_task
+):
+    recalled_linked_reply_structs = await linked_reply_recall_task
+    if logger.level == logging.DEBUG:
+        logger.debug(f"Recalled linked reply summaries: {''.join(
+            ('\n - ' + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
+            for s in recalled_linked_reply_structs
+        )}")
+
+    bot_summary_texts = []
+    for s in recalled_linked_reply_structs:
+        if s["text"] not in bot_summary_texts:
+            bot_summary_texts.append(s["text"])
+
+    filtered_summaries = await filter_relevant_summaries(filtered_messages, bot_summary_texts)
+    logger.info(f"Relevant summaries: {''.join(
+        f'\n - {bot_summary_texts[idx]}' for idx in filtered_summaries['items']
+    )}")
+    # TODO: review messages linked to recalled summaries
+
+
 async def filter_relevant_summaries(
         messages: list[dict[str, str]],
         recalled_summaries: list[str],
@@ -504,50 +557,6 @@ async def filter_relevant_summaries(
 
 def get_data_file_name(conversation_id: int, year: int, month: int, day: int):
     return f"{conversation_id:011d}_{year}{month:02d}{day}.ndjson"
-
-
-async def get_keyword_phrase_suggestions(
-        filtered_messages: list[dict[str, str]],
-        keyword_phrase_recall_task
-):
-    recalled_keyword_phase_structs = await keyword_phrase_recall_task
-    logger.debug(f"Recalled keyword phrases: {''.join(
-        ("\n - " + str((k['score'], k['text']))) for k in recalled_keyword_phase_structs
-    )}")
-
-    keyword_phrase_suggestions = await suggest_keyword_phrases(filtered_messages, [k["text"] for k in recalled_keyword_phase_structs])
-    logger.info(f"Search keyword suggestions: {keyword_phrase_suggestions['phrases']}")
-    return keyword_phrase_suggestions
-
-
-async def get_online_info(
-        filtered_messages: list[dict[str, str]],
-):
-    info_source_suggestions = await suggest_best_online_info_source(filtered_messages, [])
-    logger.info(f"Info source suggestions: {info_source_suggestions['urls']}")
-
-
-async def get_relevant_linked_replies(
-        filtered_messages: list[dict[str, str]],
-        linked_reply_recall_task
-):
-    recalled_linked_reply_structs = await linked_reply_recall_task
-    if logger.level == logging.DEBUG:
-        logger.debug(f"Recalled linked reply summaries: {''.join(
-            ('\n - ' + str((s['score'], s['text'], s['conversation_id'], s['dt_created'])))
-            for s in recalled_linked_reply_structs
-        )}")
-
-    bot_summary_texts = []
-    for s in recalled_linked_reply_structs:
-        if s["text"] not in bot_summary_texts:
-            bot_summary_texts.append(s["text"])
-
-    filtered_summaries = await filter_relevant_summaries(filtered_messages, bot_summary_texts)
-    logger.info(f"Relevant summaries: {''.join(
-        f'\n - {bot_summary_texts[idx]}' for idx in filtered_summaries['items']
-    )}")
-    # TODO: review messages linked to recalled summaries
 
 
 def get_storage_path(user_id: int, year: int, month: int, day: int,

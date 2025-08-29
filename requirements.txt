@@ -13,6 +13,7 @@ huggingface_hub[hf_xet]
 itsdangerous
 jinja2
 jinja2-cli
+lxml
 markdown-it-py
 neo4j
 numpy
@@ -24,6 +25,7 @@ opentelemetry-instrumentation-httpx
 opentelemetry-instrumentation-redis
 opentelemetry-instrumentation-sqlalchemy
 opentelemetry-sdk
+playwright
 prometheus_client
 psycopg2-binary
 pydantic

@@ -83,7 +83,7 @@ async def lifespan(app: FastAPI):
     """
     logger.info("Starting")
 
-    chat_controller = ChatController(knowledge_graph, redis_client)
+    chat_controller = ChatController(knowledge_graph)
     websocket_manager.add_conversation_monitor(chat_controller)
     websocket_manager.add_receive_event_handler(chat_controller)
     websocket_manager.add_send_event_handler(chat_controller)
