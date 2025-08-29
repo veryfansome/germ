@@ -3,6 +3,7 @@ networks:
 
 volumes:
   germ-data: {}
+  germ-root-cache: {}
   grafana-storage: {}
 
 services:
@@ -24,6 +25,7 @@ services:
     volumes:
       - ./:/src:rw
       - germ-data:/opt/germ/data
+      - germ-root-cache:/root/.cache
     working_dir: /src
     environment: &local-dev
       GERM_LOG_LEVEL: ${GERM_LOG_LEVEL:-INFO}
@@ -253,5 +255,6 @@ services:
     image: "germ:latest"
     volumes:
       - ./:/src
+      - germ-root-cache:/root/.cache
     working_dir: /src
     command: [ "scripts/venv.sh" ]

@@ -3,6 +3,7 @@
 source germ_venv/bin/activate
 
 if grep -q 'germ.services.bot.main' <<<"$1"; then
+    python -m playwright install --with-deps chromium
     ./scripts/update-static-files.sh
 fi
 
