@@ -16,7 +16,7 @@ class ChatModelEventHandler(WebSocketReceiveEventHandler):
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(
-            self, user_id: int, conversation_id: int, dt_created: datetime,
+            self, session, conversation_id: int, dt_created: datetime,
             chat_request: ChatRequest, ws_sender: WebSocketSender
     ):
         if chat_request.model is None:
@@ -50,7 +50,7 @@ class ReasoningChatModelEventHandler(WebSocketReceiveEventHandler):
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
     async def on_receive(
-            self, user_id: int, conversation_id: int, dt_created: datetime,
+            self, session, conversation_id: int, dt_created: datetime,
             chat_request: ChatRequest, ws_sender: WebSocketSender
     ):
         if chat_request.model is None:

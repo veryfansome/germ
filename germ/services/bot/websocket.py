@@ -47,7 +47,7 @@ class WebSocketSender(ABC):
 
 class WebSocketReceiveEventHandler(ABC):
     @abstractmethod
-    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime,
+    async def on_receive(self, session, conversation_id: int, dt_created: datetime,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         pass
 
@@ -130,7 +130,7 @@ class WebSocketConnectionManager:
     def add_send_event_handler(self, handler: WebSocketSendEventHandler):
         self.send_event_handlers.append(handler)
 
-    async def connect(self, user_id: int, ws: WebSocket, conversation_ident: str = None) -> int | None:
+    async def connect(self, session, ws: WebSocket, conversation_ident: str = None) -> int | None:
         try:
             conversation_id = None if conversation_ident is None else decrypt_integer(conversation_ident, ENCRYPTION_KEY)
         except Exception:
@@ -138,18 +138,18 @@ class WebSocketConnectionManager:
 
         if (conversation_id is None
                 # Or stale/bad client-side data
-                or await self.conversation_not_found(conversation_id, user_id)
+                or await self.conversation_not_found(conversation_id, session["user_id"])
                 or conversation_id in self.active_connections):
-            conversation_id, dt_created = await self.new_conversation(user_id)
+            conversation_id, dt_created = await self.new_conversation(session["user_id"])
             await self.knowledge_graph.add_conversation(conversation_id, dt_created)
             asyncio.create_task(
-                self.knowledge_graph.link_chat_user_to_conversation(user_id, conversation_id)
+                self.knowledge_graph.link_chat_user_to_conversation(session["user_id"], conversation_id)
             )
         self.active_connections[conversation_id] = ws
 
         # Create and store a cancellation event, and start a monitor task
         cancel_event = asyncio.Event()
-        monitor_task = asyncio.create_task(self.monitor_conversation(user_id, conversation_id, ws, cancel_event))
+        monitor_task = asyncio.create_task(self.monitor_conversation(session, conversation_id, ws, cancel_event))
         self.monitor_tasks[conversation_id] = (monitor_task, cancel_event)
         return conversation_id
 
@@ -185,7 +185,7 @@ class WebSocketConnectionManager:
     async def disconnect_all(self):
         await asyncio.gather(*[self.disconnect(conversation_id) for conversation_id in self.active_connections])
 
-    async def monitor_conversation(self, user_id, conversation_id: int, ws: WebSocket, cancel_event: asyncio.Event):
+    async def monitor_conversation(self, session, conversation_id: int, ws: WebSocket, cancel_event: asyncio.Event):
         """
         Runs in the background to do periodic or event-driven checks.
         Closes automatically when cancel_event is set.
@@ -238,7 +238,7 @@ class WebSocketConnectionManager:
         return DefaultWebSocketSender(self.knowledge_graph, conversation_id, ws,
                                       send_event_handlers=self.send_event_handlers)
 
-    async def receive(self, ws: WebSocket, ws_sender: WebSocketSender, user_id: int, conversation_id: int):
+    async def receive(self, ws: WebSocket, ws_sender: WebSocketSender, session, conversation_id: int):
         try:
             chat_request = ChatRequest.model_validate(await ws.receive_json())
 
@@ -247,7 +247,9 @@ class WebSocketConnectionManager:
 
             async_tasks = ([
                 asyncio.create_task(
-                    self.knowledge_graph.link_chat_message_received_to_chat_user(conversation_id, dt_created, user_id)
+                    self.knowledge_graph.link_chat_message_received_to_chat_user(
+                        conversation_id, dt_created, session["user_id"]
+                    )
                 ),
                 asyncio.create_task(
                     self.knowledge_graph.link_chat_message_to_conversation(conversation_id, dt_created)
@@ -255,7 +257,7 @@ class WebSocketConnectionManager:
             ])
             async_tasks.extend(
                 asyncio.create_task(
-                    handler.on_receive(user_id, conversation_id, dt_created, chat_request, ws_sender)
+                    handler.on_receive(session, conversation_id, dt_created, chat_request, ws_sender)
                 )
                 for handler in self.receive_event_handlers
             )
@@ -263,12 +265,12 @@ class WebSocketConnectionManager:
         except WebSocketDisconnect:
             raise  # Pass through WebSocketDisconnect to the caller
         except Exception:
-            logger.error(f"Error in conversation {conversation_id} with user {user_id}.\n{format_exc()}")
+            logger.error(f"Error in conversation {conversation_id} with user {session['user_id']}.\n{format_exc()}")
             await ws_sender.send_message(
                 ChatResponse(complete=True, content="An error occurred while processing your request.", error=True)
             )
 
-    async def wait_for_receive(self, user_id: int, conversation_id: int):
+    async def wait_for_receive(self, session, conversation_id: int):
         ws: WebSocket = self.active_connections[conversation_id]
         ws_sender = self.new_ws_sender(conversation_id, ws)
         try:
@@ -277,12 +279,12 @@ class WebSocketConnectionManager:
             )
             while True:
                 await asyncio.wait_for(
-                    self.receive(ws, ws_sender, user_id, conversation_id),
+                    self.receive(ws, ws_sender, session, conversation_id),
                     timeout=GERM_WEBSOCKET_IDLE_TIMEOUT
                 )
         except asyncio.TimeoutError:
-            logger.info(f"Conversation {conversation_id} with user {user_id} timed out.")
+            logger.info(f"Conversation {conversation_id} with user {session['user_id']} timed out.")
             await self.disconnect(conversation_id)
         except WebSocketDisconnect:
-            logger.info(f"Conversation {conversation_id} with user {user_id} disconnected.")
+            logger.info(f"Conversation {conversation_id} with user {session['user_id']} disconnected.")
             await self.disconnect(conversation_id, close_ws=False)  # Skip close since already disconnected

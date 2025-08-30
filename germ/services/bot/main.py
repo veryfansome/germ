@@ -22,6 +22,7 @@ from starsessions.stores.redis import RedisStore
 from typing import List
 from urllib.parse import urlencode
 
+from germ.browser import WebBrowser
 from germ.database.neo4j import KnowledgeGraph
 from germ.database.pg import DATABASE_URL, TableHelper
 from germ.observability.logging import logging, setup_logging
@@ -83,7 +84,10 @@ async def lifespan(app: FastAPI):
     """
     logger.info("Starting")
 
-    chat_controller = ChatController(knowledge_graph)
+    web_browser = WebBrowser()
+    await web_browser.start()
+
+    chat_controller = ChatController(knowledge_graph, web_browser)
     websocket_manager.add_conversation_monitor(chat_controller)
     websocket_manager.add_receive_event_handler(chat_controller)
     websocket_manager.add_send_event_handler(chat_controller)
@@ -101,6 +105,7 @@ async def lifespan(app: FastAPI):
         knowledge_graph.shutdown(),
         pg_async_engine.dispose(),
         redis_client.close(),
+        web_browser.stop(),
     ])
     pg_sync_engine.dispose()
 
@@ -219,10 +224,11 @@ async def post_login_form(request: Request, username: str = Form(...), password:
         error_params = urlencode({"error": "Invalid password."})
         logger.error(f"Invalid password: {username}")
     else:
+        user_agent = request.headers.get("User-Agent")
         user_id = await auth_helper.get_user_id(username)
         await load_session_task
         request.session.clear()
-        request.session.update({"user_id": user_id, "username": username})
+        request.session.update({"user_agent": user_agent, "user_id": user_id, "username": username})
         logger.info(f"{username} logged in")
         return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(f"/login?{error_params}", status_code=status.HTTP_303_SEE_OTHER)
@@ -238,6 +244,7 @@ async def post_register(request:  Request, username: str = Form(...), password: 
         error_params = urlencode({"error": "'Password' and 'Verify password' did not match."})
         logger.error(f"Mistyped password: {username}")
     else:
+        user_agent = request.headers.get("User-Agent")
         user_id, dt_created = await auth_helper.add_new_user(username, password)
         if user_id is None:
             error_params = urlencode({"error": "Failed to create new user."})
@@ -246,7 +253,7 @@ async def post_register(request:  Request, username: str = Form(...), password: 
             await knowledge_graph.add_chat_user(user_id, dt_created)
             await load_session_task
             request.session.clear()
-            request.session.update({"user_id": user_id, "username": username})
+            request.session.update({"user_agent": user_agent, "user_id": user_id, "username": username})
             logger.info(f"Registered new user {username}")
             return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(f"/register?{error_params}", status_code=status.HTTP_303_SEE_OTHER)
@@ -284,15 +291,14 @@ async def websocket_chat(ws: WebSocket):
     if not session or "user_id" not in session:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION)
         return
-    user_id = session["user_id"]
     if "conversation_ident" in ws.url.query:
         query_params = dict(map(lambda s: s.split('='), ws.url.query.split('&')))
         conversation_id = await websocket_manager.connect(
-            user_id, ws, conversation_ident=query_params["conversation_ident"]
+            session, ws, conversation_ident=query_params["conversation_ident"]
         )
         if conversation_id is None:
             await ws.close(code=status.WS_1003_UNSUPPORTED_DATA)
             return
     else:
-        conversation_id = await websocket_manager.connect(user_id, ws)
-    await websocket_manager.wait_for_receive(user_id, conversation_id)
+        conversation_id = await websocket_manager.connect(session, ws)
+    await websocket_manager.wait_for_receive(session, conversation_id)
