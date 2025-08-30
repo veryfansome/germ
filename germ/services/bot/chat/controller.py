@@ -15,7 +15,7 @@ from traceback import format_exc
 from typing import Iterable
 
 from germ.api.models import ChatRequest, ChatResponse
-from germ.browser import fetch_page_text
+from germ.browser import WebBrowser
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
 from germ.services.bot.chat import async_openai_client, openai_handlers
@@ -34,9 +34,26 @@ tracer = trace.get_tracer(__name__)
 
 class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                      WebSocketSendEventHandler, WebSocketSessionMonitor):
-    def __init__(self, knowledge_graph: KnowledgeGraph):
+    def __init__(self, knowledge_graph: KnowledgeGraph, web_browser: WebBrowser):
         self.conversations: dict[int, Conversation] = {}
         self.knowledge_graph = knowledge_graph
+        self.web_browser = web_browser
+
+    async def fetch_online_info(
+            self, filtered_messages: list[dict[str, str]], user_agent: str,
+    ):
+        info_source_suggestions = await suggest_best_online_info_source(filtered_messages, [])
+        logger.info(f"Info source suggestions: {info_source_suggestions['urls']}")
+
+        page_text_fetch_tasks = {}
+        for url in info_source_suggestions['urls']:
+            page_text_fetch_tasks[url] = asyncio.create_task(self.web_browser.fetch(url, user_agent))
+        await asyncio.gather(*page_text_fetch_tasks.values())
+
+        for url, fetch_task in page_text_fetch_tasks.items():
+            final_url, text, resp_status = fetch_task.result()
+            if logger.level == logging.DEBUG:
+                logger.debug(f"Completed fetching {len(text)} characters of page text from {url}")
 
     async def load_conversations(self, user_id: int, conversation_ids: Iterable[int]):
         if not conversation_ids:
@@ -65,11 +82,11 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         pass
 
     @measure_exec_seconds(use_logging=True, use_prometheus=True)
-    async def on_receive(self, user_id: int, conversation_id: int, dt_created: datetime,
+    async def on_receive(self, session, conversation_id: int, dt_created: datetime,
                          chat_request: ChatRequest, ws_sender: WebSocketSender):
         if conversation_id not in self.conversations:
             self.conversations[conversation_id] = Conversation(
-                conversation_id=conversation_id, user_id=user_id,
+                conversation_id=conversation_id, user_id=session["user_id"],
             )
 
         if chat_request.uploaded_filenames:
@@ -78,7 +95,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 pass
 
         message_doc = await run_in_threadpool(ParsedDoc.from_text, chat_request.messages[-1].content)
-        self.conversations[conversation_id].messages[dt_created] = (user_id, message_doc)
+        self.conversations[conversation_id].messages[dt_created] = (session["user_id"], message_doc)
         # TODO: code block summarization
 
         filtered_messages: list[dict[str, str]] = [m.model_dump() for m in chat_request.messages if m.role != "system"]
@@ -106,7 +123,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             recalled_user_message_structs,  # user messages similar to summary_emb
         ) = await asyncio.gather(
             self.knowledge_graph.match_user_message_summaries_by_similarity_to_query_vector(
-                user_id, summary_emb_floats, k=15, min_similarity=min_similarity,
+                session["user_id"], summary_emb_floats, k=15, min_similarity=min_similarity,
             ),
         )
         if logger.level == logging.DEBUG:
@@ -118,7 +135,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         # Pull old conversations from storage
         pending_tasks = [
             asyncio.create_task(self.load_conversations(
-                user_id,
+                session["user_id"],
                 {
                     s["conversation_id"] for s in recalled_user_message_structs
                     if s["conversation_id"] != conversation_id and s["conversation_id"] not in self.conversations
@@ -159,7 +176,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         keyword_phrase_suggestions_task = None
 
         if has_informational_intent or has_instrumental_intent:
-            online_info_task = asyncio.create_task(fetch_online_info(filtered_messages))
+            online_info_task = asyncio.create_task(self.fetch_online_info(filtered_messages, session["user_agent"]))
             pending_tasks.append(online_info_task)
 
             keyword_phrase_suggestions_task = asyncio.create_task(
@@ -179,7 +196,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             (
                 openai_handlers.ReasoningChatModelEventHandler() if germ_settings.OPENAI_REASONING_MODEL
                 else openai_handlers.ChatModelEventHandler()
-            ).on_receive(user_id, conversation_id, dt_created, chat_request, ws_sender),
+            ).on_receive(session, conversation_id, dt_created, chat_request, ws_sender),
 
             # House-keeping
             self.knowledge_graph.add_user_message_intent(conversation_id, dt_created, user_intent_labels['intents']),
@@ -187,7 +204,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 conversation_id, dt_created,
                 [] if not keyword_phrase_suggestions_task else keyword_phrase_suggestions_task.result()["phrases"]
             ),
-            self.persist_message(user_id, conversation_id, dt_created, message_doc),
+            self.persist_message(session["user_id"], conversation_id, dt_created, message_doc),
             self.persist_message_summary(
                 conversation_id, dt_created, 0,
                 summary_text, summary_emb_floats, recalled_user_message_structs
@@ -443,23 +460,6 @@ async def fetch_keyword_phrase_suggestions(
     keyword_phrase_suggestions = await suggest_keyword_phrases(filtered_messages, [k["text"] for k in recalled_keyword_phase_structs])
     logger.info(f"Search keyword suggestions: {keyword_phrase_suggestions['phrases']}")
     return keyword_phrase_suggestions
-
-
-async def fetch_online_info(
-        filtered_messages: list[dict[str, str]],
-):
-    info_source_suggestions = await suggest_best_online_info_source(filtered_messages, [])
-    logger.info(f"Info source suggestions: {info_source_suggestions['urls']}")
-
-    page_text_fetch_tasks = {}
-    for url in info_source_suggestions['urls']:
-        page_text_fetch_tasks[url] = asyncio.create_task(fetch_page_text(url))
-    await asyncio.gather(*page_text_fetch_tasks.values())
-
-    for url, fetch_task in page_text_fetch_tasks.items():
-        final_url, text, resp_status = fetch_task.result()
-        if logger.level == logging.DEBUG:
-            logger.debug(f"Completed fetching {len(text)} characters of page text from {url}")
 
 
 async def fetch_relevant_linked_replies(
