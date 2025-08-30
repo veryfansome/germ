@@ -15,7 +15,7 @@ from traceback import format_exc
 from typing import Iterable
 
 from germ.api.models import ChatRequest, ChatResponse
-from germ.browser import WebBrowser
+from germ.browser import FetchResult, WebBrowser
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
 from germ.services.bot.chat import async_openai_client, openai_handlers
@@ -40,20 +40,21 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.web_browser = web_browser
 
     async def fetch_online_info(
-            self, filtered_messages: list[dict[str, str]], user_agent: str,
+            self, filtered_messages: list[dict[str, str]], accept_language: str, user_agent: str,
     ):
         info_source_suggestions = await suggest_best_online_info_source(filtered_messages, [])
         logger.info(f"Info source suggestions: {info_source_suggestions['urls']}")
 
-        page_text_fetch_tasks = {}
-        for url in info_source_suggestions['urls']:
-            page_text_fetch_tasks[url] = asyncio.create_task(self.web_browser.fetch(url, user_agent))
-        await asyncio.gather(*page_text_fetch_tasks.values())
-
-        for url, fetch_task in page_text_fetch_tasks.items():
-            final_url, text, resp_status = fetch_task.result()
+        coroutines = [self.web_browser.fetch(url, accept_language, user_agent)
+                      for url in info_source_suggestions["urls"]]
+        results = await asyncio.gather(*coroutines, return_exceptions=True)
+        for url, result in zip(info_source_suggestions["urls"], results):
+            if isinstance(result, Exception):
+                logger.error(f"Failed to fetch {url}", exc_info=result)
+                continue
             if logger.level == logging.DEBUG:
-                logger.debug(f"Completed fetching {len(text)} characters of page text from {url}")
+                logger.debug(f"Fetched {len(result.text)} characters of page text: "
+                             f"{result.status_code} {result.content_type} {result.extraction_status} {result.url}")
 
     async def load_conversations(self, user_id: int, conversation_ids: Iterable[int]):
         if not conversation_ids:
@@ -176,7 +177,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         keyword_phrase_suggestions_task = None
 
         if has_informational_intent or has_instrumental_intent:
-            online_info_task = asyncio.create_task(self.fetch_online_info(filtered_messages, session["user_agent"]))
+            online_info_task = asyncio.create_task(self.fetch_online_info(
+                filtered_messages, session["accept_language"], session["user_agent"]
+            ))
             pending_tasks.append(online_info_task)
 
             keyword_phrase_suggestions_task = asyncio.create_task(
