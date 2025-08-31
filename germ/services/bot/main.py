@@ -225,13 +225,13 @@ async def post_login_form(request: Request, username: str = Form(...), password:
         error_params = urlencode({"error": "Invalid password."})
         logger.error(f"Invalid password: {username}")
     else:
-        accept_language = request.headers.get("Accept-Language")
         user_agent = request.headers.get("User-Agent")
         user_id = await auth_helper.get_user_id(username)
         await load_session_task
         request.session.clear()
         request.session.update({
-            "accept_language": accept_language,
+            "headers": {k.lower(): v for k, v in request.headers.items()
+                        if k.lower().startswith("accept") or k.lower().startswith("sec")},
             "user_agent": user_agent,
             "user_id": user_id,
             "username": username
@@ -251,7 +251,6 @@ async def post_register(request:  Request, username: str = Form(...), password: 
         error_params = urlencode({"error": "'Password' and 'Verify password' did not match."})
         logger.error(f"Mistyped password: {username}")
     else:
-        accept_language = request.headers.get("Accept-Language")
         user_agent = request.headers.get("User-Agent")
         user_id, dt_created = await auth_helper.add_new_user(username, password)
         if user_id is None:
@@ -262,7 +261,8 @@ async def post_register(request:  Request, username: str = Form(...), password: 
             await load_session_task
             request.session.clear()
             request.session.update({
-                "accept_language": accept_language,
+                "headers": {k.lower(): v for k, v in request.headers.items()
+                            if k.lower().startswith("accept") or k.lower().startswith("sec")},
                 "user_agent": user_agent,
                 "user_id": user_id,
                 "username": username

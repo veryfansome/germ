@@ -5,9 +5,9 @@ from bs4 import BeautifulSoup
 from collections import OrderedDict
 from contextlib import suppress
 from enum import Enum
-from playwright.async_api import Browser, BrowserContext, Page, Playwright, Response, async_playwright
+from playwright.async_api import Browser, BrowserContext, Page, Playwright, Request, Response, Route, async_playwright
 from pydantic import BaseModel
-from urllib.parse import SplitResult, urlsplit
+from urllib.parse import SplitResult, urlparse, urlsplit
 
 from germ.utils import TimeBudget
 
@@ -28,7 +28,7 @@ class TextExtractionStatus(Enum):
 
 
 class WebBrowser:
-    def __init__(self, max_context: int = 4):
+    def __init__(self, max_context: int = 24):
         self._browser: Browser | None = None
         self._cache = {}
         self._context_lock: asyncio.Lock = asyncio.Lock()
@@ -37,54 +37,60 @@ class WebBrowser:
         self._playwright: Playwright | None = None
 
     async def _get_or_create_context(
-            self, url_split: SplitResult, accept_language: str, user_agent: str
+            self, url_split: SplitResult, user_agent: str, extra_headers: dict[str, str]
     ) -> BrowserContext:
+        context_key = (url_split.scheme, url_split.hostname, url_split.port)
         async with self._context_lock:
-            if (url_split.scheme, url_split.hostname, url_split.port) in self._contexts:
+            if context_key in self._contexts:
                 # LRU: mark as recently used
-                context = self._contexts.pop((url_split.scheme, url_split.hostname, url_split.port))
-                self._contexts[(url_split.scheme, url_split.hostname, url_split.port)] = context
+                context = self._contexts.pop(context_key)
+                self._contexts[context_key] = context
                 return context
 
-            locale_parts = accept_language.split(",")
+            locale = "en-US"
+            if "accept-language" in extra_headers:
+                locale = extra_headers["accept-language"].split(",", 1)[0].split(";", 1)[0].strip()
             context = await self._browser.new_context(
-                locale="en-US" if len(locale_parts) == 1 else locale_parts[0],  # Fallback to en-US
+                extra_http_headers={
+                    "upgrade-insecure-requests": "1",
+                    **extra_headers,   # accept*, sec-fetch-*, and sec-ch-ua*
+                },
+                locale=locale,
+                service_workers="block",
                 user_agent=user_agent,
             )
-            # Abort non-essential requests
-            await context.route("**/*", lambda r: (
-                r.abort()
-                if r.request.resource_type in {"image", "media", "font"} or
-                   any(d in r.request.url for d in ["ads.", "doubleclick", "metrics", "analytics"])
-                else r.continue_()
-            ))
-            self._contexts[(url_split.scheme, url_split.hostname, url_split.port)] = context
+            # Performance optimization using route blocker to abort non-essential requests
+            await context.route("**/*", _route_blocker)
+            self._contexts[context_key] = context
 
             # Evict if over capacity
             contexts_to_close = []
             while len(self._contexts) > self._max_context:
-                _, context_to_expire = self._contexts.popitem(last=False)
-                contexts_to_close.append(context_to_expire.close())
+                key_to_expire, context_to_expire = self._contexts.popitem(last=False)
+                if len(context_to_expire.pages) == 0:
+                    contexts_to_close.append(context_to_expire.close())
+                else:
+                    # Put it back since we can’t evict now
+                    self._contexts[key_to_expire] = context_to_expire
+                    break
 
         await asyncio.gather(*contexts_to_close)
         return context
 
     async def fetch(
-            self, url: str, accept_language: str, user_agent: str,
-            enforce_https: bool = False,
-            timeout_ms: int = 15000,
-            wait_selector: str | None = None,
+            self, url: str, user_agent: str, extra_headers: dict[str, str],
+            timeout_ms: int = 15000, wait_selector: str | None = None,
     ) -> FetchResult:
         time_budget = TimeBudget.from_ms(timeout_ms)
 
         url_parts = urlsplit(url)
         if url_parts.hostname is None:
             raise RuntimeError(f"Invalid URL: {url}")
-        if not url_parts.scheme or (url_parts.scheme == "http" and enforce_https):
-            url_parts.scheme = "https"
+        if not url_parts.scheme:
+            url_parts = urlsplit(f"https://{url}")
 
         url = url_parts.geturl()
-        context = await self._get_or_create_context(url_parts, accept_language, user_agent)
+        context = await self._get_or_create_context(url_parts, user_agent, extra_headers)
         page: Page = await context.new_page()
         try:
             resp: Response | None = await page.goto(
@@ -138,9 +144,9 @@ class WebBrowser:
 
         try:
             if wait_selector:
-                await page.wait_for_selector(wait_selector, timeout=text_extraction_budget)
+                await page.wait_for_selector(wait_selector, state="visible", timeout=text_extraction_budget)
             else:
-                await wait_for_page_to_settle(page, max_ms=text_extraction_budget)
+                await _wait_for_page_to_settle(page, max_ms=text_extraction_budget)
 
             dom_text = await page.inner_text("body", timeout=time_budget.remaining_ms())
 
@@ -165,9 +171,9 @@ class WebBrowser:
                     url=page.url
                 )
             elif len(html) > 100_000:  # Threshold for offloading larger docs to unblock event loop
-                dom_text = extract_visible_text_from_html(html)
+                dom_text = await asyncio.to_thread(_extract_visible_text_from_html, html)
             else:
-                dom_text = await asyncio.to_thread(extract_visible_text_from_html, html)
+                dom_text = _extract_visible_text_from_html(html)
             return FetchResult(
                 content_type=resp_content_type,
                 extraction_status=TextExtractionStatus.DONE,
@@ -191,7 +197,7 @@ class WebBrowser:
             await self._playwright.stop()
 
 
-def extract_visible_text_from_html(html: str) -> str:
+def _extract_visible_text_from_html(html: str) -> str:
     soup = BeautifulSoup(html, "lxml")
     for tag in soup(["script", "style", "noscript", "template"]):
         tag.decompose()
@@ -200,7 +206,31 @@ def extract_visible_text_from_html(html: str) -> str:
     return re.sub(r"\n{2,}", "\n\n", text)
 
 
-async def wait_for_page_to_settle(page: Page, quiet_ms: int = 800, max_ms: int = 10000):
+async def _route_blocker(route: Route, request: Request):
+    rtype = request.resource_type
+    if rtype in {
+        "beacon",
+        "font",
+        "image",
+        "media",
+    }:
+        await route.abort()
+        return
+
+    request_hostname = (urlparse(request.url).hostname or "").lower()
+    blocked_hosts = (
+        "doubleclick.net", "googletagmanager.com", "google-analytics.com",
+        "adservice.google.com", "facebook.net", "mixpanel.com",
+    )
+    # Avoid breaking primary navigations; only block non-navigation subresources.
+    if any(request_hostname.endswith(h) for h in blocked_hosts) and not request.is_navigation_request():
+        await route.abort()
+        return
+
+    await route.continue_()
+
+
+async def _wait_for_page_to_settle(page: Page, quiet_ms: int = 2000, max_ms: int = 10000):
     # 1. Initial HTML is parsed and most sub-resources (images, stylesheets, iframes) have finished loading.
     # 2. Network idleness and DOM quiet period as a best-effort proxy for completion of client-side rendering.
     time_budget = TimeBudget.from_ms(max_ms)

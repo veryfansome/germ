@@ -40,12 +40,12 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         self.web_browser = web_browser
 
     async def fetch_online_info(
-            self, filtered_messages: list[dict[str, str]], accept_language: str, user_agent: str,
+            self, filtered_messages: list[dict[str, str]], user_agent: str, extra_headers: dict[str, str]
     ):
         info_source_suggestions = await suggest_best_online_info_source(filtered_messages, [])
         logger.info(f"Info source suggestions: {info_source_suggestions['urls']}")
 
-        coroutines = [self.web_browser.fetch(url, accept_language, user_agent)
+        coroutines = [self.web_browser.fetch(url, user_agent, extra_headers)
                       for url in info_source_suggestions["urls"]]
         results = await asyncio.gather(*coroutines, return_exceptions=True)
         for url, result in zip(info_source_suggestions["urls"], results):
@@ -178,7 +178,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         if has_informational_intent or has_instrumental_intent:
             online_info_task = asyncio.create_task(self.fetch_online_info(
-                filtered_messages, session["accept_language"], session["user_agent"]
+                filtered_messages, session["user_agent"], session["headers"]
             ))
             pending_tasks.append(online_info_task)
 
