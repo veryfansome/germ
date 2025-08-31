@@ -162,6 +162,7 @@ async def get_landing(request: Request):
     session = request.session
     if not session:
         return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    logger.info(f"Headers: {request.headers}")
     file_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
     return FileResponse(
         file_path,
@@ -228,7 +229,13 @@ async def post_login_form(request: Request, username: str = Form(...), password:
         user_id = await auth_helper.get_user_id(username)
         await load_session_task
         request.session.clear()
-        request.session.update({"user_agent": user_agent, "user_id": user_id, "username": username})
+        request.session.update({
+            "headers": {k.lower(): v for k, v in request.headers.items()
+                        if k.lower().startswith("accept") or k.lower().startswith("sec")},
+            "user_agent": user_agent,
+            "user_id": user_id,
+            "username": username
+        })
         logger.info(f"{username} logged in")
         return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(f"/login?{error_params}", status_code=status.HTTP_303_SEE_OTHER)
@@ -253,7 +260,13 @@ async def post_register(request:  Request, username: str = Form(...), password: 
             await knowledge_graph.add_chat_user(user_id, dt_created)
             await load_session_task
             request.session.clear()
-            request.session.update({"user_agent": user_agent, "user_id": user_id, "username": username})
+            request.session.update({
+                "headers": {k.lower(): v for k, v in request.headers.items()
+                            if k.lower().startswith("accept") or k.lower().startswith("sec")},
+                "user_agent": user_agent,
+                "user_id": user_id,
+                "username": username
+            })
             logger.info(f"Registered new user {username}")
             return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(f"/register?{error_params}", status_code=status.HTTP_303_SEE_OTHER)

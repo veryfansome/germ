@@ -4,7 +4,6 @@ from transformers.utils.constants import OPENAI_CLIP_STD, OPENAI_CLIP_MEAN
 
 # Service
 
-GERM_BROWSER_LOCALE = os.environ.get("GERM_BROWSER_LOCALE", "en-US")
 GERM_DATA_DIR = os.environ.get("GERM_DATA_DIR", "/opt/germ/data")
 GERM_ENCRYPTION_PASSWORD = os.getenv("GERM_ENCRYPTION_PASSWORD", "0Bfusc8")
 GERM_LOG_LEVEL = os.getenv("GERM_LOG_LEVEL", "INFO")
