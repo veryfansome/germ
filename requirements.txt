@@ -36,6 +36,7 @@ pytest-xdist
 python-dotenv
 python-multipart
 redis
+readability-lxml
 sentence-transformers
 sqlalchemy[asyncio]
 starlette
