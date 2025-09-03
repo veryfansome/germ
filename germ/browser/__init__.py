@@ -374,9 +374,16 @@ def _normalize_whitespace(text: str) -> str:
 def _process_content_html(html: str, base_url: str) -> str:
     soup = BeautifulSoup(html, "lxml")
 
-    # Strip code line-number scaffolding
     for sel in [
-        '.hljs-ln-numbers'
+        "script,style,noscript,template",
+        # common site chrome that sometimes slips into Readability content
+        ".breadcrumb, [class*=breadcrumb], [id*=breadcrumb]",
+        ".feedback, [class*=feedback], [id*=feedback]",
+        ".sr-only, .visually-hidden",
+        ".toc, [class*=toc], [id*=toc]",
+        ".toolbar, [class*=toolbar], [id*=toolbar]",
+        # Strip code line-number scaffolding
+        '.hljs-ln-numbers',
         '.line-numbers',
         '.linenodiv',
         'table.linenos',
@@ -385,6 +392,10 @@ def _process_content_html(html: str, base_url: str) -> str:
     ]:
         for el in soup.select(sel):
             el.decompose()
+
+    # Normalize <br> into explicit newlines
+    for br in soup.find_all("br"):
+        br.replace_with("\n")
 
     # Convert data tables to Markdown
     for tbl in soup.find_all("table"):
@@ -486,8 +497,7 @@ def _process_content_html(html: str, base_url: str) -> str:
         a.insert_after(soup.new_string(f" ({parsed_href.geturl()})"))
         a.unwrap()
 
-    # Keep pre/code; flatten tables to text
-    text = soup.get_text(separator="\n", strip=True)
+    text = soup.get_text()
     text = _normalize_whitespace(text)
     return text
 
