@@ -56,7 +56,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             if logger.level == logging.DEBUG:
                 logger.debug(f"Fetched {len(result.text)} characters of page text: "
                              f"{result.status_code} {result.content_type} {result.extraction_status} {result.url}")
-                logger.debug((result.title, result.text))
+                logger.debug((result.title, f"{result.text[:10000]}...[truncated]\n"))
 
     async def load_conversations(self, user_id: int, conversation_ids: Iterable[int]):
         if not conversation_ids:
