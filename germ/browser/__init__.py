@@ -332,6 +332,52 @@ def _extract_content_html_with_readability_lxml(html: str) -> tuple[str, str]:
     return title, content_html
 
 
+def _extract_html_li_text(li: bs4.element.Tag) -> str:
+    parts = []
+    for child in li.contents:
+        if isinstance(child, bs4.element.NavigableString):
+            s = str(child).strip()
+            if s:
+                parts.append(s)
+        elif isinstance(child, bs4.element.Tag) and child.name not in ('ul', 'ol'):
+            s = child.get_text()
+            if s:
+                parts.append(s)
+    return ' '.join(parts).strip()
+
+
+def _html_list_to_markdown(list_tag: bs4.element.Tag, level: int = 0) -> list[str]:
+    lines = []
+    is_ordered = (list_tag.name == 'ol')
+
+    # Determine starting index for ordered lists (default 1)
+    start = 1
+    if is_ordered and list_tag.has_attr('start'):
+        try:
+            start = int(list_tag['start'])
+        except ValueError:
+            start = 1
+
+    index = start
+    for li in list_tag.find_all('li', recursive=False):
+        text = _extract_html_li_text(li)
+        indent = "  " * level
+        if is_ordered:
+            prefix = f"{index}. "
+        else:
+            prefix = "- "
+        # Add the current list item line (avoid trailing space if text is empty)
+        lines.append(f"{indent}{prefix}{text}".rstrip())
+
+        # Handle nested lists directly under this li
+        for sub_list in li.find_all(['ul', 'ol'], recursive=False):
+            lines.extend(_html_list_to_markdown(sub_list, level + 1))
+
+        if is_ordered:
+            index += 1
+    return lines
+
+
 async def _normalize_math_to_tex(page: Page):
     with suppress(Exception):
         # MathJax v3+: wait and replace rendered math with TeX
@@ -375,27 +421,47 @@ def _process_content_html(html: str, base_url: str) -> str:
     soup = BeautifulSoup(html, "lxml")
 
     for sel in [
+        "button",
+        "devsite-feature-tooltip",
         "script,style,noscript,template",
-        # common site chrome that sometimes slips into Readability content
-        ".breadcrumb, [class*=breadcrumb], [id*=breadcrumb]",
-        ".feedback, [class*=feedback], [id*=feedback]",
-        ".sr-only, .visually-hidden",
-        ".toc, [class*=toc], [id*=toc]",
-        ".toolbar, [class*=toolbar], [id*=toolbar]",
-        # Strip code line-number scaffolding
-        '.hljs-ln-numbers',
-        '.line-numbers',
-        '.linenodiv',
-        'table.linenos',
-        'td.gutter',
-        'td.linenos',
+        ## common site chrome that sometimes slips into Readability content
+        #".breadcrumb, [class*=breadcrumb], [id*=breadcrumb]",
+        #".feedback, [class*=feedback], [id*=feedback]",
+        #".sr-only, .visually-hidden",
+        #".toc, [class*=toc], [id*=toc]",
+        #".toolbar, [class*=toolbar], [id*=toolbar]",
+        ## Strip code line-number scaffolding
+        #'.hljs-ln-numbers',
+        #'.line-numbers',
+        #'.linenodiv',
+        #'table.linenos',
+        #'td.gutter',
+        #'td.linenos',
     ]:
         for el in soup.select(sel):
             el.decompose()
 
     # Normalize <br> into explicit newlines
     for br in soup.find_all("br"):
-        br.replace_with("\n")
+        br.replace_with(soup.new_string("\n"))
+
+    # Convert headings to Markdown
+    for tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+        for el in soup.find_all(tag):
+            el_text = el.get_text(separator=" ", strip=True)
+            el.replace_with(soup.new_string(f"\n{int(tag.lstrip('h')) * '#'} {el_text}\n"))
+
+    for el in soup.find_all("code"):
+        el_text = el.get_text(separator=" ", strip=True)
+        el.replace_with(soup.new_string(f"`{el_text}`"))
+
+    for el in soup.find_all("pre"):
+        el_text = el.get_text(separator=" ", strip=True)
+        el.replace_with(soup.new_string(f"\n```\n{el_text}\n```\n"))
+
+    for tag in {'ol', 'ul'}:
+        for el in soup.select(tag, recursive=False):
+            el.replace_with(soup.new_string('\n'.join(ln for ln in _html_list_to_markdown(el) if ln is not None)))
 
     # Convert data tables to Markdown
     for tbl in soup.find_all("table"):
@@ -409,7 +475,8 @@ def _process_content_html(html: str, base_url: str) -> str:
             # some themes use first row as headers
             first = tbl.find("tr")
             if first and first.find_all("th"):
-                headers = [c.get_text(separator=" ", strip=True) for c in first.find_all(["th","td"], recursive=False)]
+                headers = [c.get_text(separator=" ", strip=True)
+                           for c in first.find_all(["th","td"], recursive=False)]
 
         rows = []
         if headers:
@@ -497,7 +564,8 @@ def _process_content_html(html: str, base_url: str) -> str:
         a.insert_after(soup.new_string(f" ({parsed_href.geturl()})"))
         a.unwrap()
 
-    text = soup.get_text()
+    #text = soup.get_text()
+    text = str(soup)
     text = _normalize_whitespace(text)
     return text
 
