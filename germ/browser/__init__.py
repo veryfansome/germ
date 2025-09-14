@@ -13,7 +13,6 @@ from pathlib import Path
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, Request, Response, Route, async_playwright
 from prometheus_client import Gauge
 from pydantic import BaseModel
-from readability import Document
 from urllib.parse import SplitResult, parse_qsl, urlencode, urljoin, urlparse, urlsplit
 
 from germ.utils import TimeBudget
@@ -42,7 +41,6 @@ class FetchResult(BaseModel):
     extraction_status: "TextExtractionStatus"
     status_code: int | None
     text: str
-    title: str = ""
     url: str
 
 
@@ -189,7 +187,7 @@ class WebBrowser:
                 content_type=resp_content_type,
                 extraction_status=TextExtractionStatus.PASSED_THROUGH_NOT_TEXT,
                 status_code=resp_status,
-                text=_normalize_whitespace(resp_text),
+                text=_normalize_newlines(resp_text),
                 url=page.url
             )
 
@@ -221,14 +219,8 @@ class WebBrowser:
             ))
 
             await _expand_interactive_docs(page)
-            await _normalize_math_to_tex(page)
-            title, html = await _extract_content_html_with_readability_js(page)
-            if not html:
-                html = await page.content()
-                async with self._thread_pool_semaphore:
-                    title, html = await asyncio.get_running_loop().run_in_executor(
-                        self._thread_pool, _extract_content_html_with_readability_lxml, html
-                    )
+            #await _normalize_math_to_tex(page)
+            html = await page.content()
 
             canonical_url = await canonical_url_task
             async with self._thread_pool_semaphore:
@@ -241,7 +233,6 @@ class WebBrowser:
                 extraction_status=TextExtractionStatus.EXTRACTED,
                 status_code=resp_status,
                 text=text,
-                title=title,
                 url=page.url
             )
         except asyncio.CancelledError:
@@ -285,6 +276,26 @@ class WebBrowser:
         self._thread_pool.shutdown(wait=False, cancel_futures=True)
 
 
+def _aside_to_markdown(aside_tag: bs4.element.Tag, indent: str = ""):
+    class_attrs = aside_tag.get("class", bs4.element.AttributeValueList())
+    if "__normalized__" in class_attrs:
+        return
+
+    for c in aside_tag.contents:
+        if isinstance(c, bs4.element.NavigableString):
+            c.replace_with(bs4.element.NavigableString(c.get_text().replace("\n", " ")))
+        elif isinstance(c, bs4.element.Tag):
+            if c.name == "p":
+                _normalize_paragraph(c)
+            elif c.name == "span":
+                _normalize_span(c)
+    # TODO: handle nested block quotes
+    aside_tag.insert(0, bs4.element.NavigableString(f"\n{indent}> "))
+
+    class_attrs.append("__normalized__")
+    aside_tag["class"] = class_attrs
+
+
 async def _expand_interactive_docs(page: Page):
     # Open <details>, reveal hidden tabpanels, and dismiss aria-hidden
     await page.evaluate(
@@ -299,83 +310,68 @@ async def _expand_interactive_docs(page: Page):
     )
 
 
-async def _extract_content_html_with_readability_js(page: Page) -> tuple[str, str] | tuple[None, None]:
-    with suppress(Exception):
-        article = await page.evaluate(
-            """
-            () => {
-              // Clone to avoid live mutations during parse
-              const doc = document.cloneNode(true);
-              if (typeof Readability !== "function" && typeof Readability !== "object") return null;
-              const reader = new Readability(doc, { keepClasses: false });
-              const res = reader.parse();
-              if (!res || !res.content) return null;
-              const meta = (sel) => document.querySelector(sel)?.content || null;
-              const title =
-                res.title ||
-                meta('meta[property="og:title"]') ||
-                document.querySelector('article h1, main h1')?.innerText?.trim() ||
-                document.title || "";
-              return { title, content: res.content };
-            }
-            """
-        )
-        if article and article.get("content"):
-            return article.get("title") or "", article["content"]
-    return None, None
+def _list_to_markdown(soup: bs4.BeautifulSoup):
+    for list_tag in soup.find_all(["ol", "ul"], recursive=True):
+        class_attrs = list_tag.get("class", bs4.element.AttributeValueList())
+        if "__normalized__" in class_attrs:
+            continue
 
+        for list_tag_content in list_tag.contents:
+            # Remove newlines and empty texts between <li> tags
+            if isinstance(list_tag_content, bs4.element.NavigableString):
+                if not list_tag_content.get_text().strip():
+                    list_tag_content.decompose()
 
-def _extract_content_html_with_readability_lxml(html: str) -> tuple[str, str]:
-    doc = Document(html)
-    title = doc.short_title()
-    content_html = doc.summary(html_partial=True)
-    return title, content_html
+        is_ordered = (list_tag.name == 'ol')
 
+        # Determine starting index for ordered lists (default 1)
+        start = 1
+        if is_ordered and list_tag.has_attr('start'):
+            try:
+                start = int(list_tag['start'])
+            except ValueError:
+                start = 1
 
-def _extract_html_li_text(li: bs4.element.Tag) -> str:
-    parts = []
-    for child in li.contents:
-        if isinstance(child, bs4.element.NavigableString):
-            s = str(child).strip()
-            if s:
-                parts.append(s)
-        elif isinstance(child, bs4.element.Tag) and child.name not in ('ul', 'ol'):
-            s = child.get_text()
-            if s:
-                parts.append(s)
-    return ' '.join(parts).strip()
+        parent_ol_cnt = len(list_tag.find_parents("ol"))
+        parent_ul_cnt = len(list_tag.find_parents("ul"))
+        indent = (" " * 3 * parent_ol_cnt) + (" " * 2 * parent_ul_cnt)
+        inner_indent = indent + (" " * (3 if is_ordered else 2))
+        index = start
+        for li_tag in list_tag.find_all('li', recursive=False):
+            for li_content_idx, li_tag_content in enumerate(li_tag.contents.copy()):
+                if isinstance(li_tag_content, bs4.element.NavigableString):
+                    li_content_el_text = li_tag_content.get_text()
+                    if li_content_el_text == "\n":
+                        li_tag_content.decompose()
+                        continue
+                    else:
+                        li_content_el_text = re.sub(r"[\n\s]+", " ", li_content_el_text)
+                    # li_tag_content.replace_with(bs4.element.NavigableString(li_content_el_text))
+                    li_tag_content.replace_with(bs4.element.NavigableString(f"({li_content_el_text})"))
+                elif isinstance(li_tag_content, bs4.element.Tag):
+                    if li_tag_content.name == "p":
+                        _normalize_paragraph(li_tag_content, inner_indent)
+                    else:
+                        for pre_tag in li_tag_content.select("pre", recursive=False):
+                            _pre_to_markdown(pre_tag,
+                                             has_next_sibling=(li_content_idx <= len(li_tag.contents) - 1),
+                                             has_previous_sibling=(li_content_idx != 0),
+                                             indent=inner_indent)
+            if is_ordered:
+                prefix = f"{index}. "
+                index += 1
+            else:
+                prefix = "- "
+            li_tag.insert(0, bs4.element.NavigableString(f"\n{indent}{prefix}"))
 
+            for aside_tag in li_tag.find_all("aside", recursive=True):
+                _aside_to_markdown(aside_tag, inner_indent)
 
-def _html_list_to_markdown(list_tag: bs4.element.Tag, level: int = 0) -> list[str]:
-    lines = []
-    is_ordered = (list_tag.name == 'ol')
+        if list_tag.next_sibling:
+            list_tag.append(bs4.element.NavigableString(f"\n{indent}"))
 
-    # Determine starting index for ordered lists (default 1)
-    start = 1
-    if is_ordered and list_tag.has_attr('start'):
-        try:
-            start = int(list_tag['start'])
-        except ValueError:
-            start = 1
-
-    index = start
-    for li in list_tag.find_all('li', recursive=False):
-        text = _extract_html_li_text(li)
-        indent = "  " * level
-        if is_ordered:
-            prefix = f"{index}. "
-        else:
-            prefix = "- "
-        # Add the current list item line (avoid trailing space if text is empty)
-        lines.append(f"{indent}{prefix}{text}".rstrip())
-
-        # Handle nested lists directly under this li
-        for sub_list in li.find_all(['ul', 'ol'], recursive=False):
-            lines.extend(_html_list_to_markdown(sub_list, level + 1))
-
-        if is_ordered:
-            index += 1
-    return lines
+        class_attrs.append("__normalized__")
+        list_tag["class"] = class_attrs
 
 
 async def _normalize_math_to_tex(page: Page):
@@ -411,21 +407,100 @@ async def _normalize_math_to_tex(page: Page):
         )
 
 
-def _normalize_whitespace(text: str) -> str:
-    text = text.replace("\xa0", " ")
+def _normalize_paragraph(p_tag: bs4.element.Tag, indent: str = ""):
+    class_attrs = p_tag.get("class", bs4.element.AttributeValueList())
+    if "__normalized__" in class_attrs:
+        return
+
+    p_tag_text = p_tag.get_text().strip()
+    if p_tag_text == "":
+        p_tag.decompose()
+        return
+
+    for c in p_tag.contents:
+        if isinstance(c, bs4.element.NavigableString):
+            text = _normalize_whitespace(c.get_text())
+            #c.replace_with(bs4.element.NavigableString(text))
+            c.replace_with(bs4.element.NavigableString(f"[{text}]"))
+        elif isinstance(c, bs4.element.Tag):
+            if c.name == "a":
+                text = _normalize_whitespace(c.get_text())
+                c.replace_with(bs4.element.NavigableString(text))
+    # if not p_tag.find_parents(["ol", "ul"]):
+    #    p_tag.append(soup.new_string("\n"))
+
+    class_attrs.append("__normalized__")
+    p_tag["class"] = class_attrs
+
+
+def _normalize_span(span_tag: bs4.element.Tag):
+    class_attrs = span_tag.get("class", bs4.element.AttributeValueList())
+    if "__normalized__" in class_attrs:
+        return
+
+    for c in span_tag.contents:
+        if isinstance(c, bs4.element.NavigableString):
+            text = _normalize_whitespace(c.get_text())
+            c.replace_with(bs4.element.NavigableString(text))
+
+    class_attrs.append("__normalized__")
+    span_tag["class"] = class_attrs
+
+
+def _normalize_newlines(text: str) -> str:
     text = re.sub(r"\n{2,}", "\n\n", text)
     return text
 
 
+def _normalize_whitespace(text: str) -> str:
+    text = text.replace("\n", " ")
+    text = re.sub(r"\s{2,}", " ", text)
+    return text
+
+
+def _pre_to_markdown(
+        pre_tag: bs4.element.Tag,
+        has_next_sibling: bool = False,
+        has_previous_sibling: bool = False,
+        indent: str = "",
+):
+    class_attrs = pre_tag.get("class", bs4.element.AttributeValueList())
+    if "__normalized__" in class_attrs:
+        return
+
+    partially_indented_text = pre_tag.get_text().strip().replace("\n", f"\n{indent}")
+    markdown_text = ""
+    if has_previous_sibling or pre_tag.previous_sibling:
+        markdown_text += f"\n{indent}"
+    markdown_text += (
+        f"```"
+        f"\n{indent}{partially_indented_text}"
+        f"\n{indent}```"
+    )
+    if has_next_sibling or pre_tag.next_sibling:
+        markdown_text += f"\n{indent}"
+    pre_tag.replace_with(bs4.element.NavigableString(markdown_text))
+
+    class_attrs.append("__normalized__")
+    pre_tag["class"] = class_attrs
+
+
 def _process_content_html(html: str, base_url: str) -> str:
+    #return html
     soup = BeautifulSoup(html, "lxml")
 
     for sel in [
-        "button",
-        "devsite-feature-tooltip",
-        "script,style,noscript,template",
+        ".breadcrumb, [class*=breadcrumb], [id*=breadcrumb]",
+        "[class*=nocontent]",
+        #"[class*=search]",
+        "[role*=navigation]",
+        "[role*=presentation]",
+        "devsite-feature-tooltip, devsite-thumb-rating",
+        "head",
+        "nav, [class*=-nav], [class*=nav-]",
+        "noscript, script, style, template",
+        'button, .button, [class*="button"], [id*="button"], [role*="button"]',
         ## common site chrome that sometimes slips into Readability content
-        #".breadcrumb, [class*=breadcrumb], [id*=breadcrumb]",
         #".feedback, [class*=feedback], [id*=feedback]",
         #".sr-only, .visually-hidden",
         #".toc, [class*=toc], [id*=toc]",
@@ -441,8 +516,17 @@ def _process_content_html(html: str, base_url: str) -> str:
         for el in soup.select(sel):
             el.decompose()
 
+    #return _normalize_newlines(str(soup))
+
+    for a_tag in soup.find_all("a", href=False):
+        a_tag_text = a_tag.get_text().replace("\n", " ")
+        if not a_tag_text.strip():
+            a_tag.decompose()
+        else:
+            a_tag.replace_with(bs4.element.NavigableString(a_tag_text))
+
     # Normalize <br> into explicit newlines
-    for br in soup.find_all("br"):
+    for br in soup.select("br"):
         br.replace_with(soup.new_string("\n"))
 
     # Convert headings to Markdown
@@ -451,123 +535,135 @@ def _process_content_html(html: str, base_url: str) -> str:
             el_text = el.get_text(separator=" ", strip=True)
             el.replace_with(soup.new_string(f"\n{int(tag.lstrip('h')) * '#'} {el_text}\n"))
 
+    for el in soup.find_all("strong"):
+        el_text = el.get_text()
+        el.replace_with(soup.new_string(f"**{el_text}**"))
+
     for el in soup.find_all("code"):
-        el_text = el.get_text(separator=" ", strip=True)
-        el.replace_with(soup.new_string(f"`{el_text}`"))
-
-    for el in soup.find_all("pre"):
-        el_text = el.get_text(separator=" ", strip=True)
-        el.replace_with(soup.new_string(f"\n```\n{el_text}\n```\n"))
-
-    for tag in {'ol', 'ul'}:
-        for el in soup.select(tag, recursive=False):
-            el.replace_with(soup.new_string('\n'.join(ln for ln in _html_list_to_markdown(el) if ln is not None)))
+        el_text = el.get_text()
+        if el.parent.name != "pre":
+            el.replace_with(soup.new_string(f"`{el_text}`"))
 
     # Convert data tables to Markdown
-    for tbl in soup.find_all("table"):
-        # headers
-        thead = tbl.find("thead")
-        headers = []
-        if thead:
-            th = thead.find_all("th")
-            headers = [h.get_text(separator=" ", strip=True) for h in th]
-        else:
-            # some themes use first row as headers
-            first = tbl.find("tr")
-            if first and first.find_all("th"):
-                headers = [c.get_text(separator=" ", strip=True)
-                           for c in first.find_all(["th","td"], recursive=False)]
+    _list_to_markdown(soup)
 
-        rows = []
-        if headers:
-            rows.append("| " + " | ".join(headers) + " |")
-            rows.append("| " + " | ".join("---" for _ in headers) + " |")
+    # Convert data tables to Markdown
+    #for tbl in soup.find_all("table"):
+    #    # headers
+    #    thead = tbl.find("thead")
+    #    headers = []
+    #    if thead:
+    #        th = thead.find_all("th")
+    #        headers = [h.get_text(separator=" ", strip=True) for h in th]
+    #    else:
+    #        # some themes use first row as headers
+    #        first = tbl.find("tr")
+    #        if first and first.find_all("th"):
+    #            headers = [c.get_text(separator=" ", strip=True)
+    #                       for c in first.find_all(["th","td"], recursive=False)]
 
-        # body
-        for tr in tbl.find_all("tr"):
-            tds = tr.find_all(["td", "th"], recursive=False)
-            if not tds:
-                continue
-            if headers and tr.find_parent("thead"):
-                continue
-            row = [td.get_text(separator=" ", strip=True) for td in tds]
-            rows.append("| " + " | ".join(row) + " |")
+    #    rows = []
+    #    if headers:
+    #        rows.append("| " + " | ".join(headers) + " |")
+    #        rows.append("| " + " | ".join("---" for _ in headers) + " |")
 
-        md = "\n".join(rows).strip()
-        if md:
-            tbl.replace_with(soup.new_string("\n\n" + md + "\n\n"))
+    #    # body
+    #    for tr in tbl.find_all("tr"):
+    #        tds = tr.find_all(["td", "th"], recursive=False)
+    #        if not tds:
+    #            continue
+    #        if headers and tr.find_parent("thead"):
+    #            continue
+    #        row = [td.get_text(separator=" ", strip=True) for td in tds]
+    #        rows.append("| " + " | ".join(row) + " |")
+
+    #    md = "\n".join(rows).strip()
+    #    if md:
+    #        tbl.replace_with(soup.new_string("\n\n" + md + "\n\n"))
+
+    for aside_tag in soup.find_all("aside", recursive=True):
+        _aside_to_markdown(aside_tag)
+    for pre_tag in soup.select("pre", recursive=False):
+        _pre_to_markdown(pre_tag)
 
     # Turn <a> into "text (URL)"
-    for a in soup.select('a[href]'):
-        if not a.get_text(strip=True):
-            continue
+    #for a in soup.select('a[href]'):
+    #    if not a.get_text(strip=True):
+    #        continue
 
-        # Skip obvious navigation/chrome or code/pre
-        if a.find_parent(["nav", "header", "footer", "aside", "pre", "code"]):
-            continue
+    #    # Skip obvious navigation/chrome or code/pre
+    #    if a.find_parent(["nav", "header", "footer", "aside", "pre", "code"]):
+    #        continue
 
-        # Skip anchors inside obvious navigation containers
-        skip = False
-        for parent in a.parents:
-            if parent is None or not getattr(parent, "name", None):
-                break
-            # Semantic nav tags / roles
-            if parent.name in {"nav"}:
-                skip = True
-                break
-            role = (parent.get("role") or "").lower()
-            if "navigation" in role:
-                skip = True
-                break
-            # Common chrome classes/ids
-            parent_id = " ".join(filter(None, [parent.get("id", "")]))
-            parent_cls = parent.get("class", bs4.element.AttributeValueList())
-            if isinstance(parent_cls, (list, tuple)):
-                parent_cls = " ".join(parent_cls)
-            chrome_blob = f"{parent_id} {parent_cls}".lower()
-            if any(tok in chrome_blob for tok in ("nav", "menu", "breadcrumb", "tabs", "pager")):
-                skip = True
-                break
-        if skip:
-            continue
+    #    # Skip anchors inside obvious navigation containers
+    #    skip = False
+    #    for parent in a.parents:
+    #        if parent is None or not getattr(parent, "name", None):
+    #            break
+    #        # Semantic nav tags / roles
+    #        if parent.name in {"nav"}:
+    #            skip = True
+    #            break
+    #        role = (parent.get("role") or "").lower()
+    #        if "navigation" in role:
+    #            skip = True
+    #            break
+    #        # Common chrome classes/ids
+    #        parent_id = " ".join(filter(None, [parent.get("id", "")]))
+    #        parent_cls = parent.get("class", bs4.element.AttributeValueList())
+    #        if isinstance(parent_cls, (list, tuple)):
+    #            parent_cls = " ".join(parent_cls)
+    #        chrome_blob = f"{parent_id} {parent_cls}".lower()
+    #        if any(tok in chrome_blob for tok in ("nav", "menu", "breadcrumb", "tabs", "pager")):
+    #            skip = True
+    #            break
+    #    if skip:
+    #        continue
 
-        if a["href"].lstrip().startswith("#"):
-            continue
+    #    if a["href"].lstrip().startswith("#"):
+    #        continue
 
-        href = urljoin(base_url or "", a["href"])
-        parsed_href = urlparse(href)
+    #    href = urljoin(base_url or "", a["href"])
+    #    parsed_href = urlparse(href)
 
-        scheme = (parsed_href.scheme or "https").lower()
-        if scheme not in {"http", "https", "mailto", "tel"}:
-            continue
+    #    scheme = (parsed_href.scheme or "https").lower()
+    #    if scheme not in {"http", "https", "mailto", "tel"}:
+    #        continue
 
-        # Remove common trackers for http(s)
-        if scheme in {"http", "https"}:
-            netloc = parsed_href.hostname or ""
-            if parsed_href.port:
-                netloc = f"{netloc}:{parsed_href.port}"
-            qry = [(k, v) for (k, v) in parse_qsl(parsed_href.query, keep_blank_values=True)
-                   if k not in {
-                       # Tracking params
-                       "fbclid",
-                       "gclid",
-                       "mc_cid",
-                       "mc_eid",
-                       "utm_campaign",
-                       "utm_content",
-                       "utm_medium",
-                       "utm_source",
-                       "utm_term",
-                   }]
-            parsed_href = parsed_href._replace(netloc=netloc, query=urlencode(qry, doseq=True))
+    #    # Remove common trackers for http(s)
+    #    if scheme in {"http", "https"}:
+    #        netloc = parsed_href.hostname or ""
+    #        if parsed_href.port:
+    #            netloc = f"{netloc}:{parsed_href.port}"
+    #        qry = [(k, v) for (k, v) in parse_qsl(parsed_href.query, keep_blank_values=True)
+    #               if k not in {
+    #                   # Tracking params
+    #                   "fbclid",
+    #                   "gclid",
+    #                   "mc_cid",
+    #                   "mc_eid",
+    #                   "utm_campaign",
+    #                   "utm_content",
+    #                   "utm_medium",
+    #                   "utm_source",
+    #                   "utm_term",
+    #               }]
+    #        parsed_href = parsed_href._replace(netloc=netloc, query=urlencode(qry, doseq=True))
 
-        a.insert_after(soup.new_string(f" ({parsed_href.geturl()})"))
-        a.unwrap()
+    #    a.insert_after(soup.new_string(f" ({parsed_href.geturl()})"))
+    #    a.unwrap()
 
-    #text = soup.get_text()
-    text = str(soup)
-    text = _normalize_whitespace(text)
+    # Normalized in paragraph newlines
+    # TODO: process in list paragraphs separately - maybe first
+    for p_tag in soup.select("p"):
+        _normalize_paragraph(p_tag)
+
+    text = soup.get_text()
+    #text = str(soup)
+    text = _normalize_newlines(text)
+    text = text.replace("\xa0", " ")
     return text
+    #return ""
 
 
 async def _route_blocker(route: Route, request: Request):
