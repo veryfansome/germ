@@ -62,7 +62,6 @@ class WebBrowser:
         self._contexts_lock: asyncio.Lock = asyncio.Lock()
         self._max_contexts = max_contexts
         self._playwright: Playwright | None = None
-        self._readability_js = Path(__file__).with_name("Readability.min.js").read_text(encoding="utf-8")
         self._thread_pool = ThreadPoolExecutor(max_workers=workers)
         self._thread_pool_semaphore = asyncio.Semaphore(workers)
 
@@ -97,8 +96,6 @@ class WebBrowser:
                 service_workers="block",
                 user_agent=user_agent,
             )
-            # Inject Readability.js
-            await context.add_init_script(script=self._readability_js)
             # Performance optimization using route blocker to abort non-essential requests
             await context.route("**/*", _route_blocker)
             self._contexts[context_key] = context
