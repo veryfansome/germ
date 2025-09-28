@@ -15,7 +15,7 @@ from traceback import format_exc
 from typing import Iterable
 
 from germ.api.models import ChatRequest, ChatResponse
-from germ.browser import FetchResult, WebBrowser
+from germ.browser import WebBrowser
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
 from germ.services.bot.chat import async_openai_client, openai_handlers
@@ -46,7 +46,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         info_source_suggestions = await suggest_best_online_info_source(filtered_messages, [])
         logger.info(f"Info source suggestions: {info_source_suggestions['urls']}")
 
-        coroutines = [self.web_browser.fetch(url, user_id, user_agent, extra_headers)
+        coroutines = [self.web_browser.fetch_url(url, user_id, user_agent, extra_headers)
                       for url in info_source_suggestions["urls"]]
         results = await asyncio.gather(*coroutines, return_exceptions=True)
         for url, result in zip(info_source_suggestions["urls"], results):
@@ -54,9 +54,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 logger.error(f"Failed to fetch {url}", exc_info=result)
                 continue
             if logger.level == logging.DEBUG:
-                logger.debug(f"Fetched {len(result.text)} characters of page text: "
-                             f"{result.status_code} {result.content_type} {result.extraction_status} {result.url}")
-                logger.debug((result.title, f"{result.text[:10000]}...[truncated]\n"))
+                logger.debug(f"FetchedResult: {result}")
 
     async def load_conversations(self, user_id: int, conversation_ids: Iterable[int]):
         if not conversation_ids:
