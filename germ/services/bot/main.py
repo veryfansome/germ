@@ -163,7 +163,6 @@ async def get_landing(request: Request):
     if not session:
         return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
     file_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
-    logger.info(request.headers)
     return FileResponse(
         file_path,
         headers={
