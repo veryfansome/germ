@@ -1,13 +1,13 @@
 import asyncio
 
-from germ.browser import WebBrowser
+from germ.browser import PageFetchingWebBrowser
 
 
 if __name__ == "__main__":
     from germ.observability.logging import setup_logging
     setup_logging()
 
-    wb = WebBrowser()
+    wb = PageFetchingWebBrowser()
 
     async def _main():
         await wb.start()
@@ -29,6 +29,7 @@ if __name__ == "__main__":
                     'sec-fetch-dest': 'document', 'referer': 'http://localhost:8001/register',
                     'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate', 'sec-fetch-user': '?1',
                 },
+                data_dir="data/",
             )
             print(result)
         except Exception as e:

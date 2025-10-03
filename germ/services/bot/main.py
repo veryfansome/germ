@@ -22,7 +22,7 @@ from starsessions.stores.redis import RedisStore
 from typing import List
 from urllib.parse import urlencode
 
-from germ.browser import WebBrowser
+from germ.browser import PageFetchingWebBrowser
 from germ.database.neo4j import KnowledgeGraph
 from germ.database.pg import DATABASE_URL, TableHelper
 from germ.observability.logging import logging, setup_logging
@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI):
     """
     logger.info("Starting")
 
-    web_browser = WebBrowser()
+    web_browser = PageFetchingWebBrowser()
     await web_browser.start()
 
     chat_controller = ChatController(knowledge_graph, web_browser)
