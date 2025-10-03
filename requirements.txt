@@ -43,3 +43,7 @@ starsessions[redis]
 torch
 transformers
 uvicorn[standard]
+
+# Sandbox
+matplotlib
+polars
