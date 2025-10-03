@@ -15,7 +15,7 @@ from traceback import format_exc
 from typing import Iterable
 
 from germ.api.models import ChatRequest, ChatResponse
-from germ.browser import WebBrowser
+from germ.browser import PageFetchingWebBrowser
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
 from germ.services.bot.chat import async_openai_client, openai_handlers
@@ -34,7 +34,7 @@ tracer = trace.get_tracer(__name__)
 
 class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                      WebSocketSendEventHandler, WebSocketSessionMonitor):
-    def __init__(self, knowledge_graph: KnowledgeGraph, web_browser: WebBrowser):
+    def __init__(self, knowledge_graph: KnowledgeGraph, web_browser: PageFetchingWebBrowser):
         self.conversations: dict[int, Conversation] = {}
         self.knowledge_graph = knowledge_graph
         self.web_browser = web_browser
