@@ -1,65 +1,31 @@
-import aiofiles
-import aiofiles.os
 import asyncio
-import hashlib
 import logging
-from playwright.async_api import Page, Response
-from pydantic import BaseModel
+import os
+import re
+from bs4 import BeautifulSoup, Tag
+from bs4.element import AttributeValueList, NavigableString
+from concurrent.futures import ThreadPoolExecutor
+from playwright.async_api import Page
 
 from germ.browser.base import BaseBrowser
-from germ.settings import germ_settings
 
 logger = logging.getLogger(__name__)
 
-
-class FetchResult(BaseModel):
-    location: str | None = None
-    url: str
-    url_sig: str | None = None
-
-    # TODO:
-    #   - Extract links and click-ables
-    #   - Extract summary and features
-
-    @classmethod
-    async def save_in_page_pdf(cls, page: Page, resp: Response, data_dir: str) -> "FetchResult":
-        sig = _url_signature(resp.url)
-        location = f"{data_dir}/{sig}.pdf"
-        resp_body = await resp.body()
-        await aiofiles.os.makedirs(data_dir, exist_ok=True)
-        async with aiofiles.open(location, "wb") as f:
-            await f.write(resp_body)
-        await page.close()
-        return cls(
-            location=location,
-            url=resp.url,
-            url_sig=sig,
-        )
-
-    @classmethod
-    async def save_page_as_pdf(cls, page: Page, data_dir: str) -> "FetchResult":
-        sig = _url_signature(page.url)
-        location = f"{data_dir}/{sig}.pdf"
-        await aiofiles.os.makedirs(data_dir, exist_ok=True)
-        await page.emulate_media(media="screen")
-        await page.pdf(path=location, format="A2", print_background=True)
-        await page.close()
-        return cls(
-            location=location,
-            url=page.url,
-            url_sig=sig,
-        )
+MD_PROCESSED_MARKER = "__md__"
 
 
-class PageFetchingWebBrowser(BaseBrowser):
+class PageScrapingWebBrowser(BaseBrowser):
     def __init__(self, max_contexts: int = 24):
         super().__init__(max_contexts)
+        workers = min(os.cpu_count() or 4, 8)
+        self._thread_pool = ThreadPoolExecutor(max_workers=workers)
+        self._thread_pool_semaphore = asyncio.Semaphore(workers)
 
     async def fetch_url(
-            self, url: str, user_id: int, user_agent: str, extra_headers: dict[str, str],
-            data_dir: str = f"{germ_settings.GERM_DATA_DIR}/webpage",
-            timeout_ms: int = 15000, wait_selector: str | None = None,
-    ) -> FetchResult:
+            self, filtered_messages: list[dict[str, str]], url: str,
+            user_id: int, user_agent: str, extra_headers: dict[str, str],
+            timeout_ms: int = 15000,
+    ) -> str:
         time_budget, resp, page = await self.goto_url(url, user_id, user_agent, extra_headers, timeout_ms=timeout_ms)
 
         resp_status = None
@@ -71,20 +37,15 @@ class PageFetchingWebBrowser(BaseBrowser):
         if resp_status is None or resp_status >= 400:
             await page.close()
             raise RuntimeError(f"Failed to load page: {url}")
-        elif "application/pdf" in resp_content_type:
-            return await FetchResult.save_in_page_pdf(page, resp, data_dir)
         elif "application/xhtml+xml" not in resp_content_type and "text/html" not in resp_content_type:
             await page.close()
             raise RuntimeError(f"Unsupported content_type: {resp_content_type}")
 
         remaining_ms = time_budget.remaining_ms()
         if remaining_ms <= 0:
-            return await FetchResult.save_page_as_pdf(page, data_dir)
+            return await self.page_to_markdown(page)
 
         try:
-            if wait_selector:
-                await page.wait_for_selector(wait_selector, state="visible", timeout=remaining_ms)
-
             remaining_ms = time_budget.remaining_ms()
             if remaining_ms >= 1000:
                 # Wait for page to settle if time allows
@@ -92,13 +53,54 @@ class PageFetchingWebBrowser(BaseBrowser):
 
             await _expand_interactive_docs(page)
 
-            return await FetchResult.save_page_as_pdf(page, data_dir)
-        except asyncio.CancelledError:
+            return await self.page_to_markdown(page)
+        except Exception:
             await page.close()
             raise
-        except Exception as exc:
-            logger.error(f"Error while waiting for page to settle: {url}", exc_info=exc)
-            return await FetchResult.save_page_as_pdf(page, data_dir)
+
+    async def page_to_markdown(self, page: Page) -> str:
+        html = await page.content()
+        async with self._thread_pool_semaphore:
+            return await asyncio.get_running_loop().run_in_executor(
+                self._thread_pool, html_to_markdown, html
+            )
+
+    async def stop(self):
+        await super().stop()
+        self._thread_pool.shutdown(wait=False, cancel_futures=True)
+
+
+def decompose_non_content_elements(root_tag: Tag):
+    """Strip out things that are not content related."""
+    tags_to_decompose = [
+        "[class*=breadcrumb]",
+        "[class*=nocontent]",
+        "[class*=sidebar]",
+        "[role*=form]",
+        "[role*=navigation]",
+        "[role*=presentation]",
+        "button",
+        "head",
+        "nav",
+        "noscript",
+        "script",
+        "style",
+        "template",
+    ]
+    ## Framework specifics
+    if root_tag.select_one("devsite-content"):  # Google devsite
+        tags_to_decompose.extend([
+            "cloud-free-trial",
+            "[class*=devsite-nav-list]",
+        ])
+    for tag in root_tag.select(','.join(tags_to_decompose)):
+        tag.decompose()
+
+
+def escape_markdown(text):
+    """Escapes all common Markdown special characters."""
+    special_chars = r'''!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~'''
+    return re.sub(f"([{re.escape(special_chars)}])", r"\\\1", text)
 
 
 async def _expand_interactive_docs(page: Page):
@@ -115,6 +117,167 @@ async def _expand_interactive_docs(page: Page):
     )
 
 
-def _url_signature(url: str, size: int = 16) -> str:  # 16 bytes = 128-bit
-    h = hashlib.blake2s(url.encode('utf-8'), digest_size=size)
-    return h.hexdigest()
+def get_indentation(root_tag: Tag) -> str:
+    parent_ol_cnt = len(root_tag.find_parents("ol"))
+    parent_ul_cnt = len(root_tag.find_parents("ul"))
+    indent = (" " * 3 * parent_ol_cnt) + (" " * 2 * parent_ul_cnt)
+    return indent
+
+
+def html_to_markdown(html: str):
+    html = html.replace("\xa0", " ")
+    soup = BeautifulSoup(html, "lxml")
+
+    root_tag = soup.select_one("main")  # Prefer main if exists
+    if not root_tag:
+        root_tag = soup.select_one("body")
+
+    decompose_non_content_elements(root_tag)
+    markdownify_heading_tags(root_tag)
+    markdownify_content_phrasing_tags(root_tag)
+    markdownify_list_tags(root_tag)
+    markdownify_pre_tags(root_tag)
+
+    text = root_tag.get_text()
+    #text = str(root_tag)
+    text = normalize_newlines(text)
+    return text.strip()
+
+
+def markdownify_content_phrasing_tags(root_tag: Tag):
+    for tag in root_tag.select(",".join([
+        "b",
+        "br",
+        "code",
+        "em",
+        "hr",
+        "i",
+        "p",
+        "s",
+        "span[data-literal]",
+        "strong",
+    ])):
+        class_attrs = tag.get("class", AttributeValueList())
+        if MD_PROCESSED_MARKER in class_attrs:
+            continue
+
+        if tag.name in {"br"}:
+            tag.replace_with(NavigableString("\n\n"))
+        elif tag.name in {"hr"}:
+            tag.replace_with(NavigableString("---"))
+        else:
+            tag_text = tag.get_text()
+            if tag_text:
+                if tag.name in {"b", "strong"}:
+                    tag.insert_before(NavigableString("**"))
+                    tag.insert_after(NavigableString("**"))
+                elif tag.name in {"i", "em"}:
+                    tag.insert_before(NavigableString("*"))
+                    tag.insert_after(NavigableString("*"))
+                elif tag.name == "p":
+                    normalize_navigable_strings(tag)
+                elif tag.name == "s":
+                    tag.insert_before(NavigableString("~~"))
+                    tag.insert_after(NavigableString("~~"))
+                elif tag.name == "code" and tag.parent.name != "pre":  # block code handled separately
+                    tag.replace_with(NavigableString(f"`{tag_text}`"))
+                elif tag.name == "span" and tag.has_attr("data-literal"):
+                    tag.replace_with(NavigableString(escape_markdown(tag_text)))
+
+        if not isinstance(tag, NavigableString):
+            class_attrs.append(MD_PROCESSED_MARKER)
+            tag["class"] = class_attrs
+
+
+def markdownify_heading_tags(root_tag: Tag):
+    for tag in root_tag.select("h1,h2,h3,h4,h5,h6"):
+        class_attrs = tag.get("class", AttributeValueList())
+        if MD_PROCESSED_MARKER in class_attrs:
+            continue
+
+        for tag_component in tag.contents:
+            if isinstance(tag_component, NavigableString):
+                tag_component.replace_with(NavigableString(
+                    tag_component.get_text().replace("\n", " ").strip()
+                ))
+        tag.insert_before(NavigableString(f"\n{int(tag.name.lstrip('h')) * '#'} "))
+
+        class_attrs.append(MD_PROCESSED_MARKER)
+        tag["class"] = class_attrs
+
+
+def markdownify_list_tags(root_tag: Tag):
+    for list_tag in root_tag.find_all(["ol", "ul"], recursive=True):
+        class_attrs = list_tag.get("class", AttributeValueList())
+        if MD_PROCESSED_MARKER in class_attrs:
+            continue
+
+        for element in list_tag.contents:
+            # Remove anything that isn't a <li>
+            if isinstance(element, NavigableString) or (isinstance(element, Tag) and element.name != "li"):
+                element.decompose()
+
+        # Determine starting index for ordered lists (default 1)
+        is_ordered = (list_tag.name == 'ol')
+        index = 1
+        if is_ordered and list_tag.has_attr('start'):
+            try:
+                index = int(list_tag['start'])
+            except ValueError:
+                index = 1
+
+        indent = get_indentation(list_tag)
+        for item_tag in list_tag.find_all('li', recursive=False):
+            normalize_navigable_strings(item_tag)
+            if is_ordered:
+                prefix = f"{index}. "
+                index += 1
+            else:
+                prefix = "- "
+            item_tag.insert(0, NavigableString(f"\n{indent}{prefix}"))
+
+        if list_tag.next_sibling:
+            list_tag.append(NavigableString(f"\n{indent}"))
+
+        class_attrs.append(MD_PROCESSED_MARKER)
+        list_tag["class"] = class_attrs
+
+
+def markdownify_pre_tags(root_tag: Tag):
+    for tag in root_tag.find_all("pre", recursive=True):
+        class_attrs = tag.get("class", AttributeValueList())
+        if MD_PROCESSED_MARKER in class_attrs:
+            continue
+
+        indent = get_indentation(tag)
+        inner_text = tag.get_text().strip().replace("\n", f"\n{indent}")
+
+        # TODO: next|previous element may be too broad and sibling may require unwrap
+        if tag.previous_element:
+            tag.insert_before(NavigableString(f"\n{indent}"))
+        tag.insert_before(NavigableString(f"```"))
+        if tag.next_element:
+            tag.insert_after(NavigableString(f"\n{indent}"))
+        tag.insert_after(NavigableString(f"\n{indent}```"))
+        tag.replace_with(NavigableString(f"\n{indent}{inner_text}"))
+
+        class_attrs.append(MD_PROCESSED_MARKER)
+        tag["class"] = class_attrs
+
+
+def normalize_navigable_strings(tag: Tag):
+    for element_idx, element in enumerate(tag.contents):
+        if isinstance(element, NavigableString):
+            element_text = element.get_text()
+            if element_idx == 0:
+                element_text = element_text.lstrip()
+            if element_text in {"", "\n"}:
+                element.decompose()
+                continue
+            element_text = re.sub(r"[\n\s\t]+", " ", element_text)
+            element.replace_with(NavigableString(element_text))
+
+
+def normalize_newlines(text: str) -> str:
+    text = re.sub(r"\n{2,}", "\n\n", text)
+    return text

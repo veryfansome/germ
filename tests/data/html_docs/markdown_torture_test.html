@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="A deliberately gnarly HTML document to stress-test HTML→Markdown converters." />
+  <base href="https://example.com/base/" />
+  <title>Markdown Parser Torture Test</title>
+  <link rel="canonical" href="https://example.com/base/torture-test.html" />
+
+  <!-- CSS contains characters that could look like Markdown; ensure your parser ignores <style> content. -->
+  <style>
+    /* Intentionally odd CSS */
+    :root { --hash: "#not-a-heading"; }
+    body { font: 16px/1.4 system-ui, sans-serif; }
+    .pseudo::before { content: "**not markdown** "; }
+    .rtl { direction: rtl; unicode-bidi: bidi-override; }
+    code { white-space: pre-wrap; }
+    pre { background: #f6f8fa; padding: 0.75rem; overflow: auto; }
+    table { border-collapse: collapse; }
+    th, td { border: 1px solid #999; padding: 0.25rem 0.5rem; }
+    figure { margin: 1rem 0; }
+  </style>
+
+  <!--[if IE]>This is an old-school conditional comment that should be ignored by modern user agents.<![endif]-->
+</head>
+<body>
+  <header id="top">
+    <h1 class="pseudo">H1: Torture Test &amp; Entities &lt; &gt; &amp; &#x1F680; (🚀)</h1>
+    <nav aria-label="Breadcrumb">
+      <ol>
+        <li><a href="/">Home</a></li>
+        <li><a href="/docs/">Docs</a></li>
+        <li aria-current="page">Torture Test</li>
+      </ol>
+    </nav>
+    <p class="tagline">This page intentionally includes tricky constructs to probe HTML→Markdown conversion behavior.</p>
+  </header>
+
+  <main>
+    <article>
+      <section id="inline">
+        <h2 id="inline-text">Inline semantics, whitespace, and entities</h2>
+        <p>
+          <em>em</em>, <strong>strong</strong>, <i>i</i>, <b>b</b>, <u>u</u>, <s>strikethrough</s>,
+          <mark>mark</mark>, <small>small</small>, H<sub>2</sub>O, E = mc<sup>2</sup>,
+          press <kbd>Ctrl</kbd>+<kbd>K</kbd>, <var>x</var>=<samp>42</samp>, inline <code>code()</code>,
+          an <abbr title="Internationalization">i18n</abbr> example, a <cite>citation</cite>,
+          a short quote <q cite="https://example.com/quote">“hello”</q>,
+          and a <time datetime="2025-10-07T12:34:56-07:00">timestamp</time>.
+        </p>
+        <p>BiDi controls: <bdi>ABC123</bdi> <bdo dir="rtl">!dlroW olleH</bdo> <span dir="rtl">עברית العربية</span>.</p>
+        <p>
+          Escaped Markdown literals (should remain as text):
+          <span data-literal>**bold?** _italic?_ `inline code` [link](https://example.com) ![img](x) > quote</span>
+          and triple backticks: <span data-literal>``` not a fenced block ```</span>.
+        </p>
+        <p>Hard line breaks with <code>&lt;br&gt;</code> and <code>&lt;br /&gt;</code> below:<br>Line 2<br />Line 3</p>
+        <p>Soft hyphen &amp;shy;: hy&shy;phen&shy;ation; word break <wbr> opportunity.</p>
+        <hr />
+      </section>
+
+      <section id="headings">
+        <h2>Headings H1–H6</h2>
+        <h1 id="h1-duplicate">H1 (within article)</h1>
+        <h2>H2</h2>
+        <h3>H3</h3>
+        <h4>H4</h4>
+        <h5>H5</h5>
+        <h6>H6</h6>
+      </section>
+
+      <section id="lists">
+        <h2>Lists (mixed, nested, start/reversed/type)</h2>
+        <ul>
+          <li>Unordered level 1
+            <ul>
+              <li>Unordered level 2 with a paragraph
+                <p>This is a paragraph inside a list item. It should remain associated with the bullet.</p>
+                <pre><code># code inside a list item
+*not a list*
+</code></pre>
+              </li>
+              <li>Unordered level 2 with nested ordered list
+                <ol start="3">
+                  <li value="3">Item 3</li>
+                  <li>Item 4</li>
+                </ol>
+              </li>
+            </ul>
+          </li>
+          <li>Another bullet with a blockquote:
+            <blockquote cite="https://example.com/source">
+              <p>&gt; This looks like Markdown but comes from HTML.</p>
+            </blockquote>
+          </li>
+        </ul>
+
+        <ol type="A" start="2" reversed>
+          <li>Alpha 2</li>
+          <li>Alpha 1</li>
+        </ol>
+
+        <dl>
+          <dt>Term A</dt>
+          <dd>Definition A1</dd>
+          <dd>Definition A2 (multiple definitions)</dd>
+          <dt>Term B</dt>
+          <dd>Definition B</dd>
+        </dl>
+      </section>
+
+      <section id="links">
+        <h2>Links (various schemes and forms)</h2>
+        <ul>
+          <li><a href="#top">Fragment link</a></li>
+          <li><a href="//example.com/proto-relative">Protocol-relative URL</a></li>
+          <li><a href="mailto:alice@example.com?subject=Hello&amp;body=Line1%0ALine2">mailto: with query</a></li>
+          <li><a href="tel:+1-415-555-0100">tel:</a></li>
+          <li><a href="./relative/path">Relative path (resolves via &lt;base&gt;)</a></li>
+          <li><a href="javascript:alert('xss')">javascript: pseudo-link (should probably be stripped)</a></li>
+          <li><a title="Title attribute example" href="https://example.com/title">Titled link</a></li>
+        </ul>
+      </section>
+
+      <section id="media">
+        <h2>Media (img/picture/figure/audio/video/svg)</h2>
+        <figure>
+          <picture>
+            <source srcset="images/sample.webp" type="image/webp" />
+            <img src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="1×1 transparent GIF" width="24" height="24" />
+          </picture>
+          <figcaption>Picture with fallback; transparent data URI image.</figcaption>
+        </figure>
+
+        <img src="images/no-alt.png" width="16" height="16" /> <!-- Missing alt on purpose -->
+
+        <figure>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="A circle">
+            <circle cx="50" cy="50" r="45" stroke="black" fill="none" />
+          </svg>
+          <figcaption>Inline SVG.</figcaption>
+        </figure>
+
+        <audio controls>
+          <source src="media/sample.ogg" type="audio/ogg" />
+          <source src="media/sample.mp3" type="audio/mpeg" />
+          <p>Your browser does not support the audio element.</p>
+        </audio>
+
+        <video controls width="240">
+          <source src="media/sample.mp4" type="video/mp4" />
+          <track kind="subtitles" src="media/captions.vtt" srclang="en" label="English" default />
+          Sorry, your browser doesn't support embedded videos.
+        </video>
+      </section>
+
+      <section id="tables">
+        <h2>Tables (caption, thead/tbody/tfoot, rowspan/colspan)</h2>
+        <table role="table" aria-label="Complex table">
+          <caption>Simple → Complex Table</caption>
+          <thead>
+            <tr>
+              <th scope="col" rowspan="2">Name</th>
+              <th scope="col" colspan="2">Scores</th>
+              <th scope="col" rowspan="2">Total</th>
+            </tr>
+            <tr>
+              <th scope="col">Math</th>
+              <th scope="col">Science</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Alice</th>
+              <td>9</td><td>8</td><td>17</td>
+            </tr>
+            <tr>
+              <th scope="row">Bob</th>
+              <td colspan="2">15</td><td>15</td>
+            </tr>
+            <tr>
+              <th scope="row" rowspan="2">Carol</th>
+              <td>7</td><td>9</td><td rowspan="2">18</td>
+            </tr>
+            <tr>
+              <td>6</td><td>12</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="4">Footer note</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <p>Nested table (discouraged but seen in the wild):</p>
+        <table>
+          <tr>
+            <td>
+              <table>
+                <tr><td>Inner A</td><td>Inner B</td></tr>
+              </table>
+            </td>
+            <td>Sibling cell</td>
+          </tr>
+        </table>
+      </section>
+
+      <section id="blocks">
+        <h2>Block-level structures</h2>
+        <blockquote>
+          <p>Blockquote paragraph.</p>
+          <ul><li>List inside blockquote</li></ul>
+          <pre><code>// Code in blockquote
+console.log('> not a quote');
+</code></pre>
+        </blockquote>
+
+        <details open>
+          <summary>Details/summary (open by default)</summary>
+          <p>Hidden/visible content that some converters flatten.</p>
+        </details>
+
+        <aside>Aside content.</aside>
+        <section>
+          <header><h3>Section header</h3></header>
+          <p>Section body</p>
+          <footer>Section footer</footer>
+        </section>
+      </section>
+
+      <section id="forms">
+        <h2>Forms (labels, inputs, datalist, textarea)</h2>
+        <form action="/submit" method="post">
+          <fieldset>
+            <legend>Preferences</legend>
+            <label><input type="checkbox" name="opt1" checked /> Receive updates</label><br />
+            <label><input type="radio" name="r" value="a" /> A</label>
+            <label><input type="radio" name="r" value="b" checked /> B</label>
+            <p>
+              <label for="sel">Select:</label>
+              <select id="sel" name="sel">
+                <optgroup label="Group 1">
+                  <option value="1">One</option>
+                  <option value="2">Two</option>
+                </optgroup>
+                <optgroup label="Group 2">
+                  <option value="3" selected>Three</option>
+                </optgroup>
+              </select>
+            </p>
+            <p>
+              <label for="ice">With datalist:</label>
+              <input id="ice" list="flavors" name="ice" />
+              <datalist id="flavors">
+                <option value="vanilla" />
+                <option value="chocolate" />
+                <option value="strawberry" />
+              </datalist>
+            </p>
+            <p>
+              <label for="ta">Textarea (contains Markdown-looking text):</label><br />
+              <textarea id="ta" name="ta" rows="5" cols="40"># Not a heading
+* not a list item
+`code` and [link](https://example.com)
+              </textarea>
+            </p>
+            <p>
+              Progress: <progress value="32" max="100">32%</progress>
+              Meter: <meter min="0" max="10" low="3" high="7" optimum="8" value="2">2</meter>
+            </p>
+            <button type="submit">Submit</button>
+          </fieldset>
+        </form>
+      </section>
+
+      <section id="i18n">
+        <h2>Internationalization (rtl, ruby, emoji)</h2>
+        <p class="rtl">هذا نص عربي — לדוגמה (example).</p>
+        <p>
+          <ruby>漢<rt>hàn</rt>字<rt>zì</rt><rp>(</rp><rt>zi</rt><rp>)</rp></ruby>
+        </p>
+        <p>Emoji sequences: 👨‍👩‍👧‍👦 family, ❤️‍🔥 heart on fire, 🇺🇳 flag.</p>
+      </section>
+
+      <section id="address">
+        <h2>Address/Contacts</h2>
+        <address>
+          Jane Doe · 123 Example St · Somewhere, CA 99999 ·
+          <a href="mailto:jane@example.com">jane@example.com</a>
+        </address>
+      </section>
+
+      <section id="scripts-and-templates">
+        <h2>Script/Style/Template/Noscript content</h2>
+        <noscript><p>JavaScript disabled.</p></noscript>
+        <template id="tmpl">
+          <p>This is inside &lt;template&gt; and should generally be ignored by renderers.</p>
+        </template>
+        <script type="application/json" id="json-data">{ "title": "# not markdown", "items": [1, 2, 3] }</script>
+        <script>
+          // Ensure your extractor doesn't treat this as HTML or Markdown
+          const tricky = "</scr" + "ipt> in string"; // do not split tags
+          /* Block comment with -- dashes and **asterisks** */
+          console.log('Hello, world!');
+        </script>
+        <style>
+          /* Additional style block */
+          .content::after { content: "_not italic_"; }
+        </style>
+        <iframe title="Inline content via srcdoc" srcdoc='<!DOCTYPE html><html><body><p><strong>srcdoc</strong> content &amp; entities.</p></body></html>'></iframe>
+      </section>
+
+      <section id="misc">
+        <h2>Miscellaneous</h2>
+        <p class="pseudo">Class with ::before content.</p>
+        <p>Non-breaking spaces: a&nbsp;b&nbsp;&nbsp;c.</p>
+        <p>Zero-width joiner: a&#8205;b; soft hyphen: hy&shy;phen.</p>
+        <p>Center (deprecated): <center>Centered text</center></p>
+        <p>Big/small (deprecated): <big>Big</big> <small>Small</small></p>
+        <p>Horizontal rule below:</p>
+        <hr />
+        <p>Line with <span style="white-space: pre">  leading and   multiple   spaces</span> preserved.</p>
+        <p>Addressing <span role="doc-subtitle" aria-label="subtitle">ARIA roles</span> as plain text.</p>
+      </section>
+
+      <section id="preformatted">
+        <h2>Preformatted blocks</h2>
+        <pre>
+ASCII Art &lt;pre&gt;:
+  +----+
+  |    |
+  +----+
+        </pre>
+
+        <pre><code class="language-js">// JS snippet
+function add(a, b) { return a + b; }
+console.log(add(2, 3));
+// Markdown-y text in code should remain verbatim:
+// ## Heading?
+// * list
+// `inline`
+</code></pre>
+
+        <pre><code class="language-html">&lt;!-- HTML snippet --&gt;
+&lt;div title=&quot;**not markdown**&quot;&gt;Hello&lt;/div&gt;
+</code></pre>
+      </section>
+
+      <footer>
+        <p>End of document. Generated for testing on <time datetime="2025-10-07">October 7, 2025</time>.</p>
+      </footer>
+    </article>
+  </main>
+
+  <footer>
+    <p>Back to <a href="#top">top</a>.</p>
+  </footer>
+
+  <!--
+    Comment with tricky content: **not markdown** and a fake closing tag </p> and a URL https://example.com.
+    Long HTML comments should be ignored by most converters.
+  -->
+</body>
+</html>

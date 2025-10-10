@@ -5,11 +5,9 @@ asyncpg
 bcrypt
 beautifulsoup4
 cryptography
-datasets
 fastapi
 gunicorn
 httpx
-huggingface_hub[hf_xet]
 itsdangerous
 jinja2
 jinja2-cli
@@ -18,6 +16,16 @@ markdown-it-py
 neo4j
 numpy
 openai
+psycopg2-binary
+pydantic
+redis
+sentence-transformers
+sqlalchemy[asyncio]
+starlette
+starsessions[redis]
+uvicorn[standard]
+
+# Observability
 opentelemetry-api
 opentelemetry-exporter-otlp-proto-grpc
 opentelemetry-instrumentation-fastapi
@@ -25,25 +33,23 @@ opentelemetry-instrumentation-httpx
 opentelemetry-instrumentation-redis
 opentelemetry-instrumentation-sqlalchemy
 opentelemetry-sdk
-playwright
 prometheus_client
-psycopg2-binary
-pydantic
+
+# Browser
+playwright
+
+# Sandbox
+datasets
+huggingface_hub[hf_xet]
+matplotlib
+polars
+#torch
+transformers
+
+# Testing
 pytest
 pytest-asyncio
 pytest-cov
 pytest-xdist
 python-dotenv
 python-multipart
-redis
-sentence-transformers
-sqlalchemy[asyncio]
-starlette
-starsessions[redis]
-torch
-transformers
-uvicorn[standard]
-
-# Sandbox
-matplotlib
-polars
