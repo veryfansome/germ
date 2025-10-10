@@ -1,24 +1,25 @@
 import asyncio
 
-from germ.browser import PageFetchingWebBrowser
+from germ.browser import PageScrapingWebBrowser
 
 
 if __name__ == "__main__":
     from germ.observability.logging import setup_logging
     setup_logging()
 
-    wb = PageFetchingWebBrowser()
+    wb = PageScrapingWebBrowser()
 
     async def _main():
         await wb.start()
-        #url = "https://cloud.google.com/storage/docs/uploading-objects#rest-upload-objects"
-        url = "https://en.wikipedia.org/wiki/Drosophilidae"
+        url = "https://cloud.google.com/storage/docs/uploading-objects#rest-upload-objects"
+        #url = "https://en.wikipedia.org/wiki/Drosophilidae"
         #url = "https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal)"
         #url = "https://en.wikipedia.org/wiki/PageRank"
         #url = "https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/storage_bucket"
         #url = "https://requests.readthedocs.io/en/latest/user/quickstart/#make-a-request"
         try:
             result = await wb.fetch_url(
+                [{}],
                 url, 0,
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
                 {
@@ -29,7 +30,6 @@ if __name__ == "__main__":
                     'sec-fetch-dest': 'document', 'referer': 'http://localhost:8001/register',
                     'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate', 'sec-fetch-user': '?1',
                 },
-                data_dir="data/",
             )
             print(result)
         except Exception as e:

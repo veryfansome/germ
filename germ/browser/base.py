@@ -1,8 +1,6 @@
 import asyncio
 import logging
-import os
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, Request, Response, Route, async_playwright
 from prometheus_client import Gauge
@@ -31,7 +29,6 @@ concurrent_browser_contexts_gauge = Gauge(
 
 class BaseBrowser:
     def __init__(self, max_contexts: int = 24):
-        workers = min(os.cpu_count() or 4, 8)
 
         self._browser: Browser | None = None
         self._cache = {}
@@ -39,8 +36,6 @@ class BaseBrowser:
         self._contexts_lock: asyncio.Lock = asyncio.Lock()
         self._max_contexts = max_contexts
         self._playwright: Playwright | None = None
-        self._thread_pool = ThreadPoolExecutor(max_workers=workers)
-        self._thread_pool_semaphore = asyncio.Semaphore(workers)
 
     async def _get_or_create_context(
             self, url_split: SplitResult, user_id: int, user_agent: str, extra_headers: dict[str, str]
@@ -151,7 +146,6 @@ class BaseBrowser:
             await self._browser.close()
         if self._playwright is not None:
             await self._playwright.stop()
-        self._thread_pool.shutdown(wait=False, cancel_futures=True)
 
     @classmethod
     async def wait_for_page_to_settle(cls, page: Page, quiet_ms: float = 2000.0, max_ms: float = 10000.0):

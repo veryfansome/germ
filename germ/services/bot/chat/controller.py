@@ -15,7 +15,7 @@ from traceback import format_exc
 from typing import Iterable
 
 from germ.api.models import ChatRequest, ChatResponse
-from germ.browser import PageFetchingWebBrowser
+from germ.browser import PageScrapingWebBrowser
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
 from germ.services.bot.chat import async_openai_client, openai_handlers
@@ -34,7 +34,7 @@ tracer = trace.get_tracer(__name__)
 
 class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                      WebSocketSendEventHandler, WebSocketSessionMonitor):
-    def __init__(self, knowledge_graph: KnowledgeGraph, web_browser: PageFetchingWebBrowser):
+    def __init__(self, knowledge_graph: KnowledgeGraph, web_browser: PageScrapingWebBrowser):
         self.conversations: dict[int, Conversation] = {}
         self.knowledge_graph = knowledge_graph
         self.web_browser = web_browser
@@ -46,15 +46,15 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         info_source_suggestions = await suggest_best_online_info_source(filtered_messages, [])
         logger.info(f"Info source suggestions: {info_source_suggestions['urls']}")
 
-        coroutines = [self.web_browser.fetch_url(url, user_id, user_agent, extra_headers)
+        coroutines = [self.web_browser.fetch_url(filtered_messages, url, user_id, user_agent, extra_headers)
                       for url in info_source_suggestions["urls"]]
         results = await asyncio.gather(*coroutines, return_exceptions=True)
         for url, result in zip(info_source_suggestions["urls"], results):
             if isinstance(result, Exception):
                 logger.error(f"Failed to fetch {url}", exc_info=result)
                 continue
-            if logger.level == logging.DEBUG:
-                logger.debug(f"FetchedResult: {result}")
+            if logger.level == logging.DEBUG and isinstance(result, str):
+                logger.debug(f"FetchedResult: {result[:1000]}")
 
     async def load_conversations(self, user_id: int, conversation_ids: Iterable[int]):
         if not conversation_ids:

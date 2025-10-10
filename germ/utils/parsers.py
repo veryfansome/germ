@@ -1,6 +1,5 @@
 import logging
 import re
-from bs4 import BeautifulSoup
 from markdown_it import MarkdownIt
 from pydantic import BaseModel
 
@@ -66,7 +65,3 @@ class ParsedDoc(BaseModel):
                 text_parts.append(f"{indent}```\n")
                 code_block_pointer += 1
         return "".join(text_parts)
-
-
-def get_html_soup(text) -> BeautifulSoup:
-    return BeautifulSoup(text, 'html.parser')
