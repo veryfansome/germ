@@ -25,11 +25,7 @@ class ChatModelEventHandler(WebSocketReceiveEventHandler):
             chat_request.timeout = self.httpx_timeout
 
         completion = await async_openai_client.chat.completions.create(
-            messages=[message.model_dump() for message in chat_request.messages] + [
-                {"role": "system",
-                 "content": ("Answer in valid Markdown format only. "
-                             "Don't use code blocks unnecessarily but always use them when dealing with code.")}
-            ],
+            messages=[message.model_dump() for message in chat_request.messages] + [get_system_message()],
             model=chat_request.model,
             timeout=chat_request.timeout,
         )
@@ -61,11 +57,7 @@ class ReasoningChatModelEventHandler(WebSocketReceiveEventHandler):
             chat_request.timeout = self.httpx_timeout
 
         completion = await async_openai_client.chat.completions.create(
-            messages=[message.model_dump() for message in chat_request.messages] + [
-                {"role": "system",
-                 "content": ("Answer in valid Markdown format only. "
-                             "Don't use code blocks unnecessarily but always use them when dealing with code.")}
-            ],
+            messages=[message.model_dump() for message in chat_request.messages] + [get_system_message()],
             model=chat_request.model,
             reasoning_effort=chat_request.reasoning_effort,
             timeout=chat_request.timeout,
@@ -79,3 +71,14 @@ class ReasoningChatModelEventHandler(WebSocketReceiveEventHandler):
                 model=f"{completion.model}[effort:{chat_request.reasoning_effort}]"
             )
         )
+
+
+def get_system_message() -> dict[str, str]:
+    return {"role": "system",
+     "content": """
+Formatting:
+- Return valid Markdown for rendering.
+- Escape literal Markdown and HTML text.
+- Use ``` when dealing with code and > for all other callouts.
+""".strip()
+     }
