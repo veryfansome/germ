@@ -11,7 +11,8 @@ if __name__ == "__main__":
 
     async def _main():
         await wb.start()
-        url = "https://cloud.google.com/storage/docs/uploading-objects#rest-upload-objects"
+        #url = "https://cloud.google.com/storage/docs/uploading-objects#rest-upload-objects"
+        url = "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/blockquote"
         #url = "https://en.wikipedia.org/wiki/Drosophilidae"
         #url = "https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal)"
         #url = "https://en.wikipedia.org/wiki/PageRank"

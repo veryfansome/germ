@@ -3,7 +3,7 @@ import logging
 import os
 import re
 from bs4 import BeautifulSoup, Tag
-from bs4.element import AttributeValueList, NavigableString
+from bs4.element import AttributeValueList, Comment, NavigableString
 from concurrent.futures import ThreadPoolExecutor
 from playwright.async_api import Page
 
@@ -72,6 +72,8 @@ class PageScrapingWebBrowser(BaseBrowser):
 
 def decompose_non_content_elements(root_tag: Tag):
     """Strip out things that are not content related."""
+    #for comment in root_tag.find_all(string=Comment):
+    #    comment.decompose()
     tags_to_decompose = [
         "[class*=breadcrumb]",
         "[class*=nocontent]",
@@ -85,12 +87,15 @@ def decompose_non_content_elements(root_tag: Tag):
         "noscript",
         "script",
         "style",
+        "svg",
         "template",
     ]
     ## Framework specifics
     if root_tag.select_one("devsite-content"):  # Google devsite
         tags_to_decompose.extend([
             "cloud-free-trial",
+            "[class*=devsite-code-buttons-container]",
+            "[class*=devsite-code-cta-popout]",
             "[class*=devsite-nav-list]",
         ])
     for tag in root_tag.select(','.join(tags_to_decompose)):
@@ -134,30 +139,36 @@ def html_to_markdown(html: str):
 
     decompose_non_content_elements(root_tag)
     markdownify_heading_tags(root_tag)
-    markdownify_content_phrasing_tags(root_tag)
+    markdownify_simple_tags(root_tag)
     markdownify_list_tags(root_tag)
     markdownify_pre_tags(root_tag)
 
-    text = root_tag.get_text()
-    #text = str(root_tag)
+    #text = root_tag.get_text()
+    text = str(root_tag)
     text = normalize_newlines(text)
     return text.strip()
 
 
-def markdownify_content_phrasing_tags(root_tag: Tag):
+def markdownify_simple_tags(root_tag: Tag):
     for tag in root_tag.select(",".join([
+        "a",
+        "aside",
         "b",
         "br",
         "code",
+        "div",
         "em",
         "hr",
         "i",
         "p",
         "s",
-        "span[data-literal]",
+        "span",
         "strong",
     ])):
-        class_attrs = tag.get("class", AttributeValueList())
+        if not isinstance(tag, Tag) or tag.name is None:
+            continue  # Continue if decomposed earlier in loop
+
+        class_attrs = tag.get("class", AttributeValueList())  # TODO: Maybe move this lower down
         if MD_PROCESSED_MARKER in class_attrs:
             continue
 
@@ -166,11 +177,24 @@ def markdownify_content_phrasing_tags(root_tag: Tag):
         elif tag.name in {"hr"}:
             tag.replace_with(NavigableString("---"))
         else:
-            tag_text = tag.get_text()
-            if tag_text:
-                if tag.name in {"b", "strong"}:
+            tag_text = tag.get_text()  # TODO: Maybe move this higher up
+            if tag_text:#.strip():
+                if tag.name == "a":
+                    href = tag.get("href")
+                    if not href:
+                        tag.decompose()
+                        continue
+                    normalize_navigable_strings(tag)
+                    # TODO: implement link conversion
+                elif tag.name == "aside":
+                    normalize_navigable_strings(tag)
+                elif tag.name in {"b", "strong"}:
                     tag.insert_before(NavigableString("**"))
                     tag.insert_after(NavigableString("**"))
+                elif tag.name == "code" and tag.parent.name != "pre":  # block code handled separately
+                    tag.replace_with(NavigableString(f"`{tag_text}`"))
+                elif tag.name == "div":
+                    normalize_navigable_strings(tag)
                 elif tag.name in {"i", "em"}:
                     tag.insert_before(NavigableString("*"))
                     tag.insert_after(NavigableString("*"))
@@ -179,12 +203,16 @@ def markdownify_content_phrasing_tags(root_tag: Tag):
                 elif tag.name == "s":
                     tag.insert_before(NavigableString("~~"))
                     tag.insert_after(NavigableString("~~"))
-                elif tag.name == "code" and tag.parent.name != "pre":  # block code handled separately
-                    tag.replace_with(NavigableString(f"`{tag_text}`"))
-                elif tag.name == "span" and tag.has_attr("data-literal"):
-                    tag.replace_with(NavigableString(escape_markdown(tag_text)))
+                elif tag.name == "span":
+                    if tag.has_attr("data-literal"):
+                        tag.replace_with(NavigableString(escape_markdown(tag_text)))
+                    else:
+                        tag.unwrap()
+            else:
+                tag.decompose()
+                continue
 
-        if not isinstance(tag, NavigableString):
+        if isinstance(tag, Tag):
             class_attrs.append(MD_PROCESSED_MARKER)
             tag["class"] = class_attrs
 
@@ -201,6 +229,7 @@ def markdownify_heading_tags(root_tag: Tag):
                     tag_component.get_text().replace("\n", " ").strip()
                 ))
         tag.insert_before(NavigableString(f"\n{int(tag.name.lstrip('h')) * '#'} "))
+        tag.insert_after(NavigableString("\n"))
 
         class_attrs.append(MD_PROCESSED_MARKER)
         tag["class"] = class_attrs
@@ -249,17 +278,33 @@ def markdownify_pre_tags(root_tag: Tag):
         if MD_PROCESSED_MARKER in class_attrs:
             continue
 
-        indent = get_indentation(tag)
-        inner_text = tag.get_text().strip().replace("\n", f"\n{indent}")
+        ticks = ""
+        while len(tag.parent.contents) == 1:
+            if "code" in tag.parent.name:  # Some frameworks use custom tags that wrap around <pre>
+                ticks = "```"
+            tag.parent.unwrap()  # Unwrap all parents where the pre tag is the only child
+        if len(tag.contents) == 1:
+            child = tag.contents[0]
+            if isinstance(child, Tag) and child.name == "code":
+                ticks = "```"
 
-        # TODO: next|previous element may be too broad and sibling may require unwrap
-        if tag.previous_element:
+        indent = get_indentation(tag)
+
+        if tag.previous_sibling:
             tag.insert_before(NavigableString(f"\n{indent}"))
-        tag.insert_before(NavigableString(f"```"))
-        if tag.next_element:
+        tag.insert_before(NavigableString(f"{ticks}\n{indent}"))
+        if tag.next_sibling:
             tag.insert_after(NavigableString(f"\n{indent}"))
-        tag.insert_after(NavigableString(f"\n{indent}```"))
-        tag.replace_with(NavigableString(f"\n{indent}{inner_text}"))
+        tag.insert_after(NavigableString(f"\n{indent}{ticks}"))
+
+        if not ticks:
+            for element in tag.contents:
+                if isinstance(element, NavigableString):
+                    element_text = element.get_text().strip().replace("\n", f"\n{indent}")
+                    element.replace_with(NavigableString(element_text))
+        else:
+            inner_text = tag.get_text().strip().replace("\n", f"\n{indent}")
+            tag.replace_with(NavigableString(inner_text))
 
         class_attrs.append(MD_PROCESSED_MARKER)
         tag["class"] = class_attrs
