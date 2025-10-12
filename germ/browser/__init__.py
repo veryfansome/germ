@@ -72,8 +72,6 @@ class PageScrapingWebBrowser(BaseBrowser):
 
 def decompose_non_content_elements(root_tag: Tag):
     """Strip out things that are not content related."""
-    #for comment in root_tag.find_all(string=Comment):
-    #    comment.decompose()
     tags_to_decompose = [
         "[class*=breadcrumb]",
         "[class*=nocontent]",
@@ -100,6 +98,8 @@ def decompose_non_content_elements(root_tag: Tag):
         ])
     for tag in root_tag.select(','.join(tags_to_decompose)):
         tag.decompose()
+    for comment in root_tag.find_all(string=lambda s: isinstance(s, Comment)):
+        comment.decompose()
 
 
 def escape_markdown(text):
@@ -143,14 +143,23 @@ def html_to_markdown(html: str):
     markdownify_list_tags(root_tag)
     markdownify_pre_tags(root_tag)
 
-    #text = root_tag.get_text()
-    text = str(root_tag)
+    for element in reversed(root_tag.select("*")):
+        element.attrs = {}  # Strip original attributes
+        if not element.text.strip() or element.name not in {
+            # Leave useful tags that don't have equivalents in markdown
+            "aside",
+            "details",
+            "summary",
+        }:
+            element.unwrap()
+    text = str(root_tag)  # TODO: This still leaves the root tag
     text = normalize_newlines(text)
     return text.strip()
 
 
 def markdownify_simple_tags(root_tag: Tag):
-    for tag in root_tag.select(",".join([
+    # TODO: Maybe split flow and phrase into two passes
+    for tag in reversed(root_tag.select(",".join([
         "a",
         "aside",
         "b",
@@ -164,7 +173,7 @@ def markdownify_simple_tags(root_tag: Tag):
         "s",
         "span",
         "strong",
-    ])):
+    ]))):
         if not isinstance(tag, Tag) or tag.name is None:
             continue  # Continue if decomposed earlier in loop
 
@@ -177,7 +186,7 @@ def markdownify_simple_tags(root_tag: Tag):
         elif tag.name in {"hr"}:
             tag.replace_with(NavigableString("---"))
         else:
-            tag_text = tag.get_text()  # TODO: Maybe move this higher up
+            tag_text = tag.get_text()
             if tag_text:#.strip():
                 if tag.name == "a":
                     href = tag.get("href")
