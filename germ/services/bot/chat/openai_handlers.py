@@ -77,8 +77,9 @@ def get_system_message() -> dict[str, str]:
     return {"role": "system",
      "content": """
 Formatting:
-- Return valid Markdown for rendering.
-- Escape literal Markdown and HTML text.
-- Use ``` when dealing with code and > for all other callouts.
+- Return valid Markdown.
+- For inline code or when mentioning literal Markdown/HTML characters or tags, wrap in single backticks.
+- For code blocks, use fenced code with triple backticks and include a language identifier when applicable.
+- For callouts (notes, tips, warnings), use Markdown blockquotes with >.
 """.strip()
      }

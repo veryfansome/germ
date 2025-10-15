@@ -134,7 +134,9 @@
           <figcaption>Picture with fallback; transparent data URI image.</figcaption>
         </figure>
 
-        <img src="images/no-alt.png" width="16" height="16" /> <!-- Missing alt on purpose -->
+        <img src="images/no-alt.png" title="Image with title but no alt" width="16" height="16" />
+
+        <img src="images/no-alt.png" width="16" height="16" /> <!-- Missing alt and title -->
 
         <figure>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="A circle">
@@ -213,6 +215,10 @@
         <blockquote>
           <p>Blockquote paragraph.</p>
           <ul><li>List inside blockquote</li></ul>
+          <ol><li><pre><code>// Code in blockquote
+console.log('> not a quote');
+</code></pre></li></ol>
+          <br/>
           <pre><code>// Code in blockquote
 console.log('> not a quote');
 </code></pre>
