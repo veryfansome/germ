@@ -18,6 +18,7 @@ if __name__ == "__main__":
         #url = "https://en.wikipedia.org/wiki/PageRank"
         #url = "https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/storage_bucket"
         #url = "https://requests.readthedocs.io/en/latest/user/quickstart/#make-a-request"
+        #url = "https://www.w3schools.com/tags/default.asp"
         try:
             result = await wb.fetch_url(
                 [{}],

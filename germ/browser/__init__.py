@@ -43,7 +43,7 @@ class PageScrapingWebBrowser(BaseBrowser):
 
         remaining_ms = time_budget.remaining_ms()
         if remaining_ms <= 0:
-            return await self.page_to_markdown(page)
+            return await self.page_to_md(page)
 
         try:
             remaining_ms = time_budget.remaining_ms()
@@ -53,16 +53,16 @@ class PageScrapingWebBrowser(BaseBrowser):
 
             await _expand_interactive_docs(page)
 
-            return await self.page_to_markdown(page)
+            return await self.page_to_md(page)
         except Exception:
             await page.close()
             raise
 
-    async def page_to_markdown(self, page: Page) -> str:
+    async def page_to_md(self, page: Page) -> str:
         html = await page.content()
         async with self._thread_pool_semaphore:
             return await asyncio.get_running_loop().run_in_executor(
-                self._thread_pool, html_to_markdown, html
+                self._thread_pool, html_to_md, html
             )
 
     async def stop(self):
@@ -123,13 +123,19 @@ async def _expand_interactive_docs(page: Page):
 
 
 def get_indentation(root_tag: Tag) -> str:
-    parent_ol_cnt = len(root_tag.find_parents("ol"))
-    parent_ul_cnt = len(root_tag.find_parents("ul"))
-    indent = (" " * 3 * parent_ol_cnt) + (" " * 2 * parent_ul_cnt)
+    indent = ""
+    for parent in reversed(root_tag.find_parents(["blockquote", "ol", "ul"])):
+        match parent.name:
+            case "blockquote":
+                indent += "> "
+            case "ol":
+                indent += (" " * 3)
+            case "ul":
+                indent += (" " * 2)
     return indent
 
 
-def html_to_markdown(html: str):
+def html_to_md(html: str):
     html = html.replace("\xa0", " ")
     soup = BeautifulSoup(html, "lxml")
 
@@ -138,61 +144,57 @@ def html_to_markdown(html: str):
         root_tag = soup.select_one("body")
 
     decompose_non_content_elements(root_tag)
-    markdownify_heading_tags(root_tag)
-    markdownify_simple_tags(root_tag)
-    markdownify_list_tags(root_tag)
-    markdownify_pre_tags(root_tag)
+    md_convert_heading_tags(root_tag)
+    md_convert_simple_tags(root_tag)
+    md_convert_list_tags(root_tag)
+    md_convert_pre_tags(root_tag)
 
+    #text = str(root_tag)
     for element in reversed(root_tag.select("*")):
-        element.attrs = {}  # Strip original attributes
+        # Leave useful tags that don't have equivalents in markdown
         if not element.text.strip() or element.name not in {
-            # Leave useful tags that don't have equivalents in markdown
             "aside",
             "details",
             "summary",
         }:
             element.unwrap()
-    text = str(root_tag)  # TODO: This still leaves the root tag
+        else:
+            element.insert_before(NavigableString(f"<{element.name}>"))
+            element.insert_after(f"</{element.name}>")
+            element.unwrap()
+    text = root_tag.get_text()
     text = normalize_newlines(text)
     return text.strip()
 
 
-def markdownify_simple_tags(root_tag: Tag):
-    # TODO: Maybe split flow and phrase into two passes
-    for tag in reversed(root_tag.select(",".join([
-        "a",
-        "aside",
-        "b",
-        "br",
-        "code",
-        "div",
-        "em",
-        "hr",
-        "i",
-        "p",
-        "s",
-        "span",
-        "strong",
-    ]))):
-        if not isinstance(tag, Tag) or tag.name is None:
-            continue  # Continue if decomposed earlier in loop
-
-        class_attrs = tag.get("class", AttributeValueList())  # TODO: Maybe move this lower down
-        if MD_PROCESSED_MARKER in class_attrs:
-            continue
-
-        if tag.name in {"br"}:
-            tag.replace_with(NavigableString("\n\n"))
-        elif tag.name in {"hr"}:
+def md_convert_simple_tag(tag: Tag):
+    if not isinstance(tag, Tag) or tag.name is None:
+        return  # If already decomposed
+    match tag.name:
+        case "hr":
             tag.replace_with(NavigableString("---"))
-        else:
+        case "img":
+            alt_text = tag.get("alt")
+            is_hidden = tag.has_attr("hidden")
+            src_url = tag.get("src")
+            title = tag.get("title")
+            title = f" \"{title}\"" if title else ""
+            if not is_hidden and (alt_text or title) and src_url:
+                tag.replace_with(NavigableString(f"![{alt_text}]({src_url}{title})"))
+            else:
+                tag.decompose()
+        case _:
+            class_attrs = tag.get("class", AttributeValueList())
+            if MD_PROCESSED_MARKER in class_attrs:
+                return
+
             tag_text = tag.get_text()
-            if tag_text:#.strip():
+            if tag_text:
                 if tag.name == "a":
                     href = tag.get("href")
                     if not href:
                         tag.decompose()
-                        continue
+                        return
                     normalize_navigable_strings(tag)
                     # TODO: implement link conversion
                 elif tag.name == "aside":
@@ -215,19 +217,47 @@ def markdownify_simple_tags(root_tag: Tag):
                 elif tag.name == "span":
                     if tag.has_attr("data-literal"):
                         tag.replace_with(NavigableString(escape_markdown(tag_text)))
-                    else:
+                    elif not tag.find_parent("code"):
+                        normalize_navigable_strings(tag)
                         tag.unwrap()
             else:
                 tag.decompose()
-                continue
+                return
 
-        if isinstance(tag, Tag):
-            class_attrs.append(MD_PROCESSED_MARKER)
-            tag["class"] = class_attrs
+            if isinstance(tag, Tag):
+                class_attrs.append(MD_PROCESSED_MARKER)
+                tag["class"] = class_attrs
 
 
-def markdownify_heading_tags(root_tag: Tag):
-    for tag in root_tag.select("h1,h2,h3,h4,h5,h6"):
+def md_convert_simple_tags(root_tag: Tag):
+    # Phrasing content tags
+    for tag in reversed(root_tag.find_all([
+        "a",
+        "b",
+        "code",
+        "em",
+        "i",
+        "img",
+        "s",
+        "span",
+        "strong",
+    ])):
+        md_convert_simple_tag(tag)
+    # Flow content tags
+    for tag in reversed(root_tag.find_all([
+        "aside",
+        "div",
+        "hr",
+        "p",
+    ])):
+        md_convert_simple_tag(tag)
+    # Line break
+    for tag in root_tag.select("br"):
+        tag.replace_with(NavigableString("\n\n"))
+
+
+def md_convert_heading_tags(root_tag: Tag):
+    for tag in root_tag.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]):
         class_attrs = tag.get("class", AttributeValueList())
         if MD_PROCESSED_MARKER in class_attrs:
             continue
@@ -244,8 +274,8 @@ def markdownify_heading_tags(root_tag: Tag):
         tag["class"] = class_attrs
 
 
-def markdownify_list_tags(root_tag: Tag):
-    for list_tag in root_tag.find_all(["ol", "ul"], recursive=True):
+def md_convert_list_tags(root_tag: Tag):
+    for list_tag in root_tag.find_all(["ol", "ul"]):
         class_attrs = list_tag.get("class", AttributeValueList())
         if MD_PROCESSED_MARKER in class_attrs:
             continue
@@ -265,58 +295,76 @@ def markdownify_list_tags(root_tag: Tag):
                 index = 1
 
         indent = get_indentation(list_tag)
-        for item_tag in list_tag.find_all('li', recursive=False):
+        for item_idx, item_tag in enumerate(list_tag.find_all('li', recursive=False)):
             normalize_navigable_strings(item_tag)
             if is_ordered:
                 prefix = f"{index}. "
                 index += 1
             else:
                 prefix = "- "
-            item_tag.insert(0, NavigableString(f"\n{indent}{prefix}"))
+            indented_prefix = f"{indent}{prefix}"
+            if item_idx > 0 or (list_tag.previous_sibling and not list_tag.previous_sibling.get_text().endswith("\n")):
+                indented_prefix = "\n" + indented_prefix
+            #item_tag.insert(0, NavigableString(indented_prefix))
+            item_tag.insert_before(NavigableString(indented_prefix))
 
-        if list_tag.next_sibling:
+        if list_tag.next_sibling and not list_tag.next_sibling.get_text().startswith("\n"):
             list_tag.append(NavigableString(f"\n{indent}"))
 
         class_attrs.append(MD_PROCESSED_MARKER)
         list_tag["class"] = class_attrs
 
 
-def markdownify_pre_tags(root_tag: Tag):
-    for tag in root_tag.find_all("pre", recursive=True):
-        class_attrs = tag.get("class", AttributeValueList())
-        if MD_PROCESSED_MARKER in class_attrs:
-            continue
-
+def md_convert_pre_tags(root_tag: Tag):
+    for tag in root_tag.find_all("pre"):
         ticks = ""
         while len(tag.parent.contents) == 1:
             if "code" in tag.parent.name:  # Some frameworks use custom tags that wrap around <pre>
                 ticks = "```"
-            tag.parent.unwrap()  # Unwrap all parents where the pre tag is the only child
+            # With some exceptions, unwrap all parents where the pre tag is the only child
+            if tag.parent.name in {"aside", "blockquote", "details", "figure", "li", "td", "th"}:
+                break
+            else:
+                tag.parent.unwrap()
         if len(tag.contents) == 1:
             child = tag.contents[0]
             if isinstance(child, Tag) and child.name == "code":
                 ticks = "```"
 
         indent = get_indentation(tag)
-
-        if tag.previous_sibling:
-            tag.insert_before(NavigableString(f"\n{indent}"))
-        tag.insert_before(NavigableString(f"{ticks}\n{indent}"))
-        if tag.next_sibling:
-            tag.insert_after(NavigableString(f"\n{indent}"))
-        tag.insert_after(NavigableString(f"\n{indent}{ticks}"))
-
         if not ticks:
+            class_attrs = tag.get("class", AttributeValueList())
+            if MD_PROCESSED_MARKER in class_attrs:
+                continue
+
+            if tag.previous_sibling and not tag.previous_sibling.get_text().endswith("\n"):
+                tag.insert_before(NavigableString(f"\n{indent}"))
+            tag.insert_before(NavigableString(f"\n{indent}"))
+            if tag.next_sibling and not tag.next_sibling.get_text().startswith("\n"):
+                tag.insert_after(NavigableString(f"\n{indent}"))
+            tag.insert_after(NavigableString(f"\n{indent}"))
             for element in tag.contents:
                 if isinstance(element, NavigableString):
                     element_text = element.get_text().strip().replace("\n", f"\n{indent}")
                     element.replace_with(NavigableString(element_text))
+
+            class_attrs.append(MD_PROCESSED_MARKER)
+            tag["class"] = class_attrs
         else:
             inner_text = tag.get_text().strip().replace("\n", f"\n{indent}")
+            if "```" in inner_text:
+                ticks = "~~~"
+            if tag.parent.name == "li" and tag.parent.index(tag) == 0:
+                # If 1st element, indention handled by md_convert_list_tags
+                tag.insert_before(NavigableString(f"{ticks}\n{indent}"))
+            else:
+                if tag.previous_sibling and not tag.previous_sibling.get_text().endswith("\n"):
+                    tag.insert_before(NavigableString(f"\n"))
+                tag.insert_before(NavigableString(f"{indent}{ticks}\n{indent}"))
+            if tag.next_sibling and not tag.next_sibling.get_text().startswith("\n"):
+                tag.insert_after(NavigableString(f"\n{indent}"))
+            tag.insert_after(NavigableString(f"\n{indent}{ticks}"))
             tag.replace_with(NavigableString(inner_text))
-
-        class_attrs.append(MD_PROCESSED_MARKER)
-        tag["class"] = class_attrs
 
 
 def normalize_navigable_strings(tag: Tag):
