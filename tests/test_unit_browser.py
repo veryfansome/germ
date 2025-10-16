@@ -28,10 +28,56 @@ def test_get_indentation():
     assert get_indentation(ol_tag) == "  "
 
 
+def test_md_convert_list_tags():
+    soup = BeautifulSoup("""
+        <html><body><main>
+        <ul>
+          <li>Unordered level 1
+            <ul>
+              <li>Unordered level 2 with a paragraph.
+                <p>This is a paragraph inside a list item.</p>
+              </li>
+              <li>Unordered level 2 with nested ordered list
+                <ol start="3">
+                  <li value="3">Item 3</li>
+                  <li>Item 4</li>
+                </ol>
+              </li>
+            </ul>
+          </li>
+          <li>Another bullet</li>
+        </ul>
+
+        <ol type="A" start="2" reversed>
+          <li>Alpha 2</li>
+          <li>Alpha 1</li>
+        </ol>
+        </main></body></html>
+    """, "lxml")
+    main_tag = soup.select_one("main")
+    md_convert_list_tags(main_tag)
+    assert main_tag.get_text() == """
+- Unordered level 1 
+  - Unordered level 2 with a paragraph. This is a paragraph inside a list item.
+  - Unordered level 2 with nested ordered list 
+    3. Item 3
+    4. Item 4
+- Another bullet
+2. Alpha 2
+3. Alpha 1
+"""
+
+
 def test_md_convert_pre_tags():
     soup = BeautifulSoup(
         """
         <html><body><main>
+            <pre>
+ASCII Art &lt;pre&gt;:
+  +----+
+  |    |
+  +----+
+            </pre>
             <pre><code>// Code in blockquote
 console.log('> not a quote');
 </code></pre>
@@ -60,6 +106,12 @@ console.log('> not a quote');
     md_convert_list_tags(main_tag)
     md_convert_pre_tags(main_tag)
     assert main_tag.get_text() == """
+```
+ASCII Art <pre>:
+  +----+
+  |    |
+  +----+
+```
 ```
 // Code in blockquote
 console.log('> not a quote');

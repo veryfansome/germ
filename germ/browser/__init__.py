@@ -11,6 +11,7 @@ from germ.browser.base import BaseBrowser
 
 logger = logging.getLogger(__name__)
 
+HTML_RETAINED_MARKER = "__ret__"
 MD_PROCESSED_MARKER = "__md__"
 
 
@@ -305,7 +306,6 @@ def md_convert_list_tags(root_tag: Tag):
             indented_prefix = f"{indent}{prefix}"
             if item_idx > 0 or (list_tag.previous_sibling and not list_tag.previous_sibling.get_text().endswith("\n")):
                 indented_prefix = "\n" + indented_prefix
-            #item_tag.insert(0, NavigableString(indented_prefix))
             item_tag.insert_before(NavigableString(indented_prefix))
 
         if list_tag.next_sibling and not list_tag.next_sibling.get_text().startswith("\n"):
@@ -317,54 +317,29 @@ def md_convert_list_tags(root_tag: Tag):
 
 def md_convert_pre_tags(root_tag: Tag):
     for tag in root_tag.find_all("pre"):
-        ticks = ""
         while len(tag.parent.contents) == 1:
-            if "code" in tag.parent.name:  # Some frameworks use custom tags that wrap around <pre>
-                ticks = "```"
             # With some exceptions, unwrap all parents where the pre tag is the only child
             if tag.parent.name in {"aside", "blockquote", "details", "figure", "li", "td", "th"}:
                 break
             else:
                 tag.parent.unwrap()
-        if len(tag.contents) == 1:
-            child = tag.contents[0]
-            if isinstance(child, Tag) and child.name == "code":
-                ticks = "```"
 
+        fence = "```"
         indent = get_indentation(tag)
-        if not ticks:
-            class_attrs = tag.get("class", AttributeValueList())
-            if MD_PROCESSED_MARKER in class_attrs:
-                continue
-
-            if tag.previous_sibling and not tag.previous_sibling.get_text().endswith("\n"):
-                tag.insert_before(NavigableString(f"\n{indent}"))
-            tag.insert_before(NavigableString(f"\n{indent}"))
-            if tag.next_sibling and not tag.next_sibling.get_text().startswith("\n"):
-                tag.insert_after(NavigableString(f"\n{indent}"))
-            tag.insert_after(NavigableString(f"\n{indent}"))
-            for element in tag.contents:
-                if isinstance(element, NavigableString):
-                    element_text = element.get_text().strip().replace("\n", f"\n{indent}")
-                    element.replace_with(NavigableString(element_text))
-
-            class_attrs.append(MD_PROCESSED_MARKER)
-            tag["class"] = class_attrs
+        inner_text = tag.get_text().strip().replace("\n", f"\n{indent}")
+        if fence in inner_text:
+            fence = "~~~"
+        if tag.parent.name == "li" and tag.parent.index(tag) == 0:
+            # If 1st element, indention handled by md_convert_list_tags
+            tag.insert_before(NavigableString(f"{fence}\n{indent}"))
         else:
-            inner_text = tag.get_text().strip().replace("\n", f"\n{indent}")
-            if "```" in inner_text:
-                ticks = "~~~"
-            if tag.parent.name == "li" and tag.parent.index(tag) == 0:
-                # If 1st element, indention handled by md_convert_list_tags
-                tag.insert_before(NavigableString(f"{ticks}\n{indent}"))
-            else:
-                if tag.previous_sibling and not tag.previous_sibling.get_text().endswith("\n"):
-                    tag.insert_before(NavigableString(f"\n"))
-                tag.insert_before(NavigableString(f"{indent}{ticks}\n{indent}"))
-            if tag.next_sibling and not tag.next_sibling.get_text().startswith("\n"):
-                tag.insert_after(NavigableString(f"\n{indent}"))
-            tag.insert_after(NavigableString(f"\n{indent}{ticks}"))
-            tag.replace_with(NavigableString(inner_text))
+            if tag.previous_sibling and not tag.previous_sibling.get_text().endswith("\n"):
+                tag.insert_before(NavigableString(f"\n"))
+            tag.insert_before(NavigableString(f"{indent}{fence}\n{indent}"))
+        if tag.next_sibling and not tag.next_sibling.get_text().startswith("\n"):
+            tag.insert_after(NavigableString(f"\n{indent}"))
+        tag.insert_after(NavigableString(f"\n{indent}{fence}"))
+        tag.replace_with(NavigableString(inner_text))
 
 
 def normalize_navigable_strings(tag: Tag):
