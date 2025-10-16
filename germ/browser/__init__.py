@@ -11,7 +11,6 @@ from germ.browser.base import BaseBrowser
 
 logger = logging.getLogger(__name__)
 
-HTML_RETAINED_MARKER = "__ret__"
 MD_PROCESSED_MARKER = "__md__"
 
 
