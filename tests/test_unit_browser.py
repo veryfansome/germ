@@ -1,5 +1,8 @@
 from bs4 import BeautifulSoup
-from germ.browser import get_indentation, html_to_md, md_convert_list_tags, md_convert_pre_tags
+from germ.browser import (
+    get_indentation,
+    html_to_md,
+)
 
 
 def test_get_indentation():
@@ -29,7 +32,7 @@ def test_get_indentation():
 
 
 def test_md_convert_list_tags():
-    soup = BeautifulSoup("""
+    text = html_to_md("""
         <html><body><main>
         <ul>
           <li>Unordered level 1
@@ -53,10 +56,8 @@ def test_md_convert_list_tags():
           <li>Alpha 1</li>
         </ol>
         </main></body></html>
-    """, "lxml")
-    main_tag = soup.select_one("main")
-    md_convert_list_tags(main_tag)
-    assert main_tag.get_text() == """
+    """)
+    assert text == """
 - Unordered level 1 
   - Unordered level 2 with a paragraph. This is a paragraph inside a list item.
   - Unordered level 2 with nested ordered list 
@@ -65,11 +66,11 @@ def test_md_convert_list_tags():
 - Another bullet
 2. Alpha 2
 3. Alpha 1
-"""
+""".strip()
 
 
 def test_md_convert_pre_tags():
-    soup = BeautifulSoup(
+    text = html_to_md(
         """
         <html><body><main>
             <pre>
@@ -101,11 +102,8 @@ console.log('> not a quote');
 console.log('> not a quote');
 </code></pre></li></ol></blockquote>
         </main></body></html>
-        """, 'lxml')
-    main_tag = soup.select_one("main")
-    md_convert_list_tags(main_tag)
-    md_convert_pre_tags(main_tag)
-    assert main_tag.get_text() == """
+        """)
+    assert text == """
 ```
 ASCII Art <pre>:
   +----+
@@ -143,7 +141,64 @@ console.log('> not a quote');
 >    // Code in blockquote
 >    console.log('> not a quote');
 >    ```
-"""
+""".strip()
+
+
+def test_md_convert_simple_tag():
+    text = html_to_md("""
+            <html><body><main>
+            <h2 id="inline-text">Inline semantics, whitespace, and entities</h2>
+            <p>
+              <em>em</em>, <strong>strong</strong>, <i>i</i>, <b>b</b>, <u>u</u>, <s>strikethrough</s>,
+              <mark>mark</mark>, <small>small</small>, H<sub>2</sub>O, E = mc<sup>2</sup>,
+              press <kbd>Ctrl</kbd>+<kbd>K</kbd>, <var>x</var>=<samp>42</samp>, inline <code>code()</code>,
+              an <abbr title="Internationalization">i18n</abbr> example, a <cite>citation</cite>,
+              a short quote <q cite="https://example.com/quote">“hello”</q>,
+              and a <time datetime="2025-10-07T12:34:56-07:00">timestamp</time>.
+            </p>
+            <p>BiDi controls: <bdi>ABC123</bdi> <bdo dir="rtl">!dlroW olleH</bdo> <span dir="rtl">עברית العربية</span>.</p>
+            <p>
+              Escaped Markdown literals (should remain as text):
+              <span data-literal>**bold?** _italic?_ `inline code` [link](https://example.com) ![img](x) > quote</span>
+              and triple backticks: <span data-literal>``` not a fenced block ```</span>.
+            </p>
+            <p>Hard line breaks with <code>&lt;br&gt;</code> and <code>&lt;br /&gt;</code> below:<br>Line 2<br />Line 3</p>
+            <p>Soft hyphen &amp;shy;: hy&shy;phen&shy;ation; word break <wbr> opportunity.</p>
+            <hr />
+            <h1 id="h1-duplicate">H1 (within article)</h1>
+            <h2>H2</h2>
+            <h3>H3</h3>
+            <h4>H4</h4>
+            <h5>H5</h5>
+            <h6>H6</h6>
+            </main></body></html>
+        """)
+    assert text == """
+## Inline semantics, whitespace, and entities
+
+*em*, **strong**, *i*, **b**, <u>u</u>, ~~strikethrough~~, <mark>mark</mark>, <small>small</small>, H<sub>2</sub>O, E = mc<sup>2</sup>, press Ctrl+K, x=42, inline `code()`, an i18n example, a citation, a short quote “hello”, and a timestamp. 
+BiDi controls: ABC123 !dlroW olleH עברית العربية.
+Escaped Markdown literals (should remain as text): \\*\\*bold\\?\\*\\* \\_italic\\?\\_ \\`inline code\\` \\[link\\]\\(https\\:\\/\\/example\\.com\\) \\!\\[img\\]\\(x\\) \\> quote and triple backticks: \\`\\`\\` not a fenced block \\`\\`\\`. 
+Hard line breaks with `<br>` and `<br />` below:
+
+Line 2
+
+Line 3
+Soft hyphen &shy;: hyphenation; word break  opportunity.
+---
+
+# H1 (within article)
+
+## H2
+
+### H3
+
+#### H4
+
+##### H5
+
+###### H6
+""".strip()
 
 
 if __name__ == '__main__':
