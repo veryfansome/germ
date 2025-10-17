@@ -12,6 +12,10 @@ from germ.browser.base import BaseBrowser
 logger = logging.getLogger(__name__)
 
 MD_PROCESSED_MARKER = "__md__"
+UNICODE_TRANSLATIONS = str.maketrans({
+    0x00A0: 0x20,   # NBSP -> space
+    0x00AD: None,   # soft hyphen -> delete
+})
 
 
 class PageScrapingWebBrowser(BaseBrowser):
@@ -71,7 +75,7 @@ class PageScrapingWebBrowser(BaseBrowser):
 
 
 def decompose_non_content_elements(root_tag: Tag):
-    """Strip out things that are not content related."""
+    """Strip out things that are not needed or not content related."""
     tags_to_decompose = [
         "[class*=breadcrumb]",
         "[class*=nocontent]",
@@ -136,7 +140,6 @@ def get_indentation(root_tag: Tag) -> str:
 
 
 def html_to_md(html: str):
-    html = html.replace("\xa0", " ")
     soup = BeautifulSoup(html, "lxml")
 
     root_tag = soup.select_one("main")  # Prefer main if exists
@@ -155,7 +158,12 @@ def html_to_md(html: str):
         if not element.text.strip() or element.name not in {
             "aside",
             "details",
+            "mark",
+            "small",
+            "sub",
             "summary",
+            "sup",
+            "u",
         }:
             element.unwrap()
         else:
@@ -164,6 +172,7 @@ def html_to_md(html: str):
             element.unwrap()
     text = root_tag.get_text()
     text = normalize_newlines(text)
+    text = text.translate(UNICODE_TRANSLATIONS)
     return text.strip()
 
 
