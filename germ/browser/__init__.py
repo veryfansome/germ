@@ -11,6 +11,7 @@ from germ.browser.base import BaseBrowser
 
 logger = logging.getLogger(__name__)
 
+KEEP_HTML_MARKER = "__html__"
 MD_PROCESSED_MARKER = "__md__"
 UNICODE_TRANSLATIONS = str.maketrans({
     0x00A0: 0x20,   # NBSP -> space
@@ -89,7 +90,6 @@ def decompose_non_content_elements(root_tag: Tag):
         "noscript",
         "script",
         "style",
-        "svg",
         "template",
     ]
     ## Framework specifics
@@ -153,22 +153,34 @@ def html_to_md(html: str):
     md_convert_pre_tags(root_tag)
 
     #text = str(root_tag)
-    for element in reversed(root_tag.select("*")):
-        # Leave useful tags that don't have equivalents in markdown
-        if not element.text.strip() or element.name not in {
+    for element in reversed(root_tag.find_all()):
+        if KEEP_HTML_MARKER in element.get("class", AttributeValueList()):
+            # Leave tags that have been marked for retention
+            element.attrs.pop("class")
+            attr_blob = ' '.join([f'{attr}="{val}"' for attr, val in element.attrs.items()])
+            element.insert_before(NavigableString(f"<{element.name} {attr_blob}>"))
+            element.insert_after(f"</{element.name}>")
+            element.unwrap()
+        elif element.name in {
             "aside",
+            "audio",
             "details",
+            "figcaption",
+            "figure",
             "mark",
+            "picture",
             "small",
             "sub",
             "summary",
             "sup",
             "u",
+            "video",
         }:
-            element.unwrap()
-        else:
+            # Leave tags that don't have equivalents in markdown
             element.insert_before(NavigableString(f"<{element.name}>"))
             element.insert_after(f"</{element.name}>")
+            element.unwrap()
+        elif not element.text.strip():
             element.unwrap()
     text = root_tag.get_text()
     text = normalize_newlines(text)
@@ -179,24 +191,46 @@ def html_to_md(html: str):
 def md_convert_simple_tag(tag: Tag):
     if not isinstance(tag, Tag) or tag.name is None:
         return  # If already decomposed
+
+    class_attrs = tag.get("class", AttributeValueList())
+    if MD_PROCESSED_MARKER in class_attrs:
+        return
+
     match tag.name:
         case "hr":
             tag.replace_with(NavigableString("---"))
-        case "img":
-            alt_text = tag.get("alt")
-            is_hidden = tag.has_attr("hidden")
-            src_url = tag.get("src")
-            title = tag.get("title")
-            title = f" \"{title}\"" if title else ""
-            if not is_hidden and (alt_text or title) and src_url:
-                tag.replace_with(NavigableString(f"![{alt_text}]({src_url}{title})"))
-            else:
+        case "audio"|"picture"|"video":
+            children_to_keep = tag.find_all(["img", "source", "track"], recursive=False)
+            tag.clear()
+            tag.extend(children_to_keep)
+        case "img"|"source"|"track":
+            if (tag.name == "img"
+                    and (tag.has_attr("hidden") or (not tag.has_attr("src") and not tag.has_attr("title")))):
                 tag.decompose()
+            else:
+                for attr in set(tag.attrs.keys()):
+                    if attr not in {"src", "srcset", "title"}:
+                        tag.attrs.pop(attr)
+                class_attrs.append(KEEP_HTML_MARKER)
+        case "figure":
+            for element in tag.contents:
+                if not isinstance(element, Tag):
+                    element.decompose()
+        case "svg":
+            for attr in set(tag.attrs.keys()):
+                if attr not in {"role", "viewbox", "xmlns"}:
+                    tag.attrs.pop(attr)
+            children_to_keep = []
+            for element in tag.find_all(recursive=False):
+                if isinstance(element, Tag):
+                    element_class_attrs = element.get("class", AttributeValueList())
+                    element_class_attrs.extend([KEEP_HTML_MARKER, MD_PROCESSED_MARKER])
+                    element["class"] = element_class_attrs
+                    children_to_keep.append(element)
+            tag.clear()
+            tag.extend(children_to_keep)
+            class_attrs.append(KEEP_HTML_MARKER)
         case _:
-            class_attrs = tag.get("class", AttributeValueList())
-            if MD_PROCESSED_MARKER in class_attrs:
-                return
-
             tag_text = tag.get_text()
             if tag_text:
                 if tag.name == "a":
@@ -233,13 +267,22 @@ def md_convert_simple_tag(tag: Tag):
                 tag.decompose()
                 return
 
-            if isinstance(tag, Tag):
-                class_attrs.append(MD_PROCESSED_MARKER)
-                tag["class"] = class_attrs
+    if isinstance(tag, Tag):
+        class_attrs.append(MD_PROCESSED_MARKER)
+        tag["class"] = class_attrs
 
 
 def md_convert_simple_tags(root_tag: Tag):
-    # Phrasing content tags
+    """Finds tags and converts them in phases."""
+    # Media tags
+    for tag in reversed(root_tag.find_all([
+        "audio",
+        "picture",
+        "svg",
+        "video",
+    ])):
+        md_convert_simple_tag(tag)
+    # Phrasing content + some media related tags
     for tag in reversed(root_tag.find_all([
         "a",
         "b",
@@ -248,14 +291,17 @@ def md_convert_simple_tags(root_tag: Tag):
         "i",
         "img",
         "s",
+        "source",
         "span",
         "strong",
+        "track",
     ])):
         md_convert_simple_tag(tag)
     # Flow content tags
     for tag in reversed(root_tag.find_all([
         "aside",
         "div",
+        "figure",
         "hr",
         "p",
     ])):

@@ -163,7 +163,7 @@ def test_md_convert_simple_tag():
               and triple backticks: <span data-literal>``` not a fenced block ```</span>.
             </p>
             <p>Hard line breaks with <code>&lt;br&gt;</code> and <code>&lt;br /&gt;</code> below:<br>Line 2<br />Line 3</p>
-            <p>Soft hyphen &amp;shy;: hy&shy;phen&shy;ation; word break <wbr> opportunity.</p>
+            <aside><p>Soft hyphen &amp;shy;: hy&shy;phen&shy;ation; word break <wbr> opportunity.</p></aside>
             <hr />
             <h1 id="h1-duplicate">H1 (within article)</h1>
             <h2>H2</h2>
@@ -171,6 +171,36 @@ def test_md_convert_simple_tag():
             <h4>H4</h4>
             <h5>H5</h5>
             <h6>H6</h6>
+            <figure>
+              <picture>
+                <source srcset="images/sample.webp" type="image/webp" />
+                <img src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="1×1 transparent GIF" width="24" height="24" />
+              </picture>
+              <figcaption>Picture with fallback; transparent data URI image.</figcaption>
+            </figure>
+
+            <img src="images/no-alt.png" title="Image with title but no alt" width="16" height="16" />
+
+            <img src="images/no-alt.png" width="16" height="16" /> <!-- Missing alt and title -->
+
+            <figure>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="A circle">
+                <circle cx="50" cy="50" r="45" stroke="black" fill="none" />
+              </svg>
+              <figcaption>Inline SVG.</figcaption>
+            </figure>
+
+            <audio controls>
+              <source src="media/sample.ogg" type="audio/ogg" />
+              <source src="media/sample.mp3" type="audio/mpeg" />
+              <p>Your browser does not support the audio element.</p>
+            </audio>
+
+            <video controls width="240">
+              <source src="media/sample.mp4" type="video/mp4" />
+              <track kind="subtitles" src="media/captions.vtt" srclang="en" label="English" default />
+              Sorry, your browser doesn't support embedded videos.
+            </video>
             </main></body></html>
         """)
     assert text == """
@@ -184,7 +214,7 @@ Hard line breaks with `<br>` and `<br />` below:
 Line 2
 
 Line 3
-Soft hyphen &shy;: hyphenation; word break  opportunity.
+<aside>Soft hyphen &shy;: hyphenation; word break  opportunity.</aside>
 ---
 
 # H1 (within article)
@@ -198,6 +228,13 @@ Soft hyphen &shy;: hyphenation; word break  opportunity.
 ##### H5
 
 ###### H6
+
+<figure><picture><source srcset="images/sample.webp"></source><img src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="></img></picture><figcaption>Picture with fallback; transparent data URI image.</figcaption></figure>
+<img src="images/no-alt.png" title="Image with title but no alt"></img>
+<img src="images/no-alt.png"></img> 
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewbox="0 0 100 100" role="img"><circle cx="50" cy="50" r="45" stroke="black" fill="none"></circle></svg><figcaption>Inline SVG.</figcaption></figure>
+<audio><source src="media/sample.ogg"></source><source src="media/sample.mp3"></source></audio>
+<video><source src="media/sample.mp4"></source><track src="media/captions.vtt"></track></video>
 """.strip()
 
 
