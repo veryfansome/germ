@@ -44,7 +44,6 @@ gymnasium
 huggingface_hub[hf_xet]
 matplotlib
 polars
-pygame
 torch
 transformers
 
