@@ -40,10 +40,12 @@ playwright
 
 # Sandbox
 datasets
+gymnasium
 huggingface_hub[hf_xet]
 matplotlib
 polars
-#torch
+pygame
+torch
 transformers
 
 # Testing
