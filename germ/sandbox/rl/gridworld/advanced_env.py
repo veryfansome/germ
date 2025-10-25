@@ -1,8 +1,7 @@
 """
 Advanced Gridworld for Gymnasium
 --------------------------------
-A configurable Gridworld environment compatible with Gymnasium (step API v0.28+).
-Designed to stress-test RL agents.
+A configurable Gridworld environment compatible with Gymnasium (step API v0.28+). Designed to stress-test RL agents.
 
 Key features
 ============
@@ -15,6 +14,11 @@ Key features
 - Tile channels: "onehot", "index", or "rgb"
 - Render modes: "ansi", "rgb_array"
 - Deterministic seeding and episode-level domain randomization
+
+TODO:
+  - When bucket is dropped any water in inventory is dropped as well
+  - Pickaxe (⛏️) for removing non-border walls
+  - If path to goal is blocked, try to make required tools available
 """
 import enum
 import gymnasium as gym
@@ -30,31 +34,34 @@ from gymnasium import spaces
 class Act(enum.IntEnum):
     # Movement / stay (unchanged indices 0..4 to preserve prior behavior)
     STAY = 0
-    RIGHT = 1
-    LEFT = 2
-    DOWN = 3
-    UP = 4
+    MOVE_RIGHT = 1
+    MOVE_LEFT = 2
+    MOVE_DOWN = 3
+    MOVE_UP = 4
+
+    # Recover from fallen state
+    STAND_UP = 5
 
     # Use inventory slot s on adjacent tile dir (s in {1,2,3})
-    USE1_LEFT = 5
-    USE1_RIGHT = 6
-    USE1_UP = 7
-    USE1_DOWN = 8
+    USE1_LEFT = 6
+    USE1_RIGHT = 7
+    USE1_UP = 8
+    USE1_DOWN = 9
 
-    USE2_LEFT = 9
-    USE2_RIGHT = 10
-    USE2_UP = 11
-    USE2_DOWN = 12
+    USE2_LEFT = 10
+    USE2_RIGHT = 11
+    USE2_UP = 12
+    USE2_DOWN = 13
 
-    USE3_LEFT = 13
-    USE3_RIGHT = 14
-    USE3_UP = 15
-    USE3_DOWN = 16
+    USE3_LEFT = 14
+    USE3_RIGHT = 15
+    USE3_UP = 16
+    USE3_DOWN = 17
 
     # Drop / switch at current tile, for slot s
-    SWAP1 = 17
-    SWAP2 = 18
-    SWAP3 = 19
+    SWAP1 = 18
+    SWAP2 = 19
+    SWAP3 = 20
 
 
 # ----------------------------
@@ -144,8 +151,13 @@ class GridworldConfig:
         assert self.observation_mode in {"dict", "tiles", "rgb"}
         assert 0.0 <= self.slip_prob < 1.0
         assert 0.0 <= self.wind_strength < 1.0
-        assert self.goals >= 0 and self.keys >= 0 and self.doors >= 0
-
+        assert -1 <= self.wind_dir[0] <= 1 and -1 <= self.wind_dir[1] <= 1, "wind_dir components must be in {-1,0,1}"
+        assert 0.0 <= self.walls_density <= 1.0, "walls_density must be in [0,1]"
+        assert self.max_steps > 0, "max_steps must be positive"
+        # counts
+        for name in ("goals", "keys", "doors", "apples", "axes", "buckets",
+                     "lava_pools", "trees", "water_pools", "dynamic_obstacles"):
+            assert getattr(self, name) >= 0, f"{name} must be >= 0"
 
 # ----------------------------
 # Environment
@@ -156,10 +168,10 @@ class AdvancedGridworldEnv(gym.Env):
 
     MOVE_DELTAS = {
         Act.STAY: (0, 0),
-        Act.RIGHT: (1, 0),
-        Act.LEFT: (-1, 0),
-        Act.DOWN: (0, 1),
-        Act.UP: (0, -1),
+        Act.MOVE_RIGHT: (1, 0),
+        Act.MOVE_LEFT: (-1, 0),
+        Act.MOVE_DOWN: (0, 1),
+        Act.MOVE_UP: (0, -1),
     }
 
     def __init__(self, config: GridworldConfig | None = None):
@@ -176,13 +188,13 @@ class AdvancedGridworldEnv(gym.Env):
         self.apple_positions: list[tuple[int, int]] = []
         self.door_positions: list[tuple[int, int]] = []
         self.dynamic_obs: list[tuple[int, int]] = []
+        self.fallen_down: bool = False
         self.goal_positions: list[tuple[int, int]] = []
         self.grid = np.zeros((self.config.height, self.config.width), dtype=np.int8)
         self.inventory_slots: list[int] = [int(Tile.EMPTY), int(Tile.EMPTY), int(Tile.EMPTY)]
-        self.tree_positions: list[tuple[int, int]] = []
-
         self.key_positions: list[tuple[int, int]] = []
         self.step_count = 0
+        self.tree_positions: list[tuple[int, int]] = []
 
         # Spaces
         self.action_space = spaces.Discrete(len(Act))
@@ -192,7 +204,8 @@ class AdvancedGridworldEnv(gym.Env):
                 "tiles": obs_space,
                 # Inventory as 3-slot vector of uint8 tile codes [0..len(Tile)-1]
                 "inventory": spaces.Box(low=0, high=len(Tile) - 1, shape=(3,), dtype=np.uint8),
-                "time": spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
+                "time": spaces.Box(low=0.0, high=1.0, shape=(1, ), dtype=np.float32),
+                "status": spaces.Box(low=0, high=1, shape=(1,), dtype=np.uint8),
             })
         else:
             self.observation_space = obs_space
@@ -203,31 +216,33 @@ class AdvancedGridworldEnv(gym.Env):
         pass
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
-        super().reset(seed=seed)  # lets Gymnasium seed np_random
-        if seed is not None:
-            self._rng = np.random.default_rng(seed)
-        self.step_count = 0
+        # Let Gymnasium handle np_random seeding and bookkeeping.
+        super().reset(seed=seed)
+        # Sync with gymnasium's np_random so there's only one source.
+        # Gymnasium's Env.reset(seed=seed) guarantees self.np_random exists.
+        # We use Generator(np_random.bit_generator) to avoid distribution drift.
+        self._rng = np.random.default_rng(self.np_random.bit_generator)
+
+        self.fallen_down = False
         self.inventory_slots = [int(Tile.EMPTY), int(Tile.EMPTY), int(Tile.EMPTY)]
+        self.step_count = 0
+
         self._generate_layout()
         self._slip_ep, self._wind_dir_ep, self._wind_strength_ep = self._episode_params()
         obs = self._get_observation()
         info = {"agent_pos": self.agent_pos}
         return obs, info
 
-    def seed(self, seed: int | None = None):
-        # Gymnasium prefers seeding in reset(); this is for compatibility
-        self._rng = np.random.default_rng(seed)
-
     def step(self, action: int):
         self.step_count += 1
         acted_nonmove = False  # True if we executed a use/swap action (consumes step)
-        dx = dy = 0
         reward = 0.0
         terminated = False
         truncated = False
 
-        # Remember the agent’s previous position (for push-backs) then update to new position
+        # Remember the agent’s previous position and fallen state
         prev_agent_pos = self.agent_pos
+        prev_fallen = self.fallen_down
 
         # Branch on action family
         try:
@@ -235,56 +250,65 @@ class AdvancedGridworldEnv(gym.Env):
         except (ValueError, TypeError):
             act_enum = Act.STAY
 
+        slipped_this_step = False  # did we newly fall this step?
+
         if act_enum in self.MOVE_DELTAS:
             # Movement / stay
-            dx, dy = self.MOVE_DELTAS[act_enum]
-            proposed = (self.agent_pos[0] + dx, self.agent_pos[1] + dy)
-            proposed = self._clip_to_bounds(proposed)
-
-            # Slip is only possible when moving into or out of water
-            src_is_water = (self._tile_at(self.agent_pos) == Tile.WATER)
-            dst_is_water = (self._tile_at(proposed) == Tile.WATER)
-            if (src_is_water or dst_is_water) and (self._rng.random() < self._slip_ep):
-                # randomize among movement actions (0..4)
-                action = int(self._rng.integers(0, len(self.MOVE_DELTAS)))
-                act_enum = Act(action)
+            if self.fallen_down:
+                # When down, movement actions do nothing.
+                new_pos = self.agent_pos
+            else:
                 dx, dy = self.MOVE_DELTAS[act_enum]
                 proposed = (self.agent_pos[0] + dx, self.agent_pos[1] + dy)
                 proposed = self._clip_to_bounds(proposed)
 
-            # Wind: probabilistic push (as a separate single-cell attempt)
-            if self._wind_strength_ep > 0 and self._rng.random() < self._wind_strength_ep:
-                wdx, wdy = self._wind_dir_ep
-                wx, wy = int(np.sign(wdx)), int(np.sign(wdy))
-                cand = self._clip_to_bounds((proposed[0] + wx, proposed[1] + wy))
-                # allow wind push only into occupiable tiles (not through-walls)
-                cand_tile = Tile(int(self.grid[cand[1], cand[0]]))
-                if cand_tile not in (Tile.WALL, Tile.LAVA, Tile.DOOR_LOCKED, Tile.TREE):
-                    proposed = cand
+                # Slip is only possible when moving into or out of water
+                src_is_water = (self._tile_at(self.agent_pos) == Tile.WATER)
+                dst_is_water = (self._tile_at(proposed) == Tile.WATER)
+                if (src_is_water or dst_is_water) and (self._rng.random() < self._slip_ep):
+                    # Slip: agent falls down instead of moving
+                    self.fallen_down = True
+                    slipped_this_step = True
+                    proposed = self.agent_pos  # stay in place
 
-            new_pos = proposed
+                # Wind: probabilistic push (as a separate single-cell attempt)
+                if (not slipped_this_step) and self._wind_strength_ep > 0 and self._rng.random() < self._wind_strength_ep:
+                    wdx, wdy = self._wind_dir_ep
+                    wx, wy = int(np.sign(wdx)), int(np.sign(wdy))
+                    cand = self._clip_to_bounds((proposed[0] + wx, proposed[1] + wy))
+                    # allow wind push only into *agent-occupiable* tiles (respects obstacle layer too)
+                    if self._agent_can_occupy(cand):
+                        proposed = cand
+
+                new_pos = proposed
 
         else:
             # Non-movement actions consume the step but do not move the agent
             acted_nonmove = True
             new_pos = self.agent_pos
 
-            # Use slot on adjacent tile?
-            sd = self._use_action_to_slot_dir(action)
-            if sd is not None:
-                s_idx, (ux, uy) = sd
-                reward += self._use_slot_on_dir(s_idx, ux, uy)
+            if act_enum == Act.STAND_UP:
+                # Recover from fallen state
+                self.fallen_down = False
+            else:
+                # Use slot on adjacent tile?
+                sd = self._use_action_to_slot_dir(action)
+                if sd is not None:
+                    s_idx, (ux, uy) = sd
+                    reward += self._use_slot_on_dir(s_idx, ux, uy)
 
-            # Swap/Drop at current tile?
-            elif act_enum in (Act.SWAP1, Act.SWAP2, Act.SWAP3):
-                s_idx = {Act.SWAP1: 0, Act.SWAP2: 1, Act.SWAP3: 2}[act_enum]
-                reward += self._swap_drop_pick_at_current(s_idx)
+                # Swap/Drop at current tile?
+                elif act_enum in (Act.SWAP1, Act.SWAP2, Act.SWAP3):
+                    s_idx = {Act.SWAP1: 0, Act.SWAP2: 1, Act.SWAP3: 2}[act_enum]
+                    reward += self._swap_drop_pick_at_current(s_idx)
 
-            # Unknown action types fall through as no-ops
+                # Unknown action types fall through as no-ops
 
         # Collision logic
-        t = self._tile_at(new_pos)
+        apples_eaten_by_obs = 0
         collided = False
+        pushed = False
+        t = self._tile_at(new_pos)
         if t in (Tile.WALL, Tile.DOOR_LOCKED, Tile.TREE):
             collided = True
             reward += self.config.collision_penalty
@@ -295,7 +319,7 @@ class AdvancedGridworldEnv(gym.Env):
         elif t == Tile.LAVA:
             reward += self.config.lava_penalty
             if self.config.respawn_on_lava:
-                new_pos = self._random_empty_cell()
+                new_pos = self._random_empty_cell(exclude=self._dynamic_obs_set)
             else:
                 terminated = True
         else:
@@ -331,84 +355,83 @@ class AdvancedGridworldEnv(gym.Env):
         # Update to new position
         self.agent_pos = new_pos
 
-        # Remember previous obstacle positions, then move dynamic obstacles
-        prev_obs_positions = list(self.dynamic_obs)
-        apples_eaten_by_obs = self._step_dynamic_obstacles()
-
-        # After obstacles move, if one occupies the agent cell, push the agent
-        pushed = False
-        if self.agent_pos in self.dynamic_obs:
-            reward += self.config.collision_penalty
-            pushed = True
-
-            # Find (one) colliding obstacle and its movement vector
-            coll_idx = None
-            for i, pos in enumerate(self.dynamic_obs):
-                if pos == self.agent_pos:
-                    coll_idx = i
-                    break
-
-            if coll_idx is not None:
-                ox_prev = prev_obs_positions[coll_idx][0]
-                oy_prev = prev_obs_positions[coll_idx][1]
-                ox_now, oy_now = self.dynamic_obs[coll_idx]
-                odx = ox_now - ox_prev
-                ody = oy_now - oy_prev
-
-                # Default candidate: push along obstacle's move direction
-                if odx == 0 and ody == 0:
-                    # Obstacle didn't move; fall back to pushing the agent back to where it came from
-                    cand = prev_agent_pos
-                else:
-                    cand = (self.agent_pos[0] + odx, self.agent_pos[1] + ody)
-
-                # Try push destination; if not safe, revert to previous cell if safe; else stay
-                if self._agent_can_occupy(cand):
-                    self.agent_pos = cand
-                elif self._agent_can_occupy(prev_agent_pos):
-                    self.agent_pos = prev_agent_pos
-                else:
-                    # Last-resort escape to avoid persistent co-location.
-                    # Fixed neighbor order for determinism:
-                    for nx, ny in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                        cand2 = (self.agent_pos[0] + nx, self.agent_pos[1] + ny)
-                        if self._agent_can_occupy(cand2):
-                            self.agent_pos = cand2
-                            break
-                    else:
-                        if self.config.truncate_on_collision:
-                            truncated = True
-
-            if self.config.truncate_on_collision:
-                truncated = True
-
-        # Trees may drop apples with each step
-        self._trees_maybe_drop_apples()
-
-        # If a push moves the agent onto an apple/key/goal, process the landing tile
-        t_post = self._tile_at(self.agent_pos)
-        if t_post == Tile.APPLE and self.agent_pos in self.apple_positions:
-            reward += self.config.apple_reward
-            self.apple_positions.remove(self.agent_pos)
-            self.grid[self.agent_pos[1], self.agent_pos[0]] = Tile.EMPTY
-        elif t_post == Tile.GOAL:
-            reward += self.config.goal_reward
-            # remove from bookkeeping + clear cell
-            self._remove_goal_at(self.agent_pos)
-            self.grid[self.agent_pos[1], self.agent_pos[0]] = Tile.EMPTY
-            if self.config.goal_terminates:
-                terminated = True
-            if self.config.goal_respawn:
-                self.grid[self.agent_pos[1], self.agent_pos[0]] = Tile.EMPTY
-                self._spawn_goal(1)
-
-        # Step penalty
         if not terminated:
+            # Remember previous obstacle positions, then move dynamic obstacles
+            prev_obs_positions = list(self.dynamic_obs)
+            apples_eaten_by_obs = self._step_dynamic_obstacles()
+
+            # After obstacles move, if one occupies the agent cell, push the agent
+            if self.agent_pos in self.dynamic_obs:
+                reward += self.config.collision_penalty
+                pushed = True
+
+                # Find (one) colliding obstacle and its movement vector
+                coll_idx = None
+                for i, pos in enumerate(self.dynamic_obs):
+                    if pos == self.agent_pos:
+                        coll_idx = i
+                        break
+
+                if coll_idx is not None:
+                    ox_prev = prev_obs_positions[coll_idx][0]
+                    oy_prev = prev_obs_positions[coll_idx][1]
+                    ox_now, oy_now = self.dynamic_obs[coll_idx]
+                    odx = ox_now - ox_prev
+                    ody = oy_now - oy_prev
+
+                    # Default candidate: push along obstacle's move direction
+                    if odx == 0 and ody == 0:
+                        # Obstacle didn't move; fall back to pushing the agent back to where it came from
+                        cand = prev_agent_pos
+                    else:
+                        cand = (self.agent_pos[0] + odx, self.agent_pos[1] + ody)
+
+                    # Try push destination; if not safe, revert to previous cell if safe; else stay
+                    if self._agent_can_occupy(cand):
+                        self.agent_pos = cand
+                    elif self._agent_can_occupy(prev_agent_pos):
+                        self.agent_pos = prev_agent_pos
+                    else:
+                        # Last-resort escape to avoid persistent co-location.
+                        # Fixed neighbor order for determinism:
+                        for nx, ny in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                            cand2 = (self.agent_pos[0] + nx, self.agent_pos[1] + ny)
+                            if self._agent_can_occupy(cand2):
+                                self.agent_pos = cand2
+                                break
+                        else:
+                            if self.config.truncate_on_collision:
+                                truncated = True
+
+                if self.config.truncate_on_collision:
+                    truncated = True
+
+            # Trees may drop apples with each step
+            self._trees_maybe_drop_apples()
+
+            # If a push moves the agent onto an apple/key/goal, process the landing tile
+            t_post = self._tile_at(self.agent_pos)
+            if t_post == Tile.APPLE and self.agent_pos in self.apple_positions:
+                reward += self.config.apple_reward
+                self.apple_positions.remove(self.agent_pos)
+                self.grid[self.agent_pos[1], self.agent_pos[0]] = Tile.EMPTY
+            elif t_post == Tile.GOAL:
+                reward += self.config.goal_reward
+                # remove from bookkeeping + clear cell
+                self._remove_goal_at(self.agent_pos)
+                self.grid[self.agent_pos[1], self.agent_pos[0]] = Tile.EMPTY
+                if self.config.goal_terminates:
+                    terminated = True
+                if self.config.goal_respawn:
+                    self.grid[self.agent_pos[1], self.agent_pos[0]] = Tile.EMPTY
+                    self._spawn_goal(1)
+
+            # Step penalty
             reward += -abs(self.config.step_penalty)
 
-        # Time truncation
-        if self.step_count >= self.config.max_steps:
-            truncated = True
+            # Time truncation
+            if self.step_count >= self.config.max_steps:
+                truncated = True
 
         obs = self._get_observation()
         info = {
@@ -418,6 +441,9 @@ class AdvancedGridworldEnv(gym.Env):
             "apples_eaten_by_obs": apples_eaten_by_obs,
             "collided": collided or pushed,
             "dst_is_water": (self._tile_at(self.agent_pos) == Tile.WATER),
+            "fallen_down": self.fallen_down,
+            "fell_this_step": slipped_this_step,
+            "previously_fallen": prev_fallen,
             "slip_prob_ep": self._slip_ep,
             "src_is_water": (self._tile_at(prev_agent_pos) == Tile.WATER),
             "step": self.step_count,
@@ -464,11 +490,12 @@ class AdvancedGridworldEnv(gym.Env):
         if self.config.observation_mode == "tiles":
             return obs_tiles
         elif self.config.observation_mode == "dict":
-            tfrac = np.array([self.step_count / max(1, self.config.max_steps)], dtype=np.float32)
+            tfrac = np.array([min(self.step_count, self.config.max_steps) / max(1, self.config.max_steps)], dtype=np.float32)
             return {
                 "tiles": obs_tiles,
                 "inventory": np.array(self.inventory_slots, dtype=np.uint8),
                 "time": tfrac,
+                "status": np.array([1 if self.fallen_down else 0], dtype=np.uint8),
             }
         else:  # fallback
             return obs_tiles
@@ -531,9 +558,6 @@ class AdvancedGridworldEnv(gym.Env):
         self._spawn_goal(max(0, self.config.goals))
         self._ensure_connectivity()
 
-        # Agent spawn (avoid hazards)
-        self.agent_pos = self._random_empty_cell()
-
         # Lava pools
         for _ in range(max(0, self.config.lava_pools)):
             pos = self._random_empty_cell()
@@ -568,12 +592,22 @@ class AdvancedGridworldEnv(gym.Env):
             pos = self._random_empty_cell()
             self.grid[pos[1], pos[0]] = Tile.BUCKET
 
+        if not np.any(self.grid == int(Tile.EMPTY)):
+            raise RuntimeError(
+                "Layout contains no EMPTY cell (try lowering walls_density or counts)."
+            )
+
         # Dynamic obstacles (layered; do not write into base grid)
         self.dynamic_obs = []
+        taken = set()
         for _ in range(max(0, self.config.dynamic_obstacles)):
-            pos = self._random_empty_cell()
+            pos = self._random_empty_cell(exclude=taken)
             self.dynamic_obs.append(pos)
+            taken.add(pos)
         self._dynamic_obs_set = set(self.dynamic_obs)
+
+        # Agent spawn (avoid hazards)
+        self.agent_pos = self._random_empty_cell(exclude=self._dynamic_obs_set)
 
     def _remove_goal_at(self, pos: tuple[int, int]) -> None:
         """Remove goal bookkeeping for a goal at pos, if present."""
@@ -583,10 +617,14 @@ class AdvancedGridworldEnv(gym.Env):
             pass
 
     def _spawn_goal(self, n: int):
+        exclude = {self.agent_pos}
+        # optionally also exclude dynamic obstacles to avoid immediate collision artifacts
+        exclude |= set(self.dynamic_obs)
         for _ in range(n):
-            pos = self._find_goal_spot()
+            pos = self._find_goal_spot(exclude=exclude)
             self.grid[pos[1], pos[0]] = int(Tile.GOAL)
             self.goal_positions.append(pos)
+            exclude.add(pos)  # avoid placing multiple goals on same cell
 
     # ------------- Dynamics helpers -------------
 
@@ -623,18 +661,22 @@ class AdvancedGridworldEnv(gym.Env):
 
     def _ensure_connectivity(self) -> None:
         """
-        Simplified invariant: ensure each GOAL has at least one non-WALL neighbor.
-        Walls are immutable; other obstacles are removable and do not matter here.
-        If a goal is boxed by walls, relocate it to a valid spot.
+        Ensure each GOAL has at least one non-WALL neighbor. If a goal is boxed by walls, relocate it
+        to a valid spot, avoiding collisions with other goals.
         """
+        occupied = set(self.goal_positions)
         fixed_positions: list[tuple[int, int]] = []
         for pos in list(self.goal_positions):
             x, y = pos
             if not self._has_nonwall_neighbor(pos):
                 # relocate
                 self.grid[y, x] = int(Tile.EMPTY)
-                new_pos = self._find_goal_spot()
+                # Exclude all other goals already considered/kept this pass
+                exclude = occupied - {pos}
+                new_pos = self._find_goal_spot(exclude=exclude)
                 self.grid[new_pos[1], new_pos[0]] = int(Tile.GOAL)
+                occupied.discard(pos)
+                occupied.add(new_pos)
                 fixed_positions.append(new_pos)
             else:
                 fixed_positions.append(pos)
@@ -655,20 +697,33 @@ class AdvancedGridworldEnv(gym.Env):
                     self._rng.normal(self.config.wind_strength, 0.02), 0.0, 1.0))
         return slip, wind_dir, wind_strength
 
-    def _find_goal_spot(self, max_tries: int = 500) -> tuple[int, int]:
+    def _find_goal_spot(self, max_tries: int = 500, exclude: set[tuple[int, int]] | None = None) -> tuple[int, int]:
         """
-        Sample empty cells until we find one that is not boxed by walls.
-        Fallback to any empty cell if none found within max_tries (extremely rare
-        unless the map is almost all walls).
+        Sample empty cells until we find one that is not boxed by walls and not in `exclude`.
+        Fallback to any empty non-excluded cell if none found within max_tries.
         """
+        if exclude is None:
+            exclude = set()
+
         last_empty: tuple[int, int] | None = None
         for _ in range(max_tries):
             pos = self._random_empty_cell()
+            if pos in exclude:
+                continue
             last_empty = pos
             if self._has_nonwall_neighbor(pos):
                 return pos
-        # Fallback: accept the last empty even if boxed (the caller will re-validate later)
-        return last_empty or (1, 1)
+
+        # Fallback: choose any EMPTY not in exclude
+        empties = np.argwhere(self.grid == int(Tile.EMPTY))
+        self._rng.shuffle(empties)
+        for y, x in empties:
+            p = (int(x), int(y))
+            if p not in exclude:
+                return p
+
+        # Nothing workable
+        raise RuntimeError("Could not place a GOAL (grid over-constrained).")
 
     def _has_nonwall_neighbor(self, pos: tuple[int, int]) -> bool:
         """Return True if at least one 4-neighbor is not a WALL."""
@@ -685,50 +740,79 @@ class AdvancedGridworldEnv(gym.Env):
         return [(cx, cy) for (cx, cy) in cand
                 if 0 <= cx < self.config.width and 0 <= cy < self.config.height]
 
-    def _random_empty_cell(self) -> tuple[int, int]:
+    def _random_empty_cell(self, exclude: set[tuple[int, int]] | None = None) -> tuple[int, int]:
+        """Sample an EMPTY base-grid cell not in `exclude` (if given)."""
+        if exclude is None:
+            exclude = set()
+
         H, W = self.config.height, self.config.width
-        # retry sampling for robustness
-        for _ in range(10000):
-            x = int(self._rng.integers(1, W-1))
-            y = int(self._rng.integers(1, H-1))
-            if self.grid[y, x] == Tile.EMPTY:
+
+        # Fast rejection sampling (avoids materializing full list in the common case)
+        for _ in range(5000):
+            x = int(self._rng.integers(1, W - 1))
+            y = int(self._rng.integers(1, H - 1))
+            if self.grid[y, x] == Tile.EMPTY and (x, y) not in exclude:
                 return (x, y)
-        # fallback (should be rare)
-        empties = np.argwhere(self.grid == Tile.EMPTY)
-        if len(empties) == 0:
-            return (1, 1)
-        y, x = empties[self._rng.integers(0, len(empties))]
-        return (int(x), int(y))
+
+        # Deterministic fallback over the true set of empties
+        empties = np.argwhere(self.grid == int(Tile.EMPTY))
+        if empties.size == 0:
+            raise RuntimeError("No EMPTY cells available in grid (layout over-constrained).")
+
+        # Shuffle a copy to preserve RNG determinism without huge loops
+        self._rng.shuffle(empties)
+        for y, x in empties:
+            p = (int(x), int(y))
+            if p not in exclude:
+                return p
+
+        # If we got here, nothing fits the exclusion set.
+        raise RuntimeError("No EMPTY cells remain after applying `exclude`.")
 
     def _step_dynamic_obstacles(self) -> int:
         """Advance obstacle layer via random walk (or adversary bias) without touching base tiles."""
         apples_eaten = 0
-        next_taken = set()
+        next_taken: set[tuple[int, int]] = set()
         new_positions: list[tuple[int, int]] = []
+
+        # Snapshot of current positions to disallow moves into other obstacles' current cells
+        current_positions = set(self.dynamic_obs)
+
         for pos in list(self.dynamic_obs):  # iterate a snapshot
             if self.config.adversary:
                 # biased move towards agent (Manhattan greedy)
                 dx = np.sign(self.agent_pos[0] - pos[0])
                 dy = np.sign(self.agent_pos[1] - pos[1])
-                candidates = [(dx, 0), (0, dy), (0, 0), (-dx, 0), (0, -dy)]
+                # Greedy first; stay is considered explicitly at the end
+                candidate_steps = [(dx, 0), (0, dy), (-dx, 0), (0, -dy), (0, 0)]
             else:
                 # random walk with stay
-                candidates = [(1, 0), (-1, 0), (0, 1), (0, -1), (0, 0)]
-                self._rng.shuffle(candidates)
+                candidate_steps = [(1, 0), (-1, 0), (0, 1), (0, -1), (0, 0)]
+                self._rng.shuffle(candidate_steps)
 
-            moved = pos
-            for (cx, cy) in candidates:
+            moved = None
+            for (cx, cy) in candidate_steps:
                 nx, ny = pos[0] + cx, pos[1] + cy
+                # in-bounds
                 if not (0 <= nx < self.config.width and 0 <= ny < self.config.height):
                     continue
                 tile = Tile(int(self.grid[ny, nx]))
-                # can't move into walls, lava, trees, or locked doors; avoid stacking, everything else is fine
+                # cannot pass through hard obstacles
                 if tile in (Tile.WALL, Tile.LAVA, Tile.DOOR_LOCKED, Tile.TREE):
                     continue
+                # do not move into a cell that another obstacle already reserved this tick
                 if (nx, ny) in next_taken:
-                    continue  # avoid stacking
+                    continue
+                # do not move into any other obstacle's *current* cell
+                if (nx, ny) in current_positions and (nx, ny) != pos:
+                    continue
                 moved = (nx, ny)
                 break
+
+            if moved is None:
+                # staying in place is always allowed; if someone already moved into our cell,
+                # the check above prevented that.
+                moved = pos
 
             # If the obstacle's destination contains an apple, consume it.
             if self.grid[moved[1], moved[0]] == Tile.APPLE:
@@ -881,12 +965,8 @@ class AdvancedGridworldEnv(gym.Env):
                     self.tree_positions.remove((tx, ty))
                 return reward_delta
             # Remove MOVING_OBS at target location (layered)
-            if (tx, ty) in self.dynamic_obs:
-                # delete one instance at that location (if duplicates existed)
-                for i, pos in enumerate(list(self.dynamic_obs)):
-                    if pos == (tx, ty):
-                        del self.dynamic_obs[i]
-                        break
+            if (tx, ty) in self._dynamic_obs_set:
+                self.dynamic_obs = [p for p in self.dynamic_obs if p != (tx, ty)]
                 self._dynamic_obs_set = set(self.dynamic_obs)
                 return reward_delta
 
@@ -919,19 +999,19 @@ class AdvancedGridworldEnv(gym.Env):
 
     def _render_ansi(self) -> str:
         glyphs = {
-            Tile.AGENT: " 😁 ",
+            Tile.AGENT: " 💥 " if self.agent_pos in self._dynamic_obs_set else " 😁 ",
             Tile.APPLE: " 🍎 ",
-            Tile.AXE: " 🪓 ",  # Can be used to chops down trees and remove moving obstacles
-            Tile.BUCKET: " 🪣 ",  # Enables picking up water if in inventory
+            Tile.AXE: " 🪓 ",
+            Tile.BUCKET: " 🪣 ",
             Tile.DOOR_LOCKED: " 🚪 ",
             Tile.EMPTY: " ⬜ ",
             Tile.GOAL: " 🏁 ",
             Tile.KEY: " 🔑 ",
             Tile.LAVA: " ♨️ ",
             Tile.MOVING_OBS: " 😈 ",
-            Tile.TREE: " 🌳 ",  # Occasionally drops apples in adjacent tiles and can be removed with an axe
+            Tile.TREE: " 🌳 ",
             Tile.WALL: " 🪨 ",
-            Tile.WATER: " 💦 ",  # Risk of slipping, can be picked up, can be used to remove lava tiles, and can be used on trees to increase chance of dropping apples.
+            Tile.WATER: " 💦 ",
         }
         grid = self.grid.copy()
         for (ox, oy) in self.dynamic_obs:  # overlay dynamic obstacles first
@@ -973,7 +1053,7 @@ if __name__ == "__main__":
     env = make_env(width=12, height=12, view_size=5,
                    apples=2, axes=1, buckets=1, doors=1, dynamic_obstacles=1, keys=1,
                    lava_pools=1, trees=2, water_pools=2,
-                   walls_density=0.3, slip_prob=0.05, wind_strength=0.1, wind_dir=(1,0),
+                   walls_density=0.2, slip_prob=0.05, wind_strength=0.1, wind_dir=(1,0),
                    observation_mode="dict", render_mode="ansi")
     #obs, info = env.reset(seed=0)
     obs, info = env.reset()
