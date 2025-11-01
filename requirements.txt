@@ -1,13 +1,11 @@
-accelerate
 aiofiles
 aiohttp
 asyncpg
 bcrypt
 beautifulsoup4
 cryptography
-fastapi
+fastapi>=0.120.4
 gunicorn
-httpx
 itsdangerous
 jinja2
 jinja2-cli
@@ -21,7 +19,7 @@ pydantic
 redis
 sentence-transformers
 sqlalchemy[asyncio]
-starlette
+starlette>=0.47.3
 starsessions[redis]
 uvicorn[standard]
 
@@ -37,15 +35,6 @@ prometheus_client
 
 # Browser
 playwright
-
-# Sandbox
-datasets
-gymnasium
-huggingface_hub[hf_xet]
-matplotlib
-polars
-torch
-transformers
 
 # Testing
 pytest
