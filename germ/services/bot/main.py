@@ -151,7 +151,6 @@ async def get_favicon():
 @bot_service.get("/healthz")
 async def get_healthz():
     return {
-        "environ": os.environ,
         "status": "OK",
     }
 
@@ -169,6 +168,19 @@ async def get_landing(request: Request):
             "Cache-Control": "no-store"  # Prevents serving landing from cache after logout
         }
     )
+
+
+@bot_service.get("/like", include_in_schema=False)
+async def get_like(request:  Request, conversation_ident: str):
+    await load_session(request)
+    session = request.session
+    if not session:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    conversation_id = websocket_manager.conversation_ident_to_id(conversation_ident)
+    logger.info(f"User liked conversation {conversation_id}")  # Stub
+    return {
+        "status": "OK",
+    }
 
 
 @bot_service.get("/login", include_in_schema=False)
@@ -189,7 +201,7 @@ async def get_logout(request: Request):
     return RedirectResponse(url=f"/login?{info_params}", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@bot_service.get("/metrics")
+@bot_service.get("/metrics", include_in_schema=False)
 async def get_metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
@@ -271,12 +283,12 @@ async def post_register(request:  Request, username: str = Form(...), password: 
     return RedirectResponse(f"/register?{error_params}", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@bot_service.post("/upload")
+@bot_service.post("/upload", include_in_schema=False)
 async def post_upload(request:  Request, files: List[UploadFile] = File(...)):
     await load_session(request)
     session = request.session
     if not session:
-        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 
     saved_files = []
     for file in files:
