@@ -167,8 +167,13 @@ Ensure the opacity is low enough to not interfere with the text but still visibl
     width: 100%;
 }
 /**
-Popup and Send button settings
+Popup, like, and Send button settings
 */
+#like-button {
+    cursor: pointer;
+    padding: 3px 0px 2px 0px; /* Adjust padding if needed */
+    width: 100%;
+}
 #send-button {
     cursor: pointer;
 
@@ -181,7 +186,7 @@ Popup and Send button settings
 #settings-popup-button {
     cursor: pointer;
     padding: 3px 0px 2px 0px; /* Adjust padding if needed */
-    width: 100%; /* Set equal width */
+    width: 100%;
 }
 .assistant-message-box {
     background-color: #d1ecf1; /* Light blue */

@@ -132,7 +132,7 @@ class WebSocketConnectionManager:
 
     async def connect(self, session, ws: WebSocket, conversation_ident: str = None) -> int | None:
         try:
-            conversation_id = None if conversation_ident is None else decrypt_integer(conversation_ident, ENCRYPTION_KEY)
+            conversation_id = None if conversation_ident is None else self.conversation_ident_to_id(conversation_ident)
         except Exception:
             return None
 
@@ -152,6 +152,10 @@ class WebSocketConnectionManager:
         monitor_task = asyncio.create_task(self.monitor_conversation(session, conversation_id, ws, cancel_event))
         self.monitor_tasks[conversation_id] = (monitor_task, cancel_event)
         return conversation_id
+
+    @staticmethod
+    def conversation_ident_to_id(conversation_ident: str):
+        return decrypt_integer(conversation_ident, ENCRYPTION_KEY)
 
     async def conversation_not_found(self, conversation_id: int, user_id: int) -> bool:
         async with (self.pg_session_maker() as rdb_session):

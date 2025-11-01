@@ -1,4 +1,7 @@
 
+function initLikeButton() {
+}
+
 function initPopup(onLoadCallback, elementPrefix) {
     const popupMenuButton = document.getElementById(`${elementPrefix}-popup-button`);
     const popupMenuMenu = document.getElementById(`${elementPrefix}-popup-menu`);
