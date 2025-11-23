@@ -1,27 +1,38 @@
 import asyncio
 
-from germ.browser import PageScrapingWebBrowser
+from germ.browser.agentic import AgenticBrowser
 
 
 if __name__ == "__main__":
     from germ.observability.logging import setup_logging
     setup_logging()
 
-    wb = PageScrapingWebBrowser()
+    wb = AgenticBrowser()
 
     async def _main():
         await wb.start()
         url = "https://cloud.google.com/storage/docs/uploading-objects#rest-upload-objects"
+        message_received_summary = "The user want to know how to access stored objects using python."
+
         #url = "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/blockquote"
+        #message_received_summary = "The user want to know when to use a blockquote."
+
         #url = "https://en.wikipedia.org/wiki/Drosophilidae"
+        #message_received_summary = "The user want to know about fruitfly life cycle."
+
         #url = "https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal)"
+
         #url = "https://en.wikipedia.org/wiki/PageRank"
+
         #url = "https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/storage_bucket"
+
         #url = "https://requests.readthedocs.io/en/latest/user/quickstart/#make-a-request"
+
         #url = "https://www.w3schools.com/tags/default.asp"
+
         try:
-            result = await wb.fetch_url(
-                [{}],
+            result = await wb.scan_page_content_for_related_info(
+                message_received_summary,
                 url, 0,
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
                 {
