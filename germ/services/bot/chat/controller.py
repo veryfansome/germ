@@ -15,7 +15,7 @@ from traceback import format_exc
 from typing import Iterable
 
 from germ.api.models import ChatRequest, ChatResponse
-from germ.browser import PageScrapingWebBrowser
+from germ.browser.agentic import AgenticBrowser
 from germ.database.neo4j import KnowledgeGraph
 from germ.observability.annotations import measure_exec_seconds
 from germ.services.bot.chat import async_openai_client, openai_handlers
@@ -25,7 +25,7 @@ from germ.services.bot.websocket import (WebSocketDisconnectEventHandler, WebSoc
 from germ.services.models import get_text_embedding
 from germ.settings import germ_settings
 from germ.utils import find_near_dup_pairs, normalize_embeddings
-from germ.utils.parsers import ParsedDoc
+from germ.utils.markdown_parser import ParsedMarkdownDoc
 
 logger = logging.getLogger(__name__)
 
@@ -34,19 +34,23 @@ tracer = trace.get_tracer(__name__)
 
 class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandler,
                      WebSocketSendEventHandler, WebSocketSessionMonitor):
-    def __init__(self, knowledge_graph: KnowledgeGraph, web_browser: PageScrapingWebBrowser):
+    def __init__(self, knowledge_graph: KnowledgeGraph, web_browser: AgenticBrowser):
         self.conversations: dict[int, Conversation] = {}
         self.knowledge_graph = knowledge_graph
         self.web_browser = web_browser
 
     async def fetch_online_info(
-            self, filtered_messages: list[dict[str, str]],
+            self, message_received_summary: str, messages: list[dict[str, str]],
             user_id: int, user_agent: str, extra_headers: dict[str, str]
     ):
-        info_source_suggestions = await suggest_best_online_info_source(filtered_messages, [])
+        info_source_suggestions = await suggest_best_online_info_source(
+            messages,  # TODO: Try summary only
+            []  # TODO: Recall
+        )
         logger.info(f"Info source suggestions: {info_source_suggestions['urls']}")
 
-        coroutines = [self.web_browser.fetch_url(filtered_messages, url, user_id, user_agent, extra_headers)
+        coroutines = [self.web_browser.scan_page_content_for_related_info(message_received_summary,
+                                                                          url, user_id, user_agent, extra_headers)
                       for url in info_source_suggestions["urls"]]
         results = await asyncio.gather(*coroutines, return_exceptions=True)
         for url, result in zip(info_source_suggestions["urls"], results):
@@ -76,7 +80,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                     data = json.loads(line)
                     logger.debug(f'Loading data: {data}')
                     self.conversations[conversation_id].messages[datetime.fromtimestamp(data[0], tz=timezone.utc)] = (
-                        data[1], ParsedDoc.model_validate_json(data[2])
+                        data[1], ParsedMarkdownDoc.model_validate_json(data[2])
                     )
 
     async def on_disconnect(self, conversation_id: int):
@@ -95,7 +99,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 # TODO: handle uploaded files
                 pass
 
-        message_doc = await run_in_threadpool(ParsedDoc.from_text, chat_request.messages[-1].content)
+        message_doc = await run_in_threadpool(ParsedMarkdownDoc.from_text, chat_request.messages[-1].content)
         self.conversations[conversation_id].messages[dt_created] = (session["user_id"], message_doc)
         # TODO: code block summarization
 
@@ -105,15 +109,14 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         user_intent_labels_task = asyncio.create_task(UserIntentClassifier.classify_user_intent(filtered_messages))
 
         # Summarized user message
-        message_summary = await summarize_message_received(filtered_messages)
-        summary_text = f"The user {message_summary['statement']}"
-        logger.info(f"User message summary:\n - {summary_text}")
+        message_received_summary = f"The user {(await summarize_message_received(filtered_messages))['statement']}"
+        logger.info(f"User message summary:\n - {message_received_summary}")
 
         # Generate embeddings on summarized user message
-        summary_emb = await run_in_threadpool(
-            normalize_embeddings, np.array(await get_text_embedding([summary_text]), dtype=np.float32)
+        message_received_summary_emb = await run_in_threadpool(
+            normalize_embeddings, np.array(await get_text_embedding([message_received_summary]), dtype=np.float32)
         )
-        summary_emb_floats = summary_emb[0].tolist()
+        message_received_summary_emb_floats = message_received_summary_emb[0].tolist()
 
         ##
         # Recall Phase 1
@@ -121,10 +124,10 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         # Get similar messages from same user
         min_similarity = 0.75
         (
-            recalled_user_message_structs,  # user messages similar to summary_emb
+            recalled_user_message_structs,  # user messages similar to message_received_summary_emb
         ) = await asyncio.gather(
             self.knowledge_graph.match_user_message_summaries_by_similarity_to_query_vector(
-                session["user_id"], summary_emb_floats, k=15, min_similarity=min_similarity,
+                session["user_id"], message_received_summary_emb_floats, k=15, min_similarity=min_similarity,
             ),
         )
         if logger.level == logging.DEBUG:
@@ -151,7 +154,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         linked_replies_task = asyncio.create_task(
             fetch_relevant_linked_replies(filtered_messages, asyncio.create_task(
                 self.knowledge_graph.match_reply_summaries_by_similarity_to_query_vector(
-                    summary_emb_floats, [
+                    message_received_summary_emb_floats, [
                         # Exclude messages received from current conversation
                         s for s in recalled_user_message_structs if s["conversation_id"] != conversation_id
                     ], alpha=0.5, k=30,
@@ -178,7 +181,8 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
         if has_informational_intent or has_instrumental_intent:
             online_info_task = asyncio.create_task(self.fetch_online_info(
-                filtered_messages, session["user_id"], session["user_agent"], session["headers"]
+                message_received_summary, filtered_messages,
+                session["user_id"], session["user_agent"], session["headers"]
             ))
             pending_tasks.append(online_info_task)
 
@@ -186,7 +190,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
                 fetch_keyword_phrase_suggestions(filtered_messages, asyncio.create_task(
                     self.knowledge_graph.match_keyword_phrases_by_similarity_to_query_vector(
                         # Ok to include previous phrases from current conversation
-                        summary_emb_floats, recalled_user_message_structs, alpha=0.5, k=5,
+                        message_received_summary_emb_floats, recalled_user_message_structs, alpha=0.5, k=5,
                     )
                 ))
             )
@@ -210,7 +214,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             self.persist_message(session["user_id"], conversation_id, dt_created, message_doc),
             self.persist_message_summary(
                 conversation_id, dt_created, 0,
-                summary_text, summary_emb_floats, recalled_user_message_structs
+                message_received_summary, message_received_summary_emb_floats, recalled_user_message_structs
             ),
         )
 
@@ -220,7 +224,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
             logger.error(f"Conversation {conversation_id} not found.")
             return
 
-        message_doc = await run_in_threadpool(ParsedDoc.from_text, chat_response.content)
+        message_doc = await run_in_threadpool(ParsedMarkdownDoc.from_text, chat_response.content)
         self.conversations[conversation_id].messages[dt_created] = (0, message_doc)
 
         # Hydrate message history from conversation metadata
@@ -279,7 +283,9 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
         # TODO: if a conversation has no user messages and has been idle for some time, recall what is known about
         #       the user and attempt to start a conversation.
 
-    async def persist_message(self, user_id: int, conversation_id: int, dt_created: datetime, message_doc: ParsedDoc):
+    async def persist_message(
+            self, user_id: int, conversation_id: int, dt_created: datetime, message_doc: ParsedMarkdownDoc
+    ):
         storage_path = get_storage_path(self.conversations[conversation_id].user_id,
                                         dt_created.year, dt_created.month, dt_created.day)
         await aiofiles.os.makedirs(storage_path, exist_ok=True)
@@ -365,7 +371,7 @@ class ChatController(WebSocketDisconnectEventHandler, WebSocketReceiveEventHandl
 
 class Conversation(BaseModel):
     conversation_id: int
-    messages: dict[datetime, tuple[int, ParsedDoc]] = {}
+    messages: dict[datetime, tuple[int, ParsedMarkdownDoc]] = {}
     user_id: int
 
     def hydrate_messages(self) -> list[dict[str, str]]:

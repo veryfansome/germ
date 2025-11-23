@@ -11,12 +11,12 @@ leading_whitespace_pattern = re.compile(r'^[ \t]*')
 md_parser = MarkdownIt()
 
 
-class ParsedDoc(BaseModel):
+class ParsedMarkdownDoc(BaseModel):
     code_blocks: list[tuple[str | None, str]]
     text_parts: list[str]
 
     @classmethod
-    def from_text(cls, doc_text: str) -> ("ParsedDoc", str):
+    def from_text(cls, doc_text: str) -> ("ParsedMarkdownDoc", str):
         tokens = md_parser.parse(doc_text)
         ranges: list[tuple[int, int]] = []
         blocks: list[tuple[str | None, str]] = []
